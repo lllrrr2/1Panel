@@ -6,6 +6,25 @@ import { Backup } from '../interface/backup';
 import { Setting } from '../interface/setting';
 import { TimeoutEnum } from '@/enums/http-enum';
 
+export const UploadFileData = (params: FormData) => {
+    return http.upload('/licenses/upload', params);
+};
+
+export const getLicense = () => {
+    return http.get<Setting.License>(`/licenses/get`);
+};
+export const getLicenseStatus = () => {
+    return http.get<Setting.LicenseStatus>(`/licenses/get/status`);
+};
+
+export const syncLicense = () => {
+    return http.post(`/licenses/sync`);
+};
+
+export const unbindLicense = () => {
+    return http.post(`/licenses/unbind`);
+};
+
 export const getSettingInfo = () => {
     return http.post<Setting.SettingInfo>(`/settings/search`);
 };
@@ -15,6 +34,19 @@ export const getSystemAvailable = () => {
 
 export const updateSetting = (param: Setting.SettingUpdate) => {
     return http.post(`/settings/update`, param);
+};
+
+export const updateMenu = (param: Setting.SettingUpdate) => {
+    return http.post(`/settings/menu/update`, param);
+};
+
+export const updateProxy = (params: Setting.ProxyUpdate) => {
+    let request = deepCopy(params) as Setting.ProxyUpdate;
+    if (request.proxyPasswd) {
+        request.proxyPasswd = Base64.encode(request.proxyPasswd);
+    }
+    request.proxyType = request.proxyType === 'close' ? '' : request.proxyType;
+    return http.post(`/settings/proxy/update`, request);
 };
 
 export const updatePassword = (param: Setting.PasswordUpdate) => {
@@ -52,10 +84,6 @@ export const loadTimeZone = () => {
 };
 export const syncTime = (ntpSite: string) => {
     return http.post<string>(`/settings/time/sync`, { ntpSite: ntpSite });
-};
-
-export const cleanMonitors = () => {
-    return http.post(`/settings/monitor/clean`, {});
 };
 
 export const loadMFA = (param: Setting.MFARequest) => {
@@ -96,8 +124,14 @@ export const deleteBackupRecord = (params: { ids: number[] }) => {
 export const searchBackupRecords = (params: Backup.SearchBackupRecord) => {
     return http.post<ResPage<Backup.RecordInfo>>(`/settings/backup/record/search`, params, TimeoutEnum.T_5M);
 };
+export const loadBackupSize = (param: Backup.SearchBackupRecord) => {
+    return http.post<Array<Backup.BackupFile>>(`/settings/backup/record/size`, param);
+};
 export const searchBackupRecordsByCronjob = (params: Backup.SearchBackupRecordByCronjob) => {
     return http.post<ResPage<Backup.RecordInfo>>(`/settings/backup/record/search/bycronjob`, params, TimeoutEnum.T_5M);
+};
+export const loadCronjobBackupSize = (param: Backup.SearchBackupRecordByCronjob) => {
+    return http.post<Array<Backup.BackupFile>>(`/settings/backup/record/size/bycronjob`, param);
 };
 
 export const getBackupList = () => {
@@ -156,7 +190,7 @@ export const snapshotImport = (param: Setting.SnapshotImport) => {
 export const updateSnapshotDescription = (param: DescriptionUpdate) => {
     return http.post(`/settings/snapshot/description/update`, param);
 };
-export const snapshotDelete = (param: { ids: number[] }) => {
+export const snapshotDelete = (param: { ids: number[]; deleteWithFile: boolean }) => {
     return http.post(`/settings/snapshot/del`, param);
 };
 export const snapshotRecover = (param: Setting.SnapshotRecover) => {
@@ -168,6 +202,9 @@ export const snapshotRollback = (param: Setting.SnapshotRecover) => {
 export const searchSnapshotPage = (param: SearchWithPage) => {
     return http.post<ResPage<Setting.SnapshotInfo>>(`/settings/snapshot/search`, param);
 };
+export const loadSnapshotSize = (param: SearchWithPage) => {
+    return http.post<Array<Setting.SnapshotFile>>(`/settings/snapshot/size`, param);
+};
 
 // upgrade
 export const loadUpgradeInfo = () => {
@@ -178,4 +215,12 @@ export const loadReleaseNotes = (version: string) => {
 };
 export const upgrade = (version: string) => {
     return http.post(`/settings/upgrade`, { version: version });
+};
+
+// api config
+export const generateApiKey = () => {
+    return http.post<string>(`/settings/api/config/generate/key`);
+};
+export const updateApiConfig = (param: Setting.ApiConfig) => {
+    return http.post(`/settings/api/config/update`, param);
 };

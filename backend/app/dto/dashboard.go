@@ -16,10 +16,11 @@ type DashboardBase struct {
 	KernelArch           string `json:"kernelArch"`
 	KernelVersion        string `json:"kernelVersion"`
 	VirtualizationSystem string `json:"virtualizationSystem"`
-
-	CPUCores        int    `json:"cpuCores"`
-	CPULogicalCores int    `json:"cpuLogicalCores"`
-	CPUModelName    string `json:"cpuModelName"`
+	IpV4Addr             string `json:"ipv4Addr"`
+	SystemProxy          string `json:"SystemProxy"`
+	CPUCores             int    `json:"cpuCores"`
+	CPULogicalCores      int    `json:"cpuLogicalCores"`
+	CPUModelName         string `json:"cpuModelName"`
 
 	CurrentInfo DashboardCurrent `json:"currentInfo"`
 }
@@ -30,6 +31,14 @@ type OsInfo struct {
 	PlatformFamily string `json:"platformFamily"`
 	KernelArch     string `json:"kernelArch"`
 	KernelVersion  string `json:"kernelVersion"`
+
+	DiskSize int64 `json:"diskSize"`
+}
+
+type DashboardReq struct {
+	Scope     string `json:"scope"`
+	IoOption  string `json:"ioOption"`
+	NetOption string `json:"netOption"`
 }
 
 type DashboardCurrent struct {
@@ -69,6 +78,9 @@ type DashboardCurrent struct {
 	NetBytesSent uint64 `json:"netBytesSent"`
 	NetBytesRecv uint64 `json:"netBytesRecv"`
 
+	GPUData []GPUInfo `json:"gpuData"`
+	XPUData []XPUInfo `json:"xpuData"`
+
 	ShotTime time.Time `json:"shotTime"`
 }
 
@@ -85,4 +97,29 @@ type DiskInfo struct {
 	InodesUsed        uint64  `json:"inodesUsed"`
 	InodesFree        uint64  `json:"inodesFree"`
 	InodesUsedPercent float64 `json:"inodesUsedPercent"`
+}
+
+type GPUInfo struct {
+	Index            uint   `json:"index"`
+	ProductName      string `json:"productName"`
+	GPUUtil          string `json:"gpuUtil"`
+	Temperature      string `json:"temperature"`
+	PerformanceState string `json:"performanceState"`
+	PowerUsage       string `json:"powerUsage"`
+	PowerDraw        string `json:"powerDraw"`
+	MaxPowerLimit    string `json:"maxPowerLimit"`
+	MemoryUsage      string `json:"memoryUsage"`
+	MemUsed          string `json:"memUsed"`
+	MemTotal         string `json:"memTotal"`
+	FanSpeed         string `json:"fanSpeed"`
+}
+
+type XPUInfo struct {
+	DeviceID    int    `json:"deviceID"`
+	DeviceName  string `json:"deviceName"`
+	Memory      string `json:"memory"`
+	Temperature string `json:"temperature"`
+	MemoryUsed  string `json:"memoryUsed"`
+	Power       string `json:"power"`
+	MemoryUtil  string `json:"memoryUtil"`
 }

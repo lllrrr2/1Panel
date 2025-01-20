@@ -72,6 +72,19 @@ export const deleteCommand = (params: { ids: number[] }) => {
     return http.post(`/hosts/command/del`, params);
 };
 
+export const getRedisCommandList = () => {
+    return http.get<Array<Command.RedisCommand>>(`/hosts/command/redis`, {});
+};
+export const getRedisCommandPage = (params: SearchWithPage) => {
+    return http.post<ResPage<Command.RedisCommand>>(`/hosts/command/redis/search`, params);
+};
+export const saveRedisCommand = (params: Command.RedisCommand) => {
+    return http.post(`/hosts/command/redis`, params);
+};
+export const deleteRedisCommand = (params: { ids: number[] }) => {
+    return http.post(`/hosts/command/redis/del`, params);
+};
+
 // firewall
 export const loadFireBaseInfo = () => {
     return http.get<Host.FirewallBase>(`/hosts/firewall/base`);
@@ -84,6 +97,9 @@ export const operateFire = (operation: string) => {
 };
 export const operatePortRule = (params: Host.RulePort) => {
     return http.post<Host.RulePort>(`/hosts/firewall/port`, params, TimeoutEnum.T_40S);
+};
+export const operateForwardRule = (params: { rules: Host.RuleForward[] }) => {
+    return http.post<Host.RulePort>(`/hosts/firewall/forward`, params, TimeoutEnum.T_40S);
 };
 export const operateIPRule = (params: Host.RuleIP) => {
     return http.post<Host.RuleIP>(`/hosts/firewall/ip`, params, TimeoutEnum.T_40S);
@@ -99,6 +115,20 @@ export const updateFirewallDescription = (params: Host.UpdateDescription) => {
 };
 export const batchOperateRule = (params: Host.BatchRule) => {
     return http.post(`/hosts/firewall/batch`, params, TimeoutEnum.T_60S);
+};
+
+// monitors
+export const loadMonitor = (param: Host.MonitorSearch) => {
+    return http.post<Array<Host.MonitorData>>(`/hosts/monitor/search`, param);
+};
+export const getNetworkOptions = () => {
+    return http.get<Array<string>>(`/hosts/monitor/netoptions`);
+};
+export const getIOOptions = () => {
+    return http.get<Array<string>>(`/hosts/monitor/iooptions`);
+};
+export const cleanMonitors = () => {
+    return http.post(`/hosts/monitor/clean`, {});
 };
 
 // ssh

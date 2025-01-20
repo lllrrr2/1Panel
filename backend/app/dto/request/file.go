@@ -10,7 +10,8 @@ type FileOption struct {
 }
 
 type FileContentReq struct {
-	Path string `json:"path" validate:"required"`
+	Path     string `json:"path" validate:"required"`
+	IsDetail bool   `json:"isDetail"`
 }
 
 type SearchUploadWithPage struct {
@@ -22,7 +23,7 @@ type FileCreate struct {
 	Path      string `json:"path" validate:"required"`
 	Content   string `json:"content"`
 	IsDir     bool   `json:"isDir"`
-	Mode      int64  `json:"mode" validate:"required"`
+	Mode      int64  `json:"mode"`
 	IsLink    bool   `json:"isLink"`
 	IsSymlink bool   `json:"isSymlink"`
 	LinkPath  string `json:"linkPath"`
@@ -54,12 +55,14 @@ type FileCompress struct {
 	Type    string   `json:"type" validate:"required"`
 	Name    string   `json:"name" validate:"required"`
 	Replace bool     `json:"replace"`
+	Secret  string   `json:"secret"`
 }
 
 type FileDeCompress struct {
-	Dst  string `json:"dst"  validate:"required"`
-	Type string `json:"type"  validate:"required"`
-	Path string `json:"path" validate:"required"`
+	Dst    string `json:"dst"  validate:"required"`
+	Type   string `json:"type"  validate:"required"`
+	Path   string `json:"path" validate:"required"`
+	Secret string `json:"secret"`
 }
 
 type FileEdit struct {
@@ -124,6 +127,7 @@ type FileReadByLineReq struct {
 	Type     string `json:"type" validate:"required"`
 	ID       uint   `json:"ID"`
 	Name     string `json:"name"`
+	Latest   bool   `json:"latest"`
 }
 
 type FileExistReq struct {

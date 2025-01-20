@@ -3,9 +3,12 @@ package common
 import (
 	"crypto/rand"
 	"fmt"
+	"github.com/gin-gonic/gin"
 	"io"
 	mathRand "math/rand"
 	"net"
+	"os"
+	"path"
 	"reflect"
 	"regexp"
 	"sort"
@@ -41,6 +44,43 @@ func CompareVersion(version1, version2 string) bool {
 		}
 	}
 	return false
+}
+
+func ComparePanelVersion(version1, version2 string) bool {
+	if version1 == version2 {
+		return false
+	}
+	version1s := SplitStr(version1, ".", "-")
+	version2s := SplitStr(version2, ".", "-")
+
+	if len(version2s) > len(version1s) {
+		for i := 0; i < len(version2s)-len(version1s); i++ {
+			version1s = append(version1s, "0")
+		}
+	}
+	if len(version1s) > len(version2s) {
+		for i := 0; i < len(version1s)-len(version2s); i++ {
+			version2s = append(version2s, "0")
+		}
+	}
+
+	n := min(len(version1s), len(version2s))
+	for i := 0; i < n; i++ {
+		if version1s[i] == version2s[i] {
+			continue
+		} else {
+			v1, err1 := strconv.Atoi(version1s[i])
+			if err1 != nil {
+				return version1s[i] > version2s[i]
+			}
+			v2, err2 := strconv.Atoi(version2s[i])
+			if err2 != nil {
+				return version1s[i] > version2s[i]
+			}
+			return v1 > v2
+		}
+	}
+	return true
 }
 
 func extractNumbers(version string) []string {
@@ -80,6 +120,36 @@ func GetSortedVersions(versions []string) []string {
 		return CompareVersion(versions[i], versions[j])
 	})
 	return versions
+}
+
+func CopyFile(src, dst string) error {
+	source, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer source.Close()
+
+	if path.Base(src) != path.Base(dst) {
+		dst = path.Join(dst, path.Base(src))
+	}
+	if _, err := os.Stat(path.Dir(dst)); err != nil {
+		if os.IsNotExist(err) {
+			_ = os.MkdirAll(path.Dir(dst), os.ModePerm)
+		}
+	}
+	target, err := os.OpenFile(dst+"_temp", os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
+	if err != nil {
+		return err
+	}
+	defer target.Close()
+
+	if _, err = io.Copy(target, source); err != nil {
+		return err
+	}
+	if err = os.Rename(dst+"_temp", dst); err != nil {
+		return err
+	}
+	return nil
 }
 
 func IsCrossVersion(version1, version2 string) bool {
@@ -161,13 +231,17 @@ func RemoveRepeatElement(a interface{}) (ret []interface{}) {
 }
 
 func LoadSizeUnit(value float64) string {
-	if value > 1048576 {
-		return fmt.Sprintf("%vM", value/1048576)
+	val := int64(value)
+	if val%1024 != 0 {
+		return fmt.Sprintf("%v", val)
 	}
-	if value > 1024 {
-		return fmt.Sprintf("%vK", value/1024)
+	if val > 1048576 {
+		return fmt.Sprintf("%vM", val/1048576)
 	}
-	return fmt.Sprintf("%v", value)
+	if val > 1024 {
+		return fmt.Sprintf("%vK", val/1024)
+	}
+	return fmt.Sprintf("%v", val)
 }
 
 func LoadSizeUnit2F(value float64) string {
@@ -183,13 +257,6 @@ func LoadSizeUnit2F(value float64) string {
 	return fmt.Sprintf("%.2f", value)
 }
 
-func LoadTimeZone() string {
-	loc := time.Now().Location()
-	if _, err := time.LoadLocation(loc.String()); err != nil {
-		return "Asia/Shanghai"
-	}
-	return loc.String()
-}
 func LoadTimeZoneByCmd() string {
 	loc := time.Now().Location().String()
 	if _, err := time.LoadLocation(loc); err != nil {
@@ -234,4 +301,53 @@ func PunycodeEncode(text string) (string, error) {
 		return "", err
 	}
 	return ascii, nil
+}
+
+func SplitStr(str string, spi ...string) []string {
+	lists := []string{str}
+	var results []string
+	for _, s := range spi {
+		results = []string{}
+		for _, list := range lists {
+			results = append(results, strings.Split(list, s)...)
+		}
+		lists = results
+	}
+	return results
+}
+
+func IsValidIP(ip string) bool {
+	return net.ParseIP(ip) != nil
+}
+
+const (
+	b  = uint64(1)
+	kb = 1024 * b
+	mb = 1024 * kb
+	gb = 1024 * mb
+)
+
+func FormatBytes(bytes uint64) string {
+	switch {
+	case bytes < kb:
+		return fmt.Sprintf("%dB", bytes)
+	case bytes < mb:
+		return fmt.Sprintf("%.2fKB", float64(bytes)/float64(kb))
+	case bytes < gb:
+		return fmt.Sprintf("%.2fMB", float64(bytes)/float64(mb))
+	default:
+		return fmt.Sprintf("%.2fGB", float64(bytes)/float64(gb))
+	}
+}
+
+func FormatPercent(percent float64) string {
+	return fmt.Sprintf("%.2f%%", percent)
+}
+
+func GetLang(c *gin.Context) string {
+	lang := c.GetHeader("Accept-Language")
+	if lang == "" {
+		lang = "en"
+	}
+	return lang
 }

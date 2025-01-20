@@ -13,6 +13,7 @@ import (
 	"github.com/1Panel-dev/1Panel/backend/constant"
 	"github.com/1Panel-dev/1Panel/backend/global"
 	"github.com/1Panel-dev/1Panel/backend/utils/cmd"
+	"github.com/1Panel-dev/1Panel/backend/utils/common"
 	"github.com/1Panel-dev/1Panel/backend/utils/files"
 	"github.com/pkg/errors"
 )
@@ -29,14 +30,6 @@ func (u *SnapshotService) HandleSnapshotRecover(snap model.Snapshot, isRecover b
 		if _, err := os.Stat(baseDir); err != nil && os.IsNotExist(err) {
 			_ = os.MkdirAll(baseDir, os.ModePerm)
 		}
-		if req.IsNew || snap.InterruptStep == "Backup" {
-			if err := backupBeforeRecover(snap); err != nil {
-				updateRecoverStatus(snap.ID, isRecover, "Backup", constant.StatusFailed, fmt.Sprintf("handle backup before recover failed, err: %v", err))
-				return
-			}
-			global.LOG.Debug("handle backup before recover successful!")
-			req.IsNew = true
-		}
 		if req.IsNew || snap.InterruptStep == "Download" || req.ReDownload {
 			if err := handleDownloadSnapshot(snap, baseDir); err != nil {
 				updateRecoverStatus(snap.ID, isRecover, "Backup", constant.StatusFailed, err.Error())
@@ -46,14 +39,25 @@ func (u *SnapshotService) HandleSnapshotRecover(snap model.Snapshot, isRecover b
 			req.IsNew = true
 		}
 		if req.IsNew || snap.InterruptStep == "Decompress" {
-			if err := handleUnTar(fmt.Sprintf("%s/%s.tar.gz", baseDir, snap.Name), baseDir); err != nil {
+			if err := handleUnTar(fmt.Sprintf("%s/%s.tar.gz", baseDir, snap.Name), baseDir, req.Secret); err != nil {
 				updateRecoverStatus(snap.ID, isRecover, "Decompress", constant.StatusFailed, fmt.Sprintf("decompress file failed, err: %v", err))
 				return
 			}
 			global.LOG.Debug("decompress snapshot file successful!", baseDir)
 			req.IsNew = true
 		}
+		if req.IsNew || snap.InterruptStep == "Backup" {
+			if err := backupBeforeRecover(snap); err != nil {
+				updateRecoverStatus(snap.ID, isRecover, "Backup", constant.StatusFailed, fmt.Sprintf("handle backup before recover failed, err: %v", err))
+				return
+			}
+			global.LOG.Debug("handle backup before recover successful!")
+			req.IsNew = true
+		}
 		snapFileDir = fmt.Sprintf("%s/%s", baseDir, snap.Name)
+		if _, err := os.Stat(snapFileDir); err != nil {
+			snapFileDir = baseDir
+		}
 	} else {
 		snapFileDir = fmt.Sprintf("%s/1panel_original/original_%s", global.CONF.System.BaseDir, snap.Name)
 		if _, err := os.Stat(snapFileDir); err != nil {
@@ -69,7 +73,7 @@ func (u *SnapshotService) HandleSnapshotRecover(snap model.Snapshot, isRecover b
 	if snap.InterruptStep == "Readjson" {
 		req.IsNew = true
 	}
-	if req.IsNew || snap.InterruptStep == "AppData" {
+	if isRecover && (req.IsNew || snap.InterruptStep == "AppData") {
 		if err := recoverAppData(snapFileDir); err != nil {
 			updateRecoverStatus(snap.ID, isRecover, "DockerDir", constant.StatusFailed, fmt.Sprintf("handle recover app data failed, err: %v", err))
 			return
@@ -88,7 +92,7 @@ func (u *SnapshotService) HandleSnapshotRecover(snap model.Snapshot, isRecover b
 	}
 
 	if req.IsNew || snap.InterruptStep == "1PanelBinary" {
-		if err := recoverPanel(path.Join(snapFileDir, "1panel/1panel"), "/usr/local/bin/1panel"); err != nil {
+		if err := recoverPanel(path.Join(snapFileDir, "1panel/1panel"), "/usr/local/bin"); err != nil {
 			updateRecoverStatus(snap.ID, isRecover, "1PanelBinary", constant.StatusFailed, err.Error())
 			return
 		}
@@ -96,15 +100,16 @@ func (u *SnapshotService) HandleSnapshotRecover(snap model.Snapshot, isRecover b
 		req.IsNew = true
 	}
 	if req.IsNew || snap.InterruptStep == "1PctlBinary" {
-		if err := recoverPanel(path.Join(snapFileDir, "1panel/1pctl"), "/usr/local/bin/1pctl"); err != nil {
+		if err := recoverPanel(path.Join(snapFileDir, "1panel/1pctl"), "/usr/local/bin"); err != nil {
 			updateRecoverStatus(snap.ID, isRecover, "1PctlBinary", constant.StatusFailed, err.Error())
 			return
 		}
+		_, _ = cmd.Execf("cp -r %s %s", path.Join(snapFileDir, "1panel/lang"), "/usr/local/bin/")
 		global.LOG.Debug("recover 1pctl from snapshot file successful!")
 		req.IsNew = true
 	}
 	if req.IsNew || snap.InterruptStep == "1PanelService" {
-		if err := recoverPanel(path.Join(snapFileDir, "1panel/1panel.service"), "/etc/systemd/system/1panel.service"); err != nil {
+		if err := recoverPanel(path.Join(snapFileDir, "1panel/1panel.service"), "/etc/systemd/system"); err != nil {
 			updateRecoverStatus(snap.ID, isRecover, "1PanelService", constant.StatusFailed, err.Error())
 			return
 		}
@@ -113,7 +118,7 @@ func (u *SnapshotService) HandleSnapshotRecover(snap model.Snapshot, isRecover b
 	}
 
 	if req.IsNew || snap.InterruptStep == "1PanelBackups" {
-		if err := u.handleUnTar(path.Join(snapFileDir, "/1panel/1panel_backup.tar.gz"), snapJson.BackupDataDir); err != nil {
+		if err := u.handleUnTar(path.Join(snapFileDir, "/1panel/1panel_backup.tar.gz"), snapJson.BackupDataDir, ""); err != nil {
 			updateRecoverStatus(snap.ID, isRecover, "1PanelBackups", constant.StatusFailed, err.Error())
 			return
 		}
@@ -123,7 +128,7 @@ func (u *SnapshotService) HandleSnapshotRecover(snap model.Snapshot, isRecover b
 
 	if req.IsNew || snap.InterruptStep == "1PanelData" {
 		checkPointOfWal()
-		if err := u.handleUnTar(path.Join(snapFileDir, "/1panel/1panel_data.tar.gz"), path.Join(snapJson.BaseDir, "1panel")); err != nil {
+		if err := u.handleUnTar(path.Join(snapFileDir, "/1panel/1panel_data.tar.gz"), path.Join(snapJson.BaseDir, "1panel"), ""); err != nil {
 			updateRecoverStatus(snap.ID, isRecover, "1PanelData", constant.StatusFailed, err.Error())
 			return
 		}
@@ -159,14 +164,14 @@ func backupBeforeRecover(snap model.Snapshot) error {
 	_ = os.MkdirAll(path.Join(baseDir, "1panel"), os.ModePerm)
 	_ = os.MkdirAll(path.Join(baseDir, "docker"), os.ModePerm)
 
-	wg.Add(5)
+	wg.Add(4)
 	itemHelper.Wg = &wg
 	go snapJson(itemHelper, jsonItem, baseDir)
 	go snapPanel(itemHelper, path.Join(baseDir, "1panel"))
 	go snapDaemonJson(itemHelper, path.Join(baseDir, "docker"))
-	go snapAppData(itemHelper, path.Join(baseDir, "docker"))
 	go snapBackup(itemHelper, global.CONF.System.Backup, path.Join(baseDir, "1panel"))
 	wg.Wait()
+	itemHelper.Status.AppData = constant.StatusDone
 
 	allDone, msg := checkAllDone(status)
 	if !allDone {
@@ -227,7 +232,9 @@ func recoverDaemonJson(src string, fileOp files.FileOp) error {
 		}
 	}
 
-	_, _ = cmd.Exec("systemctl restart docker")
+	if err := restartDocker(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -235,10 +242,8 @@ func recoverPanel(src string, dst string) error {
 	if _, err := os.Stat(src); err != nil {
 		return fmt.Errorf("file is not found in %s, err: %v", src, err)
 	}
-	global.LOG.Debugf(fmt.Sprintf("\\cp -f %s %s", src, dst))
-	stdout, err := cmd.Exec(fmt.Sprintf("\\cp -f %s %s", src, dst))
-	if err != nil {
-		return fmt.Errorf("cp file failed, stdout: %v, err: %v", stdout, err)
+	if err := common.CopyFile(src, dst); err != nil {
+		return fmt.Errorf("cp file failed, err: %v", err)
 	}
 	return nil
 }

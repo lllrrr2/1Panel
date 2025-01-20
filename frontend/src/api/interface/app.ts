@@ -8,6 +8,7 @@ export namespace App {
         tags: Tag[];
         shortDescZh: string;
         shortDescEn: string;
+        description: string;
         author: string;
         source: string;
         type: string;
@@ -58,10 +59,21 @@ export namespace App {
         formFields: FromField[];
     }
 
+    interface Locale {
+        zh: string;
+        en: string;
+        'zh-Hant': string;
+        ja: string;
+        ms: string;
+        'pt-br': string;
+        ru: string;
+    }
+
     export interface FromField {
         type: string;
         labelZh: string;
         labelEn: string;
+        label: Locale;
         required: boolean;
         default: any;
         envKey: string;
@@ -99,6 +111,7 @@ export namespace App {
         tags?: string[];
         update?: boolean;
         unused?: boolean;
+        sync?: boolean;
     }
     export interface ChangePort {
         key: string;
@@ -118,6 +131,27 @@ export namespace App {
         canUpdate: boolean;
         path: string;
         app: App;
+    }
+
+    export interface AppInstallDto {
+        id: number;
+        name: string;
+        appID: number;
+        appDetailID: number;
+        version: string;
+        status: string;
+        message: string;
+        httpPort: number;
+        httpsPort: number;
+        path: string;
+        canUpdate: boolean;
+        icon: string;
+        appName: string;
+        ready: number;
+        total: number;
+        appKey: string;
+        appType: string;
+        appStatus: string;
     }
 
     export interface AppInstalledInfo {
@@ -142,6 +176,7 @@ export namespace App {
     }
 
     export interface DatabaseConnInfo {
+        status: string;
         username: string;
         password: string;
         privilege: boolean;
@@ -212,5 +247,10 @@ export namespace App {
         detailID: number;
         version: string;
         icon: string;
+    }
+
+    export interface AppUpdateVersionReq {
+        appInstallID: number;
+        updateVersion?: string;
     }
 }

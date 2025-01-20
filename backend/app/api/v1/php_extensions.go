@@ -10,11 +10,11 @@ import (
 
 // @Tags PHP Extensions
 // @Summary Page Extensions
-// @Description Page Extensions
 // @Accept json
 // @Param request body request.PHPExtensionsSearch true "request"
 // @Success 200 {array} response.PHPExtensionsDTO
 // @Security ApiKeyAuth
+// @Security Timestamp
 // @Router /runtimes/php/extensions/search [post]
 func (b *BaseApi) PagePHPExtensions(c *gin.Context) {
 	var req request.PHPExtensionsSearch
@@ -44,11 +44,11 @@ func (b *BaseApi) PagePHPExtensions(c *gin.Context) {
 
 // @Tags PHP Extensions
 // @Summary Create Extensions
-// @Description Create Extensions
 // @Accept json
 // @Param request body request.PHPExtensionsCreate true "request"
 // @Success 200
 // @Security ApiKeyAuth
+// @Security Timestamp
 // @Router /runtimes/php/extensions [post]
 func (b *BaseApi) CreatePHPExtensions(c *gin.Context) {
 	var req request.PHPExtensionsCreate
@@ -64,11 +64,11 @@ func (b *BaseApi) CreatePHPExtensions(c *gin.Context) {
 
 // @Tags PHP Extensions
 // @Summary Update Extensions
-// @Description Update Extensions
 // @Accept json
 // @Param request body request.PHPExtensionsUpdate true "request"
 // @Success 200
 // @Security ApiKeyAuth
+// @Security Timestamp
 // @Router /runtimes/php/extensions/update [post]
 func (b *BaseApi) UpdatePHPExtensions(c *gin.Context) {
 	var req request.PHPExtensionsUpdate
@@ -84,11 +84,11 @@ func (b *BaseApi) UpdatePHPExtensions(c *gin.Context) {
 
 // @Tags PHP Extensions
 // @Summary Delete Extensions
-// @Description Delete Extensions
 // @Accept json
 // @Param request body request.PHPExtensionsDelete true "request"
 // @Success 200
 // @Security ApiKeyAuth
+// @Security Timestamp
 // @Router /runtimes/php/extensions/del [post]
 func (b *BaseApi) DeletePHPExtensions(c *gin.Context) {
 	var req request.PHPExtensionsDelete

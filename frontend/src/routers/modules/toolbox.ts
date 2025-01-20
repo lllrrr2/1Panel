@@ -38,7 +38,37 @@ const toolboxRouter = {
                     },
                 },
                 {
-                    path: 'fail2Ban',
+                    path: 'clam',
+                    name: 'Clam',
+                    component: () => import('@/views/toolbox/clam/index.vue'),
+                    hidden: true,
+                    meta: {
+                        activeMenu: '/toolbox',
+                        requiresAuth: false,
+                    },
+                },
+                {
+                    path: 'clam/setting',
+                    name: 'Clam-Setting',
+                    component: () => import('@/views/toolbox/clam/setting/index.vue'),
+                    hidden: true,
+                    meta: {
+                        activeMenu: '/toolbox',
+                        requiresAuth: false,
+                    },
+                },
+                {
+                    path: 'ftp',
+                    name: 'FTP',
+                    component: () => import('@/views/toolbox/ftp/index.vue'),
+                    hidden: true,
+                    meta: {
+                        activeMenu: '/toolbox',
+                        requiresAuth: false,
+                    },
+                },
+                {
+                    path: 'fail2ban',
                     name: 'Fail2ban',
                     component: () => import('@/views/toolbox/fail2ban/index.vue'),
                     hidden: true,

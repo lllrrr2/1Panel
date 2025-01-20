@@ -4,7 +4,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"os"
+	"path"
+	"strings"
 
+	"github.com/1Panel-dev/1Panel/backend/app/dto"
 	"github.com/1Panel-dev/1Panel/backend/app/model"
 	"github.com/1Panel-dev/1Panel/backend/app/repo"
 	"github.com/1Panel-dev/1Panel/backend/constant"
@@ -12,6 +15,7 @@ import (
 	"github.com/1Panel-dev/1Panel/backend/utils/cmd"
 	"github.com/1Panel-dev/1Panel/backend/utils/common"
 	"github.com/1Panel-dev/1Panel/backend/utils/encrypt"
+	"github.com/1Panel-dev/1Panel/backend/utils/xpack"
 )
 
 func Init() {
@@ -57,25 +61,35 @@ func Init() {
 		global.LOG.Fatalf("init service before start failed, err: %v", err)
 	}
 
-	if global.CONF.System.ChangeUserInfo {
-		if err := settingRepo.Update("UserName", common.RandStrAndNum(10)); err != nil {
-			global.LOG.Fatalf("init username before start failed, err: %v", err)
-		}
-		pass, _ := encrypt.StringEncrypt(common.RandStrAndNum(10))
-		if err := settingRepo.Update("Password", pass); err != nil {
-			global.LOG.Fatalf("init password before start failed, err: %v", err)
-		}
-		if err := settingRepo.Update("SecurityEntrance", common.RandStrAndNum(10)); err != nil {
-			global.LOG.Fatalf("init entrance before start failed, err: %v", err)
-		}
-
-		sudo := cmd.SudoHandleCmd()
-		_, _ = cmd.Execf("%s sed -i '/CHANGE_USER_INFO=true/d' /usr/local/bin/1pctl", sudo)
+	apiInterfaceStatusSetting, err := settingRepo.Get(settingRepo.WithByKey("ApiInterfaceStatus"))
+	if err != nil {
+		global.LOG.Errorf("load service api interface from setting failed, err: %v", err)
 	}
+	global.CONF.System.ApiInterfaceStatus = apiInterfaceStatusSetting.Value
+	if apiInterfaceStatusSetting.Value == "enable" {
+		apiKeySetting, err := settingRepo.Get(settingRepo.WithByKey("ApiKey"))
+		if err != nil {
+			global.LOG.Errorf("load service api key from setting failed, err: %v", err)
+		}
+		global.CONF.System.ApiKey = apiKeySetting.Value
+		ipWhiteListSetting, err := settingRepo.Get(settingRepo.WithByKey("IpWhiteList"))
+		if err != nil {
+			global.LOG.Errorf("load service ip white list from setting failed, err: %v", err)
+		}
+		global.CONF.System.IpWhiteList = ipWhiteListSetting.Value
+		apiKeyValidityTimeSetting, err := settingRepo.Get(settingRepo.WithByKey("ApiKeyValidityTime"))
+		if err != nil {
+			global.LOG.Errorf("load service api key validity time from setting failed, err: %v", err)
+		}
+		global.CONF.System.ApiKeyValidityTime = apiKeyValidityTimeSetting.Value
+	}
+
+	handleUserInfo(global.CONF.System.ChangeUserInfo, settingRepo)
 
 	handleCronjobStatus()
 	handleSnapStatus()
 	loadLocalDir()
+	initDir()
 }
 
 func handleSnapStatus() {
@@ -137,11 +151,24 @@ func handleSnapStatus() {
 }
 
 func handleCronjobStatus() {
-	_ = global.DB.Model(&model.JobRecords{}).Where("status = ?", constant.StatusWaiting).
-		Updates(map[string]interface{}{
-			"status":  constant.StatusFailed,
-			"message": "the task was interrupted due to the restart of the 1panel service",
-		}).Error
+	var jobRecords []model.JobRecords
+	_ = global.DB.Where("status = ?", constant.StatusWaiting).Find(&jobRecords).Error
+	for _, record := range jobRecords {
+		err := global.DB.Model(&model.JobRecords{}).Where("status = ?", constant.StatusWaiting).
+			Updates(map[string]interface{}{
+				"status":  constant.StatusFailed,
+				"message": "the task was interrupted due to the restart of the 1panel service",
+			}).Error
+
+		if err != nil {
+			global.LOG.Errorf("Failed to update job ID: %v, Error:%v", record.ID, err)
+			continue
+		}
+
+		var cronjob *model.Cronjob
+		_ = global.DB.Where("id = ?", record.CronjobID).First(&cronjob).Error
+		handleCronJobAlert(cronjob)
+	}
 }
 
 func loadLocalDir() {
@@ -172,4 +199,69 @@ func loadLocalDir() {
 		return
 	}
 	global.LOG.Errorf("error type dir: %T", varMap["dir"])
+}
+
+func handleUserInfo(tags string, settingRepo repo.ISettingRepo) {
+	if len(tags) == 0 {
+		return
+	}
+	if tags == "all" {
+		if err := settingRepo.Update("UserName", common.RandStrAndNum(10)); err != nil {
+			global.LOG.Fatalf("init username before start failed, err: %v", err)
+		}
+		pass, _ := encrypt.StringEncrypt(common.RandStrAndNum(10))
+		if err := settingRepo.Update("Password", pass); err != nil {
+			global.LOG.Fatalf("init password before start failed, err: %v", err)
+		}
+		if err := settingRepo.Update("SecurityEntrance", common.RandStrAndNum(10)); err != nil {
+			global.LOG.Fatalf("init entrance before start failed, err: %v", err)
+		}
+		return
+	}
+	if strings.Contains(global.CONF.System.ChangeUserInfo, "username") {
+		if err := settingRepo.Update("UserName", common.RandStrAndNum(10)); err != nil {
+			global.LOG.Fatalf("init username before start failed, err: %v", err)
+		}
+	}
+	if strings.Contains(global.CONF.System.ChangeUserInfo, "password") {
+		pass, _ := encrypt.StringEncrypt(common.RandStrAndNum(10))
+		if err := settingRepo.Update("Password", pass); err != nil {
+			global.LOG.Fatalf("init password before start failed, err: %v", err)
+		}
+	}
+	if strings.Contains(global.CONF.System.ChangeUserInfo, "entrance") {
+		if err := settingRepo.Update("SecurityEntrance", common.RandStrAndNum(10)); err != nil {
+			global.LOG.Fatalf("init entrance before start failed, err: %v", err)
+		}
+	}
+
+	sudo := cmd.SudoHandleCmd()
+	_, _ = cmd.Execf("%s sed -i '/CHANGE_USER_INFO=%v/d' /usr/local/bin/1pctl", sudo, global.CONF.System.ChangeUserInfo)
+}
+
+func initDir() {
+	composePath := path.Join(global.CONF.System.BaseDir, "1panel/docker/compose/")
+	if _, err := os.Stat(composePath); err != nil && os.IsNotExist(err) {
+		if err = os.MkdirAll(composePath, os.ModePerm); err != nil {
+			global.LOG.Errorf("mkdir %s failed, err: %v", composePath, err)
+			return
+		}
+	}
+}
+
+func handleCronJobAlert(cronjob *model.Cronjob) {
+	if cronjob.Type == "snapshot" {
+		return
+	}
+	pushAlert := dto.PushAlert{
+		TaskName:  cronjob.Name,
+		AlertType: cronjob.Type,
+		EntryID:   cronjob.ID,
+		Param:     cronjob.Type,
+	}
+	err := xpack.PushAlert(pushAlert)
+	if err != nil {
+		global.LOG.Errorf("cronjob alert push failed, err: %v", err)
+		return
+	}
 }

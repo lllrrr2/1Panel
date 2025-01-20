@@ -37,6 +37,8 @@ var (
 
 	deviceService   = service.NewIDeviceService()
 	fail2banService = service.NewIFail2BanService()
+	ftpService      = service.NewIFtpService()
+	clamService     = service.NewIClamService()
 
 	settingService = service.NewISettingService()
 	backupService  = service.NewIBackupService()

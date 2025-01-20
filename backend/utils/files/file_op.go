@@ -3,6 +3,7 @@ package files
 import (
 	"archive/zip"
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -15,9 +16,9 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
+	"github.com/1Panel-dev/1Panel/backend/constant"
 	"github.com/1Panel-dev/1Panel/backend/utils/cmd"
 	http2 "github.com/1Panel-dev/1Panel/backend/utils/http"
 	cZip "github.com/klauspost/compress/zip"
@@ -57,11 +58,26 @@ func (f FileOp) CreateDir(dst string, mode fs.FileMode) error {
 	return f.Fs.MkdirAll(dst, mode)
 }
 
+func (f FileOp) CreateDirWithMode(dst string, mode fs.FileMode) error {
+	if err := f.Fs.MkdirAll(dst, mode); err != nil {
+		return err
+	}
+	return f.ChmodRWithMode(dst, mode, true)
+}
+
 func (f FileOp) CreateFile(dst string) error {
 	if _, err := f.Fs.Create(dst); err != nil {
 		return err
 	}
 	return nil
+}
+
+func (f FileOp) CreateFileWithMode(dst string, mode fs.FileMode) error {
+	file, err := f.Fs.OpenFile(dst, os.O_CREATE, mode)
+	if err != nil {
+		return err
+	}
+	return file.Close()
 }
 
 func (f FileOp) LinkFile(source string, dst string, isSymlink bool) error {
@@ -149,7 +165,7 @@ func (f FileOp) ChownR(dst string, uid string, gid string, sub bool) error {
 	if cmd.HasNoPasswordSudo() {
 		cmdStr = fmt.Sprintf("sudo %s", cmdStr)
 	}
-	if msg, err := cmd.ExecWithTimeOut(cmdStr, 2*time.Second); err != nil {
+	if msg, err := cmd.ExecWithTimeOut(cmdStr, 10*time.Second); err != nil {
 		if msg != "" {
 			return errors.New(msg)
 		}
@@ -166,7 +182,24 @@ func (f FileOp) ChmodR(dst string, mode int64, sub bool) error {
 	if cmd.HasNoPasswordSudo() {
 		cmdStr = fmt.Sprintf("sudo %s", cmdStr)
 	}
-	if msg, err := cmd.ExecWithTimeOut(cmdStr, 2*time.Second); err != nil {
+	if msg, err := cmd.ExecWithTimeOut(cmdStr, 10*time.Second); err != nil {
+		if msg != "" {
+			return errors.New(msg)
+		}
+		return err
+	}
+	return nil
+}
+
+func (f FileOp) ChmodRWithMode(dst string, mode fs.FileMode, sub bool) error {
+	cmdStr := fmt.Sprintf(`chmod %v "%s"`, fmt.Sprintf("%o", mode.Perm()), dst)
+	if sub {
+		cmdStr = fmt.Sprintf(`chmod -R %v "%s"`, fmt.Sprintf("%o", mode.Perm()), dst)
+	}
+	if cmd.HasNoPasswordSudo() {
+		cmdStr = fmt.Sprintf("sudo %s", cmdStr)
+	}
+	if msg, err := cmd.ExecWithTimeOut(cmdStr, 10*time.Second); err != nil {
 		if msg != "" {
 			return errors.New(msg)
 		}
@@ -282,6 +315,7 @@ func (f FileOp) DownloadFile(url, dst string) error {
 	if err != nil {
 		return err
 	}
+	defer resp.Body.Close()
 
 	out, err := os.Create(dst)
 	if err != nil {
@@ -292,8 +326,25 @@ func (f FileOp) DownloadFile(url, dst string) error {
 	if _, err = io.Copy(out, resp.Body); err != nil {
 		return fmt.Errorf("save download file [%s] error, err %s", dst, err.Error())
 	}
-	out.Close()
-	resp.Body.Close()
+	return nil
+}
+
+func (f FileOp) DownloadFileWithProxy(url, dst string) error {
+	_, resp, err := http2.HandleGet(url, http.MethodGet, constant.TimeOut5m)
+	if err != nil {
+		return err
+	}
+
+	out, err := os.Create(dst)
+	if err != nil {
+		return fmt.Errorf("create download file [%s] error, err %s", dst, err.Error())
+	}
+	defer out.Close()
+
+	reader := bytes.NewReader(resp)
+	if _, err = io.Copy(out, reader); err != nil {
+		return fmt.Errorf("save download file [%s] error, err %s", dst, err.Error())
+	}
 	return nil
 }
 
@@ -314,7 +365,7 @@ func (f FileOp) Cut(oldPaths []string, dst, name string, cover bool) error {
 			coverFlag = "-f"
 		}
 
-		cmdStr := fmt.Sprintf(`mv %s "%s" "%s"`, coverFlag, p, dstPath)
+		cmdStr := fmt.Sprintf(`mv %s '%s' '%s'`, coverFlag, p, dstPath)
 		if err := cmd.ExecCmd(cmdStr); err != nil {
 			return err
 		}
@@ -323,7 +374,7 @@ func (f FileOp) Cut(oldPaths []string, dst, name string, cover bool) error {
 }
 
 func (f FileOp) Mv(oldPath, dstPath string) error {
-	cmdStr := fmt.Sprintf(`mv "%s" "%s"`, oldPath, dstPath)
+	cmdStr := fmt.Sprintf(`mv '%s' '%s'`, oldPath, dstPath)
 	if err := cmd.ExecCmd(cmdStr); err != nil {
 		return err
 	}
@@ -377,13 +428,13 @@ func (f FileOp) CopyAndReName(src, dst, name string, cover bool) error {
 		if name != "" && !cover {
 			dstPath = filepath.Join(dst, name)
 		}
-		return cmd.ExecCmd(fmt.Sprintf(`cp -rf "%s" "%s"`, src, dstPath))
+		return cmd.ExecCmd(fmt.Sprintf(`cp -rf '%s' '%s'`, src, dstPath))
 	} else {
 		dstPath := filepath.Join(dst, name)
 		if cover {
 			dstPath = dst
 		}
-		return cmd.ExecCmd(fmt.Sprintf(`cp -f "%s" "%s"`, src, dstPath))
+		return cmd.ExecCmd(fmt.Sprintf(`cp -f '%s' '%s'`, src, dstPath))
 	}
 }
 
@@ -396,29 +447,29 @@ func (f FileOp) CopyDir(src, dst string) error {
 	if err = f.Fs.MkdirAll(dstDir, srcInfo.Mode()); err != nil {
 		return err
 	}
-	return cmd.ExecCmd(fmt.Sprintf(`cp -rf "%s" "%s"`, src, dst+"/"))
+	return cmd.ExecCmd(fmt.Sprintf(`cp -rf '%s' '%s'`, src, dst+"/"))
 }
 
 func (f FileOp) CopyFile(src, dst string) error {
 	dst = filepath.Clean(dst) + string(filepath.Separator)
-	return cmd.ExecCmd(fmt.Sprintf(`cp -f "%s" "%s"`, src, dst+"/"))
+	return cmd.ExecCmd(fmt.Sprintf(`cp -f '%s' '%s'`, src, dst+"/"))
 }
 
 func (f FileOp) GetDirSize(path string) (float64, error) {
-	var m sync.Map
-	var wg sync.WaitGroup
-
-	wg.Add(1)
-	go ScanDir(f.Fs, path, &m, &wg)
-	wg.Wait()
-
-	var dirSize float64
-	m.Range(func(k, v interface{}) bool {
-		dirSize = dirSize + v.(float64)
-		return true
+	var size int64
+	err := filepath.Walk(path, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			size += info.Size()
+		}
+		return nil
 	})
-
-	return dirSize, nil
+	if err != nil {
+		return 0, err
+	}
+	return float64(size), nil
 }
 
 func getFormat(cType CompressType) archiver.CompressedArchive {
@@ -446,7 +497,7 @@ func getFormat(cType CompressType) archiver.CompressedArchive {
 	return format
 }
 
-func (f FileOp) Compress(srcRiles []string, dst string, name string, cType CompressType) error {
+func (f FileOp) Compress(srcRiles []string, dst string, name string, cType CompressType, secret string) error {
 	format := getFormat(cType)
 
 	fileMaps := make(map[string]string, len(srcRiles))
@@ -475,7 +526,13 @@ func (f FileOp) Compress(srcRiles []string, dst string, name string, cType Compr
 			return nil
 		}
 		_ = f.DeleteFile(dstFile)
-		return NewZipArchiver().Compress(srcRiles, dstFile)
+		return NewZipArchiver().Compress(srcRiles, dstFile, "")
+	case TarGz:
+		err = NewTarGzArchiver().Compress(srcRiles, dstFile, secret)
+		if err != nil {
+			_ = f.DeleteFile(dstFile)
+			return err
+		}
 	default:
 		err = format.Archive(context.Background(), out, files)
 		if err != nil {
@@ -553,18 +610,19 @@ func (f FileOp) decompressWithSDK(srcFile string, dst string, cType CompressType
 	return format.Extract(context.Background(), input, nil, handler)
 }
 
-func (f FileOp) Decompress(srcFile string, dst string, cType CompressType) error {
-	if err := f.decompressWithSDK(srcFile, dst, cType); err != nil {
-		if cType == Tar || cType == Zip {
-			shellArchiver, err := NewShellArchiver(cType)
-			if err != nil {
-				return err
-			}
-			return shellArchiver.Extract(srcFile, dst)
+func (f FileOp) Decompress(srcFile string, dst string, cType CompressType, secret string) error {
+	if cType == Tar || cType == Zip || cType == TarGz {
+		shellArchiver, err := NewShellArchiver(cType)
+		if !f.Stat(dst) {
+			_ = f.CreateDir(dst, 0755)
 		}
-		return err
+		if err == nil {
+			if err = shellArchiver.Extract(srcFile, dst, secret); err == nil {
+				return nil
+			}
+		}
 	}
-	return nil
+	return f.decompressWithSDK(srcFile, dst, cType)
 }
 
 func ZipFile(files []archiver.File, dst afero.File) error {

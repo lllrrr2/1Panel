@@ -41,10 +41,8 @@ class RequestHttp {
 
         this.service.interceptors.response.use(
             (response: AxiosResponse) => {
+                globalStore.errStatus = '';
                 const { data } = response;
-                if (response.headers['x-csrf-token']) {
-                    globalStore.setCsrfToken(response.headers['x-csrf-token']);
-                }
                 if (data.code == ResultEnum.OVERDUE || data.code == ResultEnum.FORBIDDEN) {
                     globalStore.setLogStatus(false);
                     router.push({
@@ -53,24 +51,29 @@ class RequestHttp {
                     });
                     return Promise.reject(data);
                 }
-                if (data.code == ResultEnum.EXPIRED) {
-                    router.push({ name: 'Expired' });
-                    return data;
+                if (data.code == ResultEnum.NOTFOUND) {
+                    globalStore.errStatus = 'err-found';
+                    return;
                 }
                 if (data.code == ResultEnum.ERRIP) {
-                    globalStore.setLogStatus(false);
-                    router.push({
-                        name: 'entrance',
-                        params: { code: 'err-ip' },
-                    });
-                    return Promise.reject(data);
+                    globalStore.errStatus = 'err-ip';
+                    return;
                 }
                 if (data.code == ResultEnum.ERRDOMAIN) {
-                    globalStore.setLogStatus(false);
-                    router.push({
-                        name: 'entrance',
-                        params: { code: 'err-domain' },
-                    });
+                    globalStore.errStatus = 'err-domain';
+                    return;
+                }
+                if (data.code == ResultEnum.UNSAFETY) {
+                    globalStore.errStatus = 'err-unsafe';
+                    return;
+                }
+                if (data.code == ResultEnum.EXPIRED) {
+                    router.push({ name: 'Expired' });
+                    return;
+                }
+                if (data.code == ResultEnum.ERRXPACK) {
+                    globalStore.isProductPro = false;
+                    window.location.reload();
                     return Promise.reject(data);
                 }
                 if (data.code == ResultEnum.ERRGLOBALLOADDING) {
@@ -92,13 +95,51 @@ class RequestHttp {
                 return data;
             },
             async (error: AxiosError) => {
+                globalStore.errStatus = '';
                 const { response } = error;
                 if (error.message.indexOf('timeout') !== -1) MsgError('请求超时！请您稍后重试');
                 if (response) {
-                    checkStatus(
-                        response.status,
-                        response.data && response.data['message'] ? response.data['message'] : '',
-                    );
+                    switch (response.status) {
+                        case 310:
+                            globalStore.errStatus = 'err-ip';
+                            router.push({
+                                name: 'entrance',
+                                params: { code: globalStore.entrance },
+                            });
+                            return;
+                        case 311:
+                            globalStore.errStatus = 'err-domain';
+                            router.push({
+                                name: 'entrance',
+                                params: { code: globalStore.entrance },
+                            });
+                            return;
+                        case 312:
+                            globalStore.errStatus = 'err-entrance';
+                            router.push({
+                                name: 'entrance',
+                                params: { code: globalStore.entrance },
+                            });
+                            return;
+                        case 313:
+                            router.push({ name: 'Expired' });
+                            return;
+                        case 500:
+                        case 407:
+                            checkStatus(
+                                response.status,
+                                response.data && response.data['message'] ? response.data['message'] : '',
+                            );
+                            return Promise.reject(error);
+                        default:
+                            globalStore.isLogin = false;
+                            globalStore.errStatus = 'code-' + response.status;
+                            router.push({
+                                name: 'entrance',
+                                params: { code: globalStore.entrance },
+                            });
+                            return Promise.reject(error);
+                    }
                 }
                 if (!window.navigator.onLine) router.replace({ path: '/500' });
                 return Promise.reject(error);

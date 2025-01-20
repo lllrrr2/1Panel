@@ -27,6 +27,7 @@ func NewParser(filePath string) (*Parser, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer f.Close()
 	l := newLexer(bufio.NewReader(f))
 	l.file = filePath
 	p := NewParserFromLexer(l)
@@ -61,7 +62,7 @@ func NewParserFromLexer(lexer *lexer) *Parser {
 
 	parser.directiveWrappers = map[string]func(*components.Directive) components.IDirective{
 		"server": func(directive *components.Directive) components.IDirective {
-			return parser.wrapServer(directive)
+			return parser.parseUpstreamServer(directive)
 		},
 	}
 

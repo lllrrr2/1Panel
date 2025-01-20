@@ -4,6 +4,7 @@
         :destroy-on-close="true"
         @close="handleClose"
         :close-on-click-modal="false"
+        :close-on-press-escape="false"
         size="50%"
     >
         <template #header>
@@ -160,8 +161,8 @@ const loadData = async () => {
 
     chartsOption.value['cpuChart'] = {
         title: 'CPU',
-        xDatas: timeDatas.value,
-        yDatas: [
+        xData: timeDatas.value,
+        yData: [
             {
                 name: 'CPU',
                 data: cpuDatas.value,
@@ -172,8 +173,8 @@ const loadData = async () => {
 
     chartsOption.value['memoryChart'] = {
         title: i18n.global.t('monitor.memory'),
-        xDatas: timeDatas.value,
-        yDatas: [
+        xData: timeDatas.value,
+        yData: [
             {
                 name: i18n.global.t('monitor.memory'),
                 data: memDatas.value,
@@ -188,8 +189,8 @@ const loadData = async () => {
 
     chartsOption.value['ioChart'] = {
         title: i18n.global.t('monitor.disk') + ' IO',
-        xDatas: timeDatas.value,
-        yDatas: [
+        xData: timeDatas.value,
+        yData: [
             {
                 name: i18n.global.t('monitor.read'),
                 data: ioReadDatas.value,
@@ -204,8 +205,8 @@ const loadData = async () => {
 
     chartsOption.value['networkChart'] = {
         title: i18n.global.t('monitor.network'),
-        xDatas: timeDatas.value,
-        yDatas: [
+        xData: timeDatas.value,
+        yData: [
             {
                 name: i18n.global.t('monitor.up'),
                 data: netTxDatas.value,
