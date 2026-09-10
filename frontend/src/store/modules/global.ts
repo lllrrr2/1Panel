@@ -1,17 +1,19 @@
 import { defineStore } from 'pinia';
+import type { StoreDefinition } from 'pinia';
 import piniaPersistConfig from '@/config/pinia-persist';
-import { GlobalState, ThemeConfigProp } from '../interface';
+import { GlobalState } from '../interface';
 import { DeviceType } from '@/enums/app';
 import i18n, { setActiveLocale } from '@/lang';
+import { isMasterOnlyPermissionCode, setMasterOnlyPermissionCodes, toManageCode } from '@/utils/permission-codes';
+import { clearPageStateCache } from '@/utils/page-state-cache';
 
-const GlobalStore = defineStore({
-    id: 'GlobalState',
+const CN_DOCS_URL = 'https://1panel.cn/docs/v2';
+const INTL_DOCS_URL = 'https://1panel.pro/docs/v2';
+
+const GlobalStore = defineStore('GlobalState', {
     state: (): GlobalState => ({
-        isLoading: false,
-        loadingText: '',
-        isLogin: false,
-        entrance: '',
-        language: '',
+        language: i18n.global.locale.value,
+        device: DeviceType.Desktop,
         themeConfig: {
             panelName: '',
             primary: '#005eeb',
@@ -27,30 +29,48 @@ const GlobalStore = defineStore({
             loginBgType: '',
             loginBtnLinkColor: '',
         },
+        // ui
+        isFullScreen: false,
+        openMenuTabs: false,
+        menuAccordion: false,
         watermark: null,
         watermarkShow: false,
-        openMenuTabs: false,
-        isFullScreen: false,
-        isOnRestart: false,
-        agreeLicense: false,
-        hasNewVersion: false,
+        isLoading: false,
+        loadingText: '',
+        csrfToken: '',
+        // auth
         ignoreCaptcha: true,
-        device: DeviceType.Desktop,
+        agreeLicense: false,
+        isLogin: false,
+        entrance: '',
+        // context
+        hasNewVersion: false,
         lastFilePath: '',
         currentDB: '',
         currentPgDB: '',
         currentRedisDB: '',
+        currentMongodbDB: '',
         showEntranceWarn: true,
         defaultNetwork: 'all',
         defaultIO: 'all',
-        isFxplay: false,
-
-        isProductPro: false,
+        isOnRestart: false,
+        // tags
+        isAdmin: false,
+        permissions: [],
+        masterOnlyPermissions: [],
+        nodeRoles: [],
+        isEnterprise: false,
         isIntl: false,
+        docWithRegion: true,
+        isFxplay: false,
+        isOffline: false,
+        // license
+        isProductPro: false,
         productProExpires: 0,
         isMasterProductPro: false,
-        isOffLine: false,
-
+        isEnterpriseLicensed: false,
+        isEnterpriseLicenseLoaded: false,
+        // multi-node
         masterAlias: '',
         currentNode: 'local',
         currentNodeAddr: '',
@@ -60,74 +80,92 @@ const GlobalStore = defineStore({
             state.themeConfig.theme === 'dark' ||
             (state.themeConfig.theme === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches),
         isDarkGoldTheme: (state) => state.themeConfig.primary === '#F0BE96' && state.isProductPro,
-        docsUrl: (state) => (state.isIntl ? 'https://docs.1panel.hk' : 'https://1panel.cn/docs/v2'),
+        isNodeAdmin: (state) =>
+            state.nodeRoles.some((item) => item.nodeName === state.currentNode && item.roleName === 'Node Admin'),
+        isAdminOrNodeAdmin: (state) =>
+            state.isAdmin ||
+            state.nodeRoles.some((item) => item.nodeName === state.currentNode && item.roleName === 'Node Admin'),
+        docsUrl: (state) => {
+            if (state.docWithRegion) {
+                return state.isIntl ? INTL_DOCS_URL : CN_DOCS_URL;
+            }
+            const lang = state.language.toLowerCase();
+            const isChinese = lang === 'zh';
+            return isChinese ? CN_DOCS_URL : INTL_DOCS_URL;
+        },
         isMaster: (state) => state.currentNode === 'local',
+        isMobile: (state) => state.device === DeviceType.Mobile,
+
+        isXpackOrEE: (state) => {
+            return (state.isEnterprise && state.isEnterpriseLicensed) || state.isMasterProductPro;
+        },
+        isEE: (state) => state.isEnterprise && state.isEnterpriseLicensed,
+        isMasterPro: (state) => state.isMasterProductPro,
     },
     actions: {
-        setOpenMenuTabs(openMenuTabs: boolean) {
-            this.openMenuTabs = openMenuTabs;
-        },
         setScreenFull() {
             this.isFullScreen = !this.isFullScreen;
         },
         setLogStatus(login: boolean) {
             this.isLogin = login;
         },
-        setGlobalLoading(loading: boolean) {
-            this.isLoading = loading;
+        setAuthInfo(payload: {
+            isAdmin: boolean;
+            permissions: string[];
+            masterOnlyPermissions?: string[];
+            nodeRoles?: Array<{ nodeId: number; nodeName: string; roleId: number; roleName: string }>;
+        }) {
+            this.isAdmin = !!payload.isAdmin;
+            this.permissions = payload.permissions || [];
+            this.masterOnlyPermissions = payload.masterOnlyPermissions || [];
+            this.nodeRoles = payload.nodeRoles || [];
+            setMasterOnlyPermissionCodes(this.masterOnlyPermissions);
         },
-        setLoadingText(text: string) {
-            this.loadingText = i18n.global.t('commons.loadingText.' + text);
+        clearAuthInfo() {
+            clearPageStateCache();
+            this.permissions = [];
+            this.masterOnlyPermissions = [];
+            this.nodeRoles = [];
+            this.isAdmin = false;
+            setMasterOnlyPermissionCodes([]);
         },
-        setCsrfToken(token: string) {
-            this.csrfToken = token;
+        hasPermission(permission: string) {
+            setMasterOnlyPermissionCodes(this.masterOnlyPermissions);
+            const normalizedPermission = permission.trim();
+            if (!normalizedPermission) {
+                return false;
+            }
+            if (!this.isMaster && isMasterOnlyPermissionCode(normalizedPermission)) {
+                return false;
+            }
+            if (this.isAdmin) {
+                return true;
+            }
+            if (this.permissions.includes(normalizedPermission)) {
+                return true;
+            }
+            const managePermission = toManageCode(normalizedPermission);
+            if (!managePermission) {
+                return false;
+            }
+            if (!this.isMaster && isMasterOnlyPermissionCode(managePermission)) {
+                return false;
+            }
+            return this.permissions.includes(managePermission);
         },
         async updateLanguage(language: string) {
             const activeLocale = await setActiveLocale(language);
             this.language = activeLocale;
             return activeLocale;
         },
-        setThemeConfig(themeConfig: ThemeConfigProp) {
-            this.themeConfig = themeConfig;
-        },
-        setAgreeLicense(agree: boolean) {
-            this.agreeLicense = agree;
-        },
         toggleDevice(value: DeviceType) {
             this.device = value;
-        },
-        isMobile() {
-            return this.device === DeviceType.Mobile;
         },
         getMasterAlias() {
             return this.masterAlias || i18n.global.t('xpack.node.master');
         },
-        isMasterPro() {
-            return this.isMasterProductPro;
-        },
-        setLastFilePath(path: string) {
-            this.lastFilePath = path;
-        },
-        setCurrentDB(name: string) {
-            this.currentDB = name;
-        },
-        setCurrentPgDB(name: string) {
-            this.currentPgDB = name;
-        },
-        setCurrentRedisDB(name: string) {
-            this.currentRedisDB = name;
-        },
-        setShowEntranceWarn(show: boolean) {
-            this.showEntranceWarn = show;
-        },
-        setDefaultNetwork(net: string) {
-            this.defaultNetwork = net;
-        },
-        setDefaultIO(net: string) {
-            this.defaultIO = net;
-        },
     },
     persist: piniaPersistConfig('GlobalState'),
-});
+}) as StoreDefinition<'GlobalState', GlobalState, any, any>;
 
 export default GlobalStore;

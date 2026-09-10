@@ -42,7 +42,7 @@
                     </el-checkbox>
                 </el-form-item>
                 <el-form-item :label="$t('website.acmeAccountManage')" prop="acmeAccountID" v-if="req.enableSSL">
-                    <el-select v-model="req.acmeAccountID" :placeholder="$t('website.selectAcme')" @change="listSSL">
+                    <el-select v-model="req.acmeAccountID" :placeholder="$t('website.selectAcme')" @change="listSSLs">
                         <el-option :key="0" :label="$t('website.imported')" :value="0"></el-option>
                         <el-option
                             v-for="(acme, index) in acmeAccounts"
@@ -63,12 +63,15 @@
                         :placeholder="$t('website.selectSSL')"
                         @change="changeSSl(req.sslID)"
                     >
-                        <el-option
-                            v-for="(ssl, index) in ssls"
-                            :key="index"
-                            :label="ssl.primaryDomain"
-                            :value="ssl.id"
-                        ></el-option>
+                        <el-option v-for="(ssl, index) in ssls" :key="index" :label="ssl.primaryDomain" :value="ssl.id">
+                            <span>{{ ssl.primaryDomain }}</span>
+                            <el-tag class="tagClass" v-if="ssl.expireDate">
+                                {{ dateFormatSimple(ssl.expireDate) }}
+                            </el-tag>
+                            <el-tag class="tagClass" v-if="ssl.organization">
+                                {{ ssl.organization }}
+                            </el-tag>
+                        </el-option>
                     </el-select>
                 </el-form-item>
             </el-form>
@@ -77,7 +80,7 @@
             <el-button @click="handleClose">
                 {{ $t('commons.button.cancel') }}
             </el-button>
-            <el-button type="primary" @click="onSubmit(formRef)">
+            <el-button v-permission type="primary" @click="onSubmit(formRef)">
                 {{ $t('commons.button.add') }}
             </el-button>
         </template>
@@ -90,15 +93,18 @@ import { listSSL, searchAcmeAccount } from '@/api/modules/website';
 import { Rules } from '@/global/form-rules';
 import { FormInstance, FormRules } from 'element-plus';
 import { reactive, ref } from 'vue';
-import { getAccountName } from '@/utils/util';
+import { getAccountName } from '@/utils/ssl';
+import { dateFormatSimple } from '@/utils/date';
 import { bindMcpDomain, getMcpDomain, updateMcpDomain } from '@/api/modules/ai';
 import { MsgSuccess } from '@/utils/message';
 import i18n from '@/lang';
 
+type SSLItem = Website.SSL & { organization?: string };
+
 const open = ref(false);
 const operate = ref('create');
 const loading = ref(false);
-const ssls = ref([]);
+const ssls = ref<SSLItem[]>([]);
 const websiteSSL = ref<Website.SSL>();
 const acmeAccounts = ref();
 const formRef = ref();
@@ -224,5 +230,11 @@ defineExpose({
 .pageRoute {
     font-size: 12px;
     margin-left: 5px;
+}
+.tagClass {
+    float: right;
+    margin-right: 10px;
+    font-size: 12px;
+    margin-top: 5px;
 }
 </style>

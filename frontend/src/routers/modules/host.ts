@@ -19,7 +19,7 @@ const hostRouter = {
             meta: {
                 icon: 'p-file-menu',
                 title: 'menu.files',
-                requiresAuth: false,
+                permission: 'host_file_view',
             },
         },
         {
@@ -29,7 +29,7 @@ const hostRouter = {
             meta: {
                 icon: 'p-system-monitor-menu',
                 title: 'menu.monitor',
-                requiresAuth: false,
+                permission: 'host_monitor_view',
             },
         },
         {
@@ -41,19 +41,30 @@ const hostRouter = {
                 activeMenu: '/hosts/monitor/monitor',
                 title: 'menu.monitor',
                 detail: 'commons.button.set',
-                requiresAuth: false,
+                permission: 'host_monitor_view',
             },
         },
         {
-            path: '/hosts/firewall/port',
+            path: '/hosts/firewall/rules',
             name: 'FirewallPort',
-            component: () => import('@/views/host/firewall/port/index.vue'),
+            component: () => import('@/views/host/firewall/rule/index.vue'),
             meta: {
                 icon: 'p-firewalld-menu',
-                activeMenu: '/hosts/firewall/port',
+                activeMenu: '/hosts/firewall/rules',
                 title: 'menu.firewall',
-                detail: 'firewall.portRule',
-                requiresAuth: false,
+                permission: 'host_firewall_view',
+            },
+        },
+        {
+            path: '/hosts/firewall/docker',
+            name: 'FirewallDockerGuard',
+            component: () => import('@/views/host/firewall/docker/index.vue'),
+            hidden: true,
+            meta: {
+                activeMenu: '/hosts/firewall/rules',
+                parent: 'menu.firewall',
+                title: 'firewall.dockerGuard',
+                permission: 'host_firewall_view',
             },
         },
         {
@@ -62,34 +73,22 @@ const hostRouter = {
             component: () => import('@/views/host/firewall/forward/index.vue'),
             hidden: true,
             meta: {
-                activeMenu: '/hosts/firewall/port',
+                activeMenu: '/hosts/firewall/rules',
                 parent: 'menu.firewall',
                 title: 'firewall.forwardRule',
-                requiresAuth: false,
+                permission: 'host_firewall_view',
             },
         },
         {
-            path: '/hosts/firewall/ip',
-            name: 'FirewallIP',
-            component: () => import('@/views/host/firewall/ip/index.vue'),
+            path: '/hosts/firewall/setting',
+            name: 'FirewallSetting',
+            component: () => import('@/views/host/firewall/setting/index.vue'),
             hidden: true,
             meta: {
-                activeMenu: '/hosts/firewall/port',
+                activeMenu: '/hosts/firewall/rules',
                 parent: 'menu.firewall',
-                title: 'firewall.ipRule',
-                requiresAuth: false,
-            },
-        },
-        {
-            path: '/hosts/firewall/advance',
-            name: 'FirewallAdvance',
-            component: () => import('@/views/host/firewall/advance/index.vue'),
-            hidden: true,
-            meta: {
-                activeMenu: '/hosts/firewall/port',
-                parent: 'menu.firewall',
-                title: 'firewall.advancedControl',
-                requiresAuth: false,
+                title: 'commons.button.set',
+                permission: 'host_firewall_view',
             },
         },
         {
@@ -100,7 +99,7 @@ const hostRouter = {
             meta: {
                 icon: 'p-disk-menu',
                 title: 'menu.disk',
-                requiresAuth: false,
+                permission: 'host_disk_view',
             },
         },
         {
@@ -112,8 +111,7 @@ const hostRouter = {
                 title: 'menu.processManage',
                 detail: 'menu.process',
                 activeMenu: '/hosts/process/process',
-                keepAlive: true,
-                requiresAuth: false,
+                permission: 'host_process_view',
             },
         },
         {
@@ -125,7 +123,7 @@ const hostRouter = {
                 parent: 'menu.processManage',
                 title: 'menu.network',
                 activeMenu: '/hosts/process/process',
-                requiresAuth: false,
+                permission: 'host_process_view',
             },
         },
         {
@@ -137,8 +135,7 @@ const hostRouter = {
                 title: 'menu.ssh',
                 detail: 'menu.config',
                 activeMenu: '/hosts/ssh/ssh',
-                keepAlive: true,
-                requiresAuth: false,
+                permission: 'host_ssh_view',
             },
         },
         {
@@ -150,7 +147,7 @@ const hostRouter = {
                 parent: 'menu.ssh',
                 title: 'ssh.loginLogs',
                 activeMenu: '/hosts/ssh/ssh',
-                requiresAuth: false,
+                permission: 'host_ssh_view',
             },
         },
         {
@@ -162,7 +159,7 @@ const hostRouter = {
                 parent: 'menu.ssh',
                 title: 'ssh.session',
                 activeMenu: '/hosts/ssh/ssh',
-                requiresAuth: false,
+                permission: 'host_ssh_view',
             },
         },
     ],

@@ -57,7 +57,7 @@
                                 <span class="font-medium">{{ $t('website.sni') }}</span>
                                 <span class="input-help">{{ $t('website.sniHelper') }}</span>
                             </div>
-                            <el-switch v-model="proxy.sni" size="large" />
+                            <el-switch v-model="proxy.sni" size="large" @change="handleSNIChange" />
                         </div>
 
                         <el-form-item
@@ -68,6 +68,14 @@
                         >
                             <el-input v-model.trim="proxy.proxySSLName" />
                         </el-form-item>
+
+                        <div class="flex justify-between items-center py-3">
+                            <div class="flex flex-col gap-1">
+                                <span class="font-medium">{{ $t('website.proxySslVerify') }}</span>
+                                <span class="input-help">{{ $t('website.proxySslVerifyHelper') }}</span>
+                            </div>
+                            <el-switch v-model="proxy.sslVerify" size="large" />
+                        </div>
                     </template>
                 </el-tab-pane>
 
@@ -214,7 +222,7 @@
                             </el-row>
                         </div>
                         <div class="mt-4">
-                            <el-button type="primary" @click="addReplaces" :icon="Plus">
+                            <el-button v-permission type="primary" @click="addReplaces" :icon="Plus">
                                 {{ $t('website.addReplace') }}
                             </el-button>
                             <span class="input-help mt-4">{{ $t('website.replaceHelper') }}</span>
@@ -225,7 +233,7 @@
         </el-form>
         <template #footer>
             <el-button @click="handleClose" :disabled="loading">{{ $t('commons.button.cancel') }}</el-button>
-            <el-button type="primary" @click="submit(proxyForm)" :disabled="loading">
+            <el-button v-permission type="primary" @click="submit(proxyForm)" :disabled="loading">
                 {{ $t('commons.button.confirm') }}
             </el-button>
         </template>
@@ -237,11 +245,11 @@ import { operateProxyConfig } from '@/api/modules/website';
 import { checkNumberRange, Rules } from '@/global/form-rules';
 import i18n from '@/lang';
 import { FormInstance } from 'element-plus';
-import { ref } from 'vue';
+import { ref, watch } from 'vue';
 import { MsgError, MsgSuccess } from '@/utils/message';
 import { Website } from '@/api/interface/website';
 import { Units } from '@/global/mimetype';
-import { isDomain } from '@/utils/util';
+import { isDomain } from '@/utils/validate';
 import { Delete, Plus } from '@element-plus/icons-vue';
 import CorsSetting from '@/views/website/website/cors/index.vue';
 
@@ -258,6 +266,8 @@ const rules = ref({
 const open = ref(false);
 const loading = ref(false);
 const activeTab = ref('basic');
+const shouldAutoEnableSNI = ref(false);
+const sniTouched = ref(false);
 
 const initData = (): Website.ProxyConfig => ({
     id: 0,
@@ -277,6 +287,7 @@ const initData = (): Website.ProxyConfig => ({
     proxyProtocol: 'http://',
     sni: false,
     proxySSLName: '',
+    sslVerify: false,
     serverCacheTime: 10,
     serverCacheUnit: 'm',
     browserCache: 'noModify',
@@ -300,6 +311,8 @@ const acceptParams = (proxyParam: Website.ProxyConfig) => {
     replaces.value = [];
     proxy.value = proxyParam;
     activeTab.value = 'basic';
+    shouldAutoEnableSNI.value = proxy.value.operate === 'create';
+    sniTouched.value = false;
 
     // Initialize browserCache based on cacheTime value
     if (proxy.value.cacheTime > 0) {
@@ -357,6 +370,10 @@ const addReplaces = () => {
 
 const removeReplace = (index: number) => {
     replaces.value.splice(index, 1);
+};
+
+const handleSNIChange = () => {
+    sniTouched.value = true;
 };
 
 const getProxyHost = () => {
@@ -424,6 +441,16 @@ const getProtocolAndHost = (url: string): { protocol: string; host: string } | n
     }
     return { protocol: '', host: url };
 };
+
+watch(
+    () => proxy.value.proxyProtocol,
+    (protocol) => {
+        if (proxy.value.operate !== 'create' || sniTouched.value || !shouldAutoEnableSNI.value) {
+            return;
+        }
+        proxy.value.sni = protocol === 'https://';
+    },
+);
 
 defineExpose({
     acceptParams,

@@ -45,10 +45,12 @@ type MonitorGPUOptions struct {
 }
 type GPUChartHide struct {
 	ProductName string `json:"productName"`
+	Type        string `json:"type"`
 	Process     bool   `json:"process"`
 	GPU         bool   `json:"gpu"`
 	Memory      bool   `json:"memory"`
 	Power       bool   `json:"power"`
+	PowerLimit  bool   `json:"powerLimit"`
 	Temperature bool   `json:"temperature"`
 	Speed       bool   `json:"speed"`
 }

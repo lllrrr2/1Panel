@@ -2,34 +2,47 @@
     <div>
         <LayoutContent v-loading="loading" v-if="!isRecordShow" :title="$t('menu.cronjob')">
             <template #leftToolBar>
-                <el-button type="primary" @click="onOpenDialog('')">
-                    {{ $t('commons.button.create') }}{{ $t('menu.cronjob') }}
+                <el-button v-permission v-node-admin type="primary" @click="onOpenDialog('')">
+                    {{ $t('commons.button.create') }}
                 </el-button>
-                <el-button @click="onOpenGroupDialog()">
+                <el-button v-permission v-node-admin @click="onOpenGroupDialog()">
                     {{ $t('commons.table.group') }}
                 </el-button>
                 <el-button-group>
-                    <el-button plain :disabled="selects.length === 0" @click="onBatchChangeStatus('enable')">
+                    <el-button
+                        v-permission
+                        v-node-admin
+                        plain
+                        :disabled="selects.length === 0"
+                        @click="onBatchChangeStatus('enable')"
+                    >
                         {{ $t('commons.button.enable') }}
                     </el-button>
-                    <el-button plain :disabled="selects.length === 0" @click="onBatchChangeStatus('disable')">
+                    <el-button
+                        v-permission
+                        v-node-admin
+                        plain
+                        :disabled="selects.length === 0"
+                        @click="onBatchChangeStatus('disable')"
+                    >
                         {{ $t('commons.button.disable') }}
                     </el-button>
-                    <el-button plain :disabled="selects.length === 0" @click="onDelete(null)">
+                    <el-button v-permission v-node-admin plain :disabled="selects.length === 0" @click="onDelete(null)">
                         {{ $t('commons.button.delete') }}
                     </el-button>
                 </el-button-group>
 
                 <el-button-group>
-                    <el-button @click="onImport">
+                    <el-button v-permission v-node-admin @click="onImport">
                         {{ $t('commons.button.import') }}
                     </el-button>
-                    <el-button :disabled="selects.length === 0" @click="onExport">
+                    <el-button v-permission v-node-admin :disabled="selects.length === 0" @click="onExport">
                         {{ $t('commons.button.export') }}
                     </el-button>
                 </el-button-group>
             </template>
             <template #rightToolBar>
+                <TableViewSwitch v-model="viewMode" storage-key="cronjob" />
                 <el-select v-model="searchGroupID" @change="search()" clearable class="p-w-200">
                     <template #prefix>{{ $t('commons.table.group') }}</template>
                     <div v-for="item in groupOptions" :key="item.id">
@@ -48,6 +61,12 @@
             <template #main>
                 <ComplexTable
                     :pagination-config="paginationConfig"
+                    :default-sort="
+                        paginationConfig.order !== 'null'
+                            ? { prop: paginationConfig.orderBy, order: paginationConfig.order }
+                            : undefined
+                    "
+                    v-model:view-mode="viewMode"
                     v-model:selects="selects"
                     @sort-change="search"
                     @search="search"
@@ -60,6 +79,7 @@
                         :min-width="120"
                         prop="name"
                         sortable
+                        card-type="name"
                         show-overflow-tooltip
                     >
                         <template #default="{ row }">
@@ -68,9 +88,19 @@
                             </el-text>
                         </template>
                     </el-table-column>
-                    <el-table-column :label="$t('commons.table.group')" min-width="120" prop="group">
+                    <el-table-column
+                        :label="$t('commons.table.group')"
+                        min-width="120"
+                        prop="group"
+                        card-type="content"
+                    >
                         <template #default="{ row }">
-                            <fu-select-rw-switch v-model="row.groupID" @change="updateGroup(row)">
+                            <fu-select-rw-switch
+                                v-permission
+                                v-node-admin
+                                v-model="row.groupID"
+                                @change="updateGroup(row)"
+                            >
                                 <template #read>
                                     {{ row.groupBelong === 'Default' ? $t('commons.table.default') : row.groupBelong }}
                                 </template>
@@ -85,15 +115,25 @@
                             </fu-select-rw-switch>
                         </template>
                     </el-table-column>
-                    <el-table-column :label="$t('commons.table.status')" :min-width="90" prop="status" sortable>
+                    <el-table-column
+                        :label="$t('commons.table.status')"
+                        :min-width="90"
+                        prop="status"
+                        sortable
+                        card-type="status"
+                    >
                         <template #default="{ row }">
                             <Status
+                                v-permission
+                                v-node-admin
                                 v-if="row.status === 'Enable'"
                                 @click="onChangeStatus(row.id, 'disable')"
                                 :status="row.status"
                                 :operate="true"
                             />
                             <Status
+                                v-permission
+                                v-node-admin
                                 v-if="row.status === 'Disable'"
                                 @click="onChangeStatus(row.id, 'enable')"
                                 :status="row.status"
@@ -102,7 +142,12 @@
                             <Status v-if="row.status === 'Pending'" :status="row.status" />
                         </template>
                     </el-table-column>
-                    <el-table-column :label="$t('cronjob.cronSpec')" show-overflow-tooltip :min-width="120">
+                    <el-table-column
+                        :label="$t('cronjob.cronSpec')"
+                        show-overflow-tooltip
+                        :min-width="120"
+                        card-type="description"
+                    >
                         <template #default="{ row }">
                             <div v-for="(item, index) of row.spec.split('&&')" :key="index">
                                 <div v-if="row.expand || (!row.expand && index < 3)">
@@ -123,9 +168,21 @@
                             </div>
                         </template>
                     </el-table-column>
-                    <el-table-column :label="$t('cronjob.retainCopies')" :min-width="120" prop="retainCopies">
+                    <el-table-column
+                        :label="$t('cronjob.retainCopies')"
+                        :min-width="120"
+                        prop="retainCopies"
+                        card-type="content"
+                    >
                         <template #default="{ row }">
-                            <el-button v-if="hasBackup(row.type)" @click="loadBackups(row)" plain size="small">
+                            <el-button
+                                v-permission
+                                v-node-admin
+                                v-if="hasBackup(row.type)"
+                                @click="loadBackups(row)"
+                                plain
+                                size="small"
+                            >
                                 {{ row.retainCopies }}{{ $t('cronjob.retainCopiesUnit') }}
                             </el-button>
                             <span v-else>{{ row.retainCopies }}</span>
@@ -136,6 +193,7 @@
                         :min-width="120"
                         show-overflow-tooltip
                         prop="lastRecordTime"
+                        card-type="description"
                     >
                         <template #default="{ row }">
                             <el-button v-if="row.lastRecordStatus === 'Success'" icon="Select" link type="success" />
@@ -145,36 +203,24 @@
                             {{ row.lastRecordTime }}
                         </template>
                     </el-table-column>
-                    <el-table-column :min-width="120" :label="$t('setting.backupAccount')">
+                    <el-table-column :min-width="120" :label="$t('setting.backupAccount')" card-type="content-full">
                         <template #default="{ row }">
                             <span v-if="!hasBackup(row.type)">-</span>
                             <div v-else>
-                                <div v-for="(item, index) of row.sourceAccounts" :key="index">
-                                    <div v-if="row.accountExpand || (!row.accountExpand && index < 3)">
-                                        <div v-if="row.expand || (!row.expand && index < 3)">
-                                            <span type="info">
-                                                {{ item === 'localhost' ? $t('setting.LOCAL') : item }}
-                                                <el-icon
-                                                    v-if="item === row.downloadAccount"
-                                                    size="12"
-                                                    class="relative top-px left-1"
-                                                >
-                                                    <Star />
-                                                </el-icon>
-                                            </span>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div v-if="!row.accountExpand && row.sourceAccounts?.length > 3">
-                                    <el-button type="primary" link @click="row.accountExpand = true">
-                                        {{ $t('commons.button.expand') }}...
-                                    </el-button>
-                                </div>
-                                <div v-if="row.accountExpand && row.sourceAccounts?.length > 3">
-                                    <el-button type="primary" link @click="row.accountExpand = false">
-                                        {{ $t('commons.button.collapse') }}
-                                    </el-button>
-                                </div>
+                                <el-button plain size="small" v-if="row.downloadAccount">
+                                    {{
+                                        row.downloadAccount === 'localhost' ? $t('setting.LOCAL') : row.downloadAccount
+                                    }}
+                                </el-button>
+                                <span v-else>-</span>
+                                <el-button
+                                    v-if="row.sourceAccounts?.length > 1"
+                                    plain
+                                    size="small"
+                                    @click="openBackupAccounts(row)"
+                                >
+                                    +{{ row.sourceAccounts.length - 1 }}
+                                </el-button>
                             </div>
                         </template>
                     </el-table-column>
@@ -183,9 +229,10 @@
                         :buttons="buttons"
                         :ellipsis="2"
                         :label="$t('commons.table.operate')"
-                        min-width="mobile ? 'auto' : 200"
-                        :fixed="mobile ? false : 'right'"
+                        :min-width="isMobile ? 'auto' : 200"
+                        :fixed="isMobile ? false : 'right'"
                         fix
+                        card-type="button"
                     />
                 </ComplexTable>
             </template>
@@ -213,6 +260,12 @@
         <Records @search="search" ref="dialogRecordRef" />
         <Import @search="search" ref="dialogImportRef" />
         <Backups @search="search" ref="dialogBackupRef" />
+        <el-dialog v-model="backupAccountsVisible" :title="$t('setting.backupAccount')" width="400px">
+            <div v-for="account in backupAccounts" :key="account" class="mb-2">
+                {{ account === 'localhost' ? $t('setting.LOCAL') : account }}
+                <el-icon v-if="account === downloadAccount" size="12" class="relative top-px left-1"><Star /></el-icon>
+            </div>
+        </el-dialog>
     </div>
 </template>
 
@@ -220,7 +273,7 @@
 import Records from '@/views/cronjob/cronjob/record/index.vue';
 import Backups from '@/views/cronjob/cronjob/backup/index.vue';
 import Import from '@/views/cronjob/cronjob/import/index.vue';
-import { computed, onMounted, reactive, ref } from 'vue';
+import { onMounted, ref, toRefs } from 'vue';
 import {
     deleteCronjob,
     editCronjobGroup,
@@ -235,17 +288,18 @@ import GroupDialog from '@/components/group/index.vue';
 import { ElMessageBox } from 'element-plus';
 import { MsgSuccess } from '@/utils/message';
 import { hasBackup, transSpecToStr } from './helper';
-import { GlobalStore } from '@/store';
-import { getCurrentDateFormatted } from '@/utils/util';
+import { getCurrentDateFormatted } from '@/utils/date';
 import { getGroupList } from '@/api/modules/group';
 import { routerToNameWithQuery } from '@/utils/router';
+import { useGlobalStore } from '@/composables/useGlobalStore';
+import { useOperateNodeContext } from '@/composables/useOperateNodeContext';
+import { usePageState } from '@/composables/usePageState';
 
-const globalStore = GlobalStore();
-const mobile = computed(() => {
-    return globalStore.isMobile();
-});
+const { currentNode, isMobile } = useGlobalStore();
+useOperateNodeContext(currentNode);
 
 const loading = ref();
+const viewMode = ref<'table' | 'card'>('table');
 const selects = ref<any>([]);
 const isRecordShow = ref();
 const operateIDs = ref();
@@ -258,24 +312,29 @@ const opExportRef = ref();
 const dialogImportRef = ref();
 
 const data = ref();
-const paginationConfig = reactive({
-    cacheSizeKey: 'cronjob-page-size',
-    currentPage: 1,
-    pageSize: Number(localStorage.getItem('cronjob-page-size')) || 20,
-    total: 0,
-    orderBy: 'createdAt',
-    order: 'null',
-});
-const searchName = ref();
-
-const defaultGroupID = ref<number>();
-const searchGroupID = ref<number>();
 const groupOptions = ref();
 const dialogGroupRef = ref();
+const pageState = usePageState(() => ({
+    paginationConfig: {
+        cacheSizeKey: 'cronjob-page-size',
+        currentPage: 1,
+        pageSize: Number(localStorage.getItem('cronjob-page-size')) || 20,
+        total: 0,
+        orderBy: 'createdAt',
+        order: 'null',
+    },
+    defaultGroupID: undefined as number | undefined,
+    searchName: undefined as string | undefined,
+    searchGroupID: undefined as number | undefined,
+}));
+const paginationConfig = pageState.paginationConfig;
+const { defaultGroupID, searchName, searchGroupID } = toRefs(pageState);
 
 const search = async (column?: any) => {
-    paginationConfig.orderBy = column?.order ? column.prop : paginationConfig.orderBy;
-    paginationConfig.order = column?.order ? column.order : paginationConfig.order;
+    if (column) {
+        paginationConfig.orderBy = column.order ? column.prop : 'createdAt';
+        paginationConfig.order = column.order || 'null';
+    }
     let groupIDs;
     if (searchGroupID.value) {
         groupIDs = searchGroupID.value === defaultGroupID.value ? [searchGroupID.value, 0] : [searchGroupID.value];
@@ -303,6 +362,9 @@ const search = async (column?: any) => {
 
 const dialogRecordRef = ref();
 const dialogBackupRef = ref();
+const backupAccountsVisible = ref(false);
+const backupAccounts = ref<string[]>([]);
+const downloadAccount = ref('');
 
 const onOpenDialog = async (id: string) => {
     routerToNameWithQuery('CronjobOperate', { id: id });
@@ -403,6 +465,11 @@ const onSubmitExport = async () => {
 const loadGroups = async () => {
     const res = await getGroupList('cronjob');
     groupOptions.value = res.data || [];
+    const invalidGroup = searchGroupID.value && !groupOptions.value.some((group) => group.id === searchGroupID.value);
+    if (invalidGroup) {
+        searchGroupID.value = undefined;
+        paginationConfig.currentPage = 1;
+    }
     for (const group of groupOptions.value) {
         if (group.name === 'Default') {
             defaultGroupID.value = group.id;
@@ -426,6 +493,9 @@ const loadGroups = async () => {
             item.groupID = null;
             item.groupBelong = '-';
         }
+    }
+    if (invalidGroup) {
+        search();
     }
 };
 
@@ -469,6 +539,12 @@ const loadBackups = async (row: any) => {
     dialogBackupRef.value!.acceptParams({ cronjobID: row.id, cronjob: row.name });
 };
 
+const openBackupAccounts = (row: Cronjob.CronjobInfo) => {
+    backupAccounts.value = row.sourceAccounts || [];
+    downloadAccount.value = row.downloadAccount;
+    backupAccountsVisible.value = true;
+};
+
 const onHandle = async (row: Cronjob.CronjobInfo) => {
     loading.value = true;
     await handleOnce(row.id)
@@ -493,6 +569,8 @@ const loadDetail = (row: any) => {
 const buttons = [
     {
         label: i18n.global.t('commons.button.handle'),
+        permission: true,
+        nodeAdmin: true,
         click: (row: Cronjob.CronjobInfo) => {
             onHandle(row);
         },
@@ -508,12 +586,16 @@ const buttons = [
     },
     {
         label: i18n.global.t('commons.button.edit'),
+        permission: true,
+        nodeAdmin: true,
         click: (row: Cronjob.CronjobInfo) => {
             onOpenDialog(row.id + '');
         },
     },
     {
         label: i18n.global.t('commons.button.delete'),
+        permission: true,
+        nodeAdmin: true,
         click: (row: Cronjob.CronjobInfo) => {
             onDelete(row);
         },

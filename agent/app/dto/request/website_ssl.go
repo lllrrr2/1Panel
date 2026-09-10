@@ -6,7 +6,7 @@ type WebsiteSSLSearch struct {
 	dto.PageInfo
 	AcmeAccountID string `json:"acmeAccountID"`
 	Domain        string `json:"domain"`
-	OrderBy       string `json:"orderBy" validate:"omitempty,oneof=created_at expire_date"`
+	OrderBy       string `json:"orderBy" validate:"omitempty,oneof=created_at updated_at expire_date"`
 	Order         string `json:"order" validate:"omitempty,oneof=null ascending descending"`
 }
 
@@ -51,7 +51,6 @@ type WebsiteSSLApply struct {
 	ID           uint     `json:"ID" validate:"required"`
 	SkipDNSCheck bool     `json:"skipDNSCheck"`
 	Nameservers  []string `json:"nameservers"`
-	DisableLog   bool     `json:"disableLog"`
 }
 
 type WebsiteSSLObtain struct {
@@ -62,7 +61,7 @@ type WebsiteSSLObtain struct {
 type WebsiteAcmeAccountCreate struct {
 	Email      string `json:"email" validate:"required"`
 	Type       string `json:"type" validate:"required,oneof=letsencrypt zerossl buypass google custom"`
-	KeyType    string `json:"keyType" validate:"required,oneof=P256 P384 2048 3072 4096 8192"`
+	KeyType    string `json:"keyType" validate:"required,oneof=EC256 EC384 RSA2048 RSA3072 RSA4096 RSA8192"`
 	EabKid     string `json:"eabKid"`
 	EabHmacKey string `json:"eabHmacKey"`
 	UseProxy   bool   `json:"useProxy"`
@@ -127,6 +126,16 @@ type WebsiteSSLUpload struct {
 	Type            string `json:"type" validate:"required,oneof=paste local"`
 	SSLID           uint   `json:"sslID"`
 	Description     string `json:"description"`
+	PushNode        bool   `json:"pushNode"`
+	Nodes           string `json:"nodes"`
+}
+
+type WebsiteSSLPush struct {
+	ID       uint   `json:"id" validate:"required"`
+	PushNode bool   `json:"pushNode"`
+	Nodes    string `json:"nodes"`
+	TaskID   string `json:"taskID" validate:"required"`
+	Sync     bool   `json:"sync"`
 }
 
 type WebsiteCASearch struct {
@@ -139,7 +148,7 @@ type WebsiteCACreate struct {
 	Organization     string `json:"organization" validate:"required"`
 	OrganizationUint string `json:"organizationUint"`
 	Name             string `json:"name" validate:"required"`
-	KeyType          string `json:"keyType" validate:"required,oneof=P256 P384 2048 3072 4096 8192"`
+	KeyType          string `json:"keyType" validate:"required,oneof=EC256 EC384 RSA2048 RSA3072 RSA4096 RSA8192"`
 	Province         string `json:"province" `
 	City             string `json:"city"`
 }
@@ -147,7 +156,7 @@ type WebsiteCACreate struct {
 type WebsiteCAObtain struct {
 	ID          uint   `json:"id" validate:"required"`
 	Domains     string `json:"domains" validate:"required"`
-	KeyType     string `json:"keyType" validate:"required,oneof=P256 P384 2048 3072 4096 8192"`
+	KeyType     string `json:"keyType" validate:"required,oneof=EC256 EC384 RSA2048 RSA3072 RSA4096 RSA8192"`
 	Time        int    `json:"time" validate:"required"`
 	Unit        string `json:"unit" validate:"required"`
 	PushDir     bool   `json:"pushDir"`
@@ -158,6 +167,8 @@ type WebsiteCAObtain struct {
 	Description string `json:"description"`
 	ExecShell   bool   `json:"execShell"`
 	Shell       string `json:"shell"`
+	PushNode    bool   `json:"pushNode"`
+	Nodes       string `json:"nodes"`
 }
 
 type WebsiteCARenew struct {
@@ -168,4 +179,6 @@ type WebsiteSSLFileUpload struct {
 	Type        string `json:"type"`
 	Description string `json:"description"`
 	SSLID       uint64 `json:"sslID"`
+	PushNode    bool   `json:"pushNode"`
+	Nodes       string `json:"nodes"`
 }

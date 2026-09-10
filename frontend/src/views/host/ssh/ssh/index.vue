@@ -10,14 +10,28 @@
                         <Status class="mt-0.5" :status="form.isActive ? 'enable' : 'disable'" :msg="form.message" />
                     </div>
                     <div class="mt-0.5">
-                        <el-button v-if="form.isActive" type="primary" @click="onOperate('stop')" link>
+                        <el-button
+                            v-if="form.isActive"
+                            type="primary"
+                            v-permission
+                            v-node-admin
+                            @click="onOperate('stop')"
+                            link
+                        >
                             {{ $t('commons.button.stop') }}
                         </el-button>
-                        <el-button v-if="!form.isActive" type="primary" @click="onOperate('start')" link>
+                        <el-button
+                            v-if="!form.isActive"
+                            type="primary"
+                            v-permission
+                            v-node-admin
+                            @click="onOperate('start')"
+                            link
+                        >
                             {{ $t('commons.button.start') }}
                         </el-button>
                         <el-divider direction="vertical" />
-                        <el-button type="primary" @click="onOperate('restart')" link>
+                        <el-button v-permission v-node-admin type="primary" @click="onOperate('restart')" link>
                             {{ $t('commons.button.restart') }}
                         </el-button>
                         <el-divider direction="vertical" />
@@ -25,6 +39,8 @@
                             {{ $t('ssh.autoStart') }}
                         </el-button>
                         <el-switch
+                            v-permission
+                            v-node-admin
                             size="small"
                             class="ml-2"
                             inactive-value="disable"
@@ -44,17 +60,17 @@
                     <el-radio-button value="all">{{ $t('database.allConf') }}</el-radio-button>
                 </el-radio-group>
 
-                <el-button @click="onOpenDrawer">{{ $t('ssh.pubkey') }}</el-button>
-                <el-button @click="onOpenAuthKeys">{{ $t('ssh.authKeys') }}</el-button>
+                <el-button v-permission v-node-admin @click="onOpenDrawer">{{ $t('ssh.pubkey') }}</el-button>
+                <el-button v-permission v-node-admin @click="onOpenAuthKeys">{{ $t('ssh.authKeys') }}</el-button>
             </template>
             <template #main>
                 <el-row class="mt-10" v-if="confShowType === 'base'">
                     <el-col :xs="24" :sm="20" :md="20" :lg="10" :xl="10">
-                        <el-form :model="form" label-position="right" ref="formRef" label-width="100px">
+                        <el-form :model="form" label-position="right" ref="formRef" label-width="120px">
                             <el-form-item :label="$t('ssh.port')" prop="port">
-                                <el-input disabled v-model.number="form.port">
+                                <el-input disabled v-model="form.port">
                                     <template #append>
-                                        <el-button @click="onChangePort" icon="Setting">
+                                        <el-button v-permission v-node-admin @click="onChangePort" icon="Setting">
                                             {{ $t('commons.button.set') }}
                                         </el-button>
                                     </template>
@@ -64,7 +80,7 @@
                             <el-form-item :label="$t('ssh.listenAddress')" prop="listenAddress">
                                 <el-input disabled v-model="form.listenAddressItem">
                                     <template #append>
-                                        <el-button @click="onChangeAddress" icon="Setting">
+                                        <el-button v-permission v-node-admin @click="onChangeAddress" icon="Setting">
                                             {{ $t('commons.button.set') }}
                                         </el-button>
                                     </template>
@@ -74,7 +90,7 @@
                             <el-form-item :label="$t('ssh.permitRootLogin')" prop="permitRootLoginItem">
                                 <el-input disabled v-model="form.permitRootLoginItem">
                                     <template #append>
-                                        <el-button @click="onChangeRoot" icon="Setting">
+                                        <el-button v-permission v-node-admin @click="onChangeRoot" icon="Setting">
                                             {{ $t('commons.button.set') }}
                                         </el-button>
                                     </template>
@@ -83,6 +99,8 @@
                             </el-form-item>
                             <el-form-item :label="$t('ssh.passwordAuthentication')" prop="passwordAuthentication">
                                 <el-switch
+                                    v-permission
+                                    v-node-admin
                                     active-value="yes"
                                     inactive-value="no"
                                     @change="onSave(formRef, 'PasswordAuthentication', form.passwordAuthentication)"
@@ -92,6 +110,8 @@
                             </el-form-item>
                             <el-form-item :label="$t('ssh.pubkeyAuthentication')" prop="pubkeyAuthentication">
                                 <el-switch
+                                    v-permission
+                                    v-node-admin
                                     active-value="yes"
                                     inactive-value="no"
                                     @change="onSave(formRef, 'PubkeyAuthentication', form.pubkeyAuthentication)"
@@ -101,6 +121,8 @@
                             </el-form-item>
                             <el-form-item :label="$t('ssh.useDNS')" prop="useDNS">
                                 <el-switch
+                                    v-permission
+                                    v-node-admin
                                     active-value="yes"
                                     inactive-value="no"
                                     @change="onSave(formRef, 'UseDNS', form.useDNS)"
@@ -113,15 +135,31 @@
                 </el-row>
 
                 <div v-if="confShowType === 'all'">
+                    <el-alert type="info" :closable="false" :title="$t('ssh.confFileOrderHelper')" />
+                    <el-select v-model="allConfMode" class="mt-2 mini-form-item" @change="changeAllConfMode">
+                        <el-option
+                            v-for="item in sshConfOptions"
+                            :key="item.value"
+                            :value="item.value"
+                            :label="item.label"
+                        ></el-option>
+                    </el-select>
                     <CodemirrorPro
-                        :heightDiff="320"
+                        :heightDiff="459"
                         :minHeight="350"
                         class="mt-5"
-                        v-model="sshConf"
+                        v-model="allConfContent"
                         mode="nginx"
                         placeholder="# The SSH configuration file does not exist or is empty (/etc/ssh/sshd_config)"
                     ></CodemirrorPro>
-                    <el-button :disabled="loading" type="primary" @click="onSaveFile" class="mt-2.5">
+                    <el-button
+                        v-permission
+                        v-node-admin
+                        :disabled="loading"
+                        type="primary"
+                        @click="onSaveFile"
+                        class="mt-2.5"
+                    >
                         {{ $t('commons.button.save') }}
                     </el-button>
                 </div>
@@ -137,7 +175,7 @@
 </template>
 
 <script lang="ts" setup>
-import { onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 import FireRouter from '@/views/host/ssh/index.vue';
 import AuthKeys from '@/views/host/ssh/ssh/auth-keys/index.vue';
 import Cert from '@/views/host/ssh/ssh/certification/index.vue';
@@ -160,12 +198,20 @@ const rootsRef = ref();
 const authKeyRef = ref();
 
 const autoStart = ref('enable');
+const allConfMode = ref('');
 
-const sshConf = ref();
+const sshConfPath = ref('');
+const sshConfOptions = ref<Array<{ value: string; label: string }>>([]);
+const allConfContent = computed({
+    get: () => sshConfPath.value,
+    set: (value: string) => {
+        sshConfPath.value = value;
+    },
+});
 const form = reactive({
     isActive: false,
     message: '',
-    port: 22,
+    port: '22',
     listenAddress: '',
     listenAddressItem: '',
     passwordAuthentication: 'yes',
@@ -185,7 +231,11 @@ const onSaveFile = async () => {
         type: 'info',
     }).then(async () => {
         loading.value = true;
-        await updateSSHByFile('sshdConf', sshConf.value)
+        if (!allConfMode.value) {
+            loading.value = false;
+            return;
+        }
+        await updateSSHByFile('sshdConfPath', sshConfPath.value, allConfMode.value)
             .then(() => {
                 loading.value = false;
                 MsgSuccess(i18n.global.t('commons.msg.operationSuccess'));
@@ -210,7 +260,7 @@ const onChangeRoot = () => {
     rootsRef.value.acceptParams({ permitRootLogin: form.permitRootLogin });
 };
 const onChangeAddress = () => {
-    addressRef.value.acceptParams({ address: form.listenAddress, port: form.port });
+    addressRef.value.acceptParams({ address: form.listenAddress, port: loadPrimarySSHPort(form.port) });
 };
 
 const onOperate = async (operation: string) => {
@@ -258,7 +308,6 @@ const onSave = async (formEl: FormInstance | undefined, key: string, value: stri
         .then(async () => {
             let params = {
                 key: key,
-                oldValue: '',
                 newValue: value,
             };
             loading.value = true;
@@ -295,8 +344,27 @@ const changeI18n = (value: string) => {
 };
 
 const loadSSHConf = async () => {
-    const res = await loadSSHFile('sshdConf');
-    sshConf.value = res.data || '';
+    const optionsRes = await loadSSHFile('sshdConfOptions');
+    let options: Array<{ path: string; priority: number }> = [];
+    try {
+        options = JSON.parse(optionsRes.data || '[]');
+    } catch {
+        options = [];
+    }
+    const fileOptions = options.map((item) => ({
+        value: item.path,
+        label: i18n.global.t('ssh.confFileOrderLabel', [item.path, item.priority]),
+    }));
+    sshConfOptions.value = fileOptions;
+    if (!fileOptions.find((item) => item.value === allConfMode.value)) {
+        allConfMode.value = fileOptions.length > 0 ? fileOptions[0].value : '';
+    }
+    if (allConfMode.value) {
+        const fileRes = await loadSSHFile(`sshdConfPath:${allConfMode.value}`);
+        sshConfPath.value = fileRes.data || '';
+    } else {
+        sshConfPath.value = '';
+    }
 };
 
 const changeMode = async () => {
@@ -310,7 +378,7 @@ const changeMode = async () => {
 const search = async () => {
     const res = await getSSHInfo();
     form.isActive = res.data.isActive;
-    form.port = Number(res.data.port);
+    form.port = res.data.port || '22';
     autoStart.value = res.data.autoStart ? 'enable' : 'disable';
     form.listenAddress = res.data.listenAddress;
     form.listenAddressItem =
@@ -325,6 +393,15 @@ const search = async () => {
     form.currentUser = res.data.currentUser;
 };
 
+const changeAllConfMode = async () => {
+    if (allConfMode.value) {
+        const res = await loadSSHFile(`sshdConfPath:${allConfMode.value}`);
+        sshConfPath.value = res.data || '';
+    } else {
+        sshConfPath.value = '';
+    }
+};
+
 const loadPermitLabel = (value: string) => {
     switch (value) {
         case 'yes':
@@ -336,6 +413,12 @@ const loadPermitLabel = (value: string) => {
         case 'forced-commands-only':
             return i18n.global.t('ssh.rootHelper4');
     }
+};
+
+const loadPrimarySSHPort = (port: string) => {
+    const firstPort = port.split(',')[0] || '22';
+    const portNumber = Number(firstPort);
+    return Number.isNaN(portNumber) ? 22 : portNumber;
 };
 
 onMounted(() => {

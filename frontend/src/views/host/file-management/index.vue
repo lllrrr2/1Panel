@@ -1,5 +1,12 @@
 <template>
-    <div class="h-full" ref="fileTableRef" @dragover="handleDragover" @drop="handleDrop" @dragleave="handleDragleave">
+    <div
+        class="file-management-page h-full"
+        :class="{ 'is-drag-over': isDragOver }"
+        ref="fileTableRef"
+        @dragover="handleDragover"
+        @drop="handleDrop"
+        @dragleave="handleDragleave"
+    >
         <el-tabs
             type="card"
             class="file-tabs"
@@ -14,8 +21,8 @@
                 :label="item.name == '' ? $t('file.root') : item.name"
                 :name="item.id"
             >
-                <div class="flex sm:flex-row flex-col justify-start gap-y-2 items-center gap-x-4" ref="toolRef">
-                    <div class="flex-shrink-0 flex sm:w-min w-full items-center justify-start">
+                <div class="flex flex-wrap items-center gap-3 pb-3 pt-0.5" ref="toolRef">
+                    <div class="flex shrink-0 items-center gap-1.5 file-navigation__actions">
                         <el-tooltip :content="$t('file.back')" placement="top">
                             <el-button icon="Back" @click="back" circle />
                         </el-tooltip>
@@ -41,31 +48,32 @@
                             />
                         </el-tooltip>
                     </div>
-                    <div class="flex-1 sm:w-min w-full hidden sm:block" :ref="(el) => setPathRef(item.id, el)">
-                        <div
-                            v-show="!searchableStatus"
-                            @click="searchableStatus = true"
-                            class="address-bar shadow-md rounded-md px-4 py-2 flex items-center flex-grow"
-                        >
+                    <div class="min-w-0 flex-1 hidden sm:block" :ref="(el) => setPathRef(item.id, el)">
+                        <div v-show="!searchableStatus" @click="searchableStatus = true" class="address-bar">
                             <div ref="breadCrumbRef" class="flex items-center address-url">
-                                <span class="root mr-2">
+                                <span class="breadcrumb-root">
                                     <el-link @click.stop="jump('/')">
                                         <el-icon :size="20"><HomeFilled /></el-icon>
                                     </el-link>
                                 </span>
-                                <span v-for="(path, index) in paths" :key="path.url" class="inline-flex items-center">
-                                    <span class="mr-2 arrow">></span>
-                                    <template v-if="index === 0 && hidePaths.length > 0">
+                                <span
+                                    v-for="(path, index) in breadcrumbVisiblePaths"
+                                    :key="path.url"
+                                    class="breadcrumb-item inline-flex min-w-0 items-center"
+                                >
+                                    <span class="arrow">></span>
+                                    <template v-if="index === 1 && breadcrumbHiddenPaths.length > 0">
                                         <el-dropdown>
                                             <span
-                                                class="path-segment cursor-pointer mr-2 pathname focus:outline-none focus-visible:outline-none"
+                                                class="path-segment path-segment--overflow cursor-pointer pathname focus:outline-none focus-visible:outline-none"
+                                                @click.stop
                                             >
                                                 ..
                                             </span>
                                             <template #dropdown>
                                                 <el-dropdown-menu>
                                                     <el-dropdown-item
-                                                        v-for="hidePath in hidePaths"
+                                                        v-for="hidePath in breadcrumbHiddenPaths"
                                                         :key="hidePath.url"
                                                         @click.stop="jump(hidePath.url)"
                                                     >
@@ -85,7 +93,7 @@
                                                 </el-dropdown-menu>
                                             </template>
                                         </el-dropdown>
-                                        <span class="mr-2 arrow">></span>
+                                        <span class="arrow">></span>
                                         <el-tooltip
                                             class="box-item"
                                             effect="dark"
@@ -93,14 +101,10 @@
                                             placement="bottom"
                                         >
                                             <el-link
-                                                class="path-segment cursor-pointer mr-2 pathname"
+                                                class="path-segment cursor-pointer pathname"
                                                 @click.stop="jump(path.url)"
                                             >
-                                                {{
-                                                    path.name.length > 25
-                                                        ? path.name.substring(0, 22) + '...'
-                                                        : path.name
-                                                }}
+                                                {{ formatBreadcrumbName(path, index) }}
                                             </el-link>
                                         </el-tooltip>
                                     </template>
@@ -112,14 +116,10 @@
                                             placement="bottom"
                                         >
                                             <el-link
-                                                class="path-segment cursor-pointer mr-2 pathname"
+                                                class="path-segment cursor-pointer pathname"
                                                 @click.stop="jump(path.url)"
                                             >
-                                                {{
-                                                    path.name.length > 25
-                                                        ? path.name.substring(0, 22) + '...'
-                                                        : path.name
-                                                }}
+                                                {{ formatBreadcrumbName(path, index) }}
                                             </el-link>
                                         </el-tooltip>
                                     </template>
@@ -131,34 +131,39 @@
                             v-show="searchableStatus"
                             v-model="searchablePath"
                             @blur="searchableInputBlur"
-                            class="px-4 py-2 border rounded-md shadow-md"
+                            class="address-input"
                             @keyup.enter="
                                 jump(searchablePath);
                                 searchableStatus = false;
                             "
                         />
                     </div>
-                    <div class="flex-1 sm:w-min w-full sm:hidden block">
-                        <div class="address-bar shadow-md rounded-md px-4 py-2 flex items-center flex-grow">
+                    <div class="min-w-0 flex-1 sm:hidden block">
+                        <div class="address-bar">
                             <div class="flex items-center address-url">
-                                <span class="root mr-2">
+                                <span class="breadcrumb-root">
                                     <el-link @click.stop="jump('/')">
                                         <el-icon :size="20"><HomeFilled /></el-icon>
                                     </el-link>
                                 </span>
-                                <span v-for="(path, index) in paths" :key="path.url" class="inline-flex items-center">
-                                    <span class="mr-2 arrow">></span>
-                                    <template v-if="index === 0 && hidePaths.length > 0">
+                                <span
+                                    v-for="(path, index) in breadcrumbVisiblePaths"
+                                    :key="path.url"
+                                    class="breadcrumb-item inline-flex min-w-0 items-center"
+                                >
+                                    <span class="arrow">></span>
+                                    <template v-if="index === 1 && breadcrumbHiddenPaths.length > 0">
                                         <el-dropdown>
                                             <span
-                                                class="path-segment cursor-pointer mr-2 pathname focus:outline-none focus-visible:outline-none"
+                                                class="path-segment path-segment--overflow cursor-pointer pathname focus:outline-none focus-visible:outline-none"
+                                                @click.stop
                                             >
                                                 ..
                                             </span>
                                             <template #dropdown>
                                                 <el-dropdown-menu>
                                                     <el-dropdown-item
-                                                        v-for="hidePath in hidePaths"
+                                                        v-for="hidePath in breadcrumbHiddenPaths"
                                                         :key="hidePath.url"
                                                         @click.stop="jump(hidePath.url)"
                                                     >
@@ -180,7 +185,7 @@
                                         </el-dropdown>
                                     </template>
                                     <template v-else>
-                                        <span class="mr-2 arrow">></span>
+                                        <span class="arrow">></span>
                                         <el-tooltip
                                             class="box-item"
                                             effect="dark"
@@ -188,14 +193,10 @@
                                             placement="bottom"
                                         >
                                             <el-link
-                                                class="path-segment cursor-pointer mr-2 pathname"
+                                                class="path-segment cursor-pointer pathname"
                                                 @click.stop="jump(path.url)"
                                             >
-                                                {{
-                                                    path.name.length > 25
-                                                        ? path.name.substring(0, 22) + '...'
-                                                        : path.name
-                                                }}
+                                                {{ formatBreadcrumbName(path, index) }}
                                             </el-link>
                                         </el-tooltip>
                                     </template>
@@ -203,8 +204,37 @@
                             </div>
                         </div>
                     </div>
+                    <div class="flex w-full flex-wrap items-center justify-start gap-2 xl:w-auto xl:flex-nowrap">
+                        <div class="file-search-input-shell w-full min-w-0">
+                            <el-input
+                                v-model="req.search"
+                                @clear="search()"
+                                @keydown.enter="search()"
+                                :placeholder="$t('file.search')"
+                            >
+                                <template #prepend>
+                                    <el-checkbox v-model="req.containSub">
+                                        {{ $t('file.sub') }}
+                                    </el-checkbox>
+                                </template>
+                                <template #append>
+                                    <el-button icon="Search" @click="search" round />
+                                </template>
+                            </el-input>
+                        </div>
+                        <el-button
+                            v-permission
+                            v-node-admin
+                            class="max-w-20"
+                            plain
+                            type="primary"
+                            @click="openAiSearchDrawer"
+                        >
+                            {{ $t('file.aiSearch') }}
+                        </el-button>
+                    </div>
                 </div>
-                <LayoutContent :title="$t('menu.files')" v-loading="loading">
+                <LayoutContent class="file-layout" :title="$t('menu.files')" v-loading="loading">
                     <template #prompt>
                         <el-alert type="info" :closable="false">
                             <template #title>
@@ -215,48 +245,48 @@
                         </el-alert>
                     </template>
                     <template #leftToolBar>
-                        <div ref="leftWrapper" class="flex items-center gap-2 flex-wrap">
-                            <el-dropdown @command="handleCreate" class="mr-2.5">
+                        <div class="flex max-w-full flex-wrap items-center gap-2">
+                            <el-dropdown @command="handleCreate">
                                 <el-button type="primary">
                                     {{ $t('commons.button.create') }}
                                     <el-icon><arrow-down /></el-icon>
                                 </el-button>
                                 <template #dropdown>
                                     <el-dropdown-menu>
-                                        <el-dropdown-item command="dir">
+                                        <fu-dropdown-item v-permission v-node-admin command="dir">
                                             <svg-icon iconName="p-file-folder"></svg-icon>
                                             {{ $t('file.dir') }}
-                                        </el-dropdown-item>
-                                        <el-dropdown-item command="file">
+                                        </fu-dropdown-item>
+                                        <fu-dropdown-item v-permission v-node-admin command="file">
                                             <svg-icon iconName="p-file-normal"></svg-icon>
                                             {{ $t('menu.files') }}
-                                        </el-dropdown-item>
+                                        </fu-dropdown-item>
                                     </el-dropdown-menu>
                                 </template>
                             </el-dropdown>
-                            <el-dropdown class="mr-2.5">
+                            <el-dropdown>
                                 <el-button>
                                     {{ $t('commons.button.upload') }}/{{ $t('commons.button.download') }}
                                     <el-icon><arrow-down /></el-icon>
                                 </el-button>
                                 <template #dropdown>
                                     <el-dropdown-menu>
-                                        <el-dropdown-item @click="openUpload">
+                                        <fu-dropdown-item v-permission v-node-admin @click="openUpload">
                                             <el-icon><ElUpload /></el-icon>
                                             {{ $t('commons.button.upload') }}
-                                        </el-dropdown-item>
-                                        <el-dropdown-item @click="openWget">
+                                        </fu-dropdown-item>
+                                        <fu-dropdown-item v-permission v-node-admin @click="openWget">
                                             <el-icon><ElDownload /></el-icon>
                                             {{ $t('file.remoteFile') }}
-                                        </el-dropdown-item>
+                                        </fu-dropdown-item>
                                     </el-dropdown-menu>
                                 </template>
                             </el-dropdown>
-                            <el-button-group class="sm:!inline-block !flex flex-wrap gap-y-2">
+                            <el-button-group class="file-utility-group">
                                 <el-button class="btn" @click="openRecycleBin">
                                     {{ $t('file.recycleBin') }}
                                 </el-button>
-                                <el-button class="btn" @click="toTerminal">
+                                <el-button class="btn" @click="toTerminal" :disabled="!isAdminOrNodeAdmin">
                                     {{ $t('menu.terminal') }}
                                 </el-button>
                                 <el-popover
@@ -279,7 +309,7 @@
                                                             class="box-item"
                                                             effect="dark"
                                                             :content="row.path"
-                                                            placement="top"
+                                                            placement="left"
                                                         >
                                                             <span
                                                                 class="table-link text-ellipsis"
@@ -312,6 +342,29 @@
                                         </el-table>
                                     </div>
                                 </el-popover>
+
+                                <el-button class="file-tool">
+                                    <el-dropdown>
+                                        <template #default>
+                                            <el-button
+                                                link
+                                                class="!w-full !h-full p-2 focus-visible:!outline-none cursor-pointer transition-colors"
+                                            >
+                                                {{ $t('file.fileTools') }}
+                                            </el-button>
+                                        </template>
+                                        <template #dropdown>
+                                            <el-dropdown-menu>
+                                                <fu-dropdown-item @click="openShareList">
+                                                    {{ $t('file.shareList') }}
+                                                </fu-dropdown-item>
+                                                <fu-dropdown-item @click="openFileHistoryCenter">
+                                                    {{ $t('file.history') }}
+                                                </fu-dropdown-item>
+                                            </el-dropdown-menu>
+                                        </template>
+                                    </el-dropdown>
+                                </el-button>
                                 <el-button class="btn" @click="calculateSize(req.path)" :loading="disableBtn">
                                     {{ $t('file.calculate') }}
                                 </el-button>
@@ -322,7 +375,7 @@
                                     </el-button>
                                 </template>
                                 <template v-else>
-                                    <el-dropdown class="mr-2.5">
+                                    <el-dropdown>
                                         <el-button class="btn">
                                             {{ hostMount[0]?.path }} ({{ $t('file.root') }})
                                             {{ formatFileSize(hostMount[0]?.free) }}
@@ -353,99 +406,106 @@
                         </div>
                     </template>
                     <template #rightToolBar>
-                        <div :ref="(el) => setBtnWrapperRef(item.id, el)" class="flex items-center gap-2 flex-wrap">
-                            <div class="flex items-center gap-2 flex-wrap">
+                        <div
+                            :ref="(el) => setBtnWrapperRef(item.id, el)"
+                            :class="[
+                                'file-batch-toolbar flex max-w-full flex-nowrap items-center gap-2',
+                                isRightToolbarWrapped ? 'is-toolbar-wrapped w-full justify-start' : 'justify-end',
+                            ]"
+                        >
+                            <div class="flex min-w-0 flex-nowrap items-center gap-2">
+                                <el-button-group class="copy-button" v-if="moveOpen">
+                                    <el-tooltip
+                                        class="box-item"
+                                        effect="dark"
+                                        :content="$t('file.paste')"
+                                        placement="bottom"
+                                    >
+                                        <el-button plain @click="openPaste">
+                                            {{ $t('file.paste') }}({{ fileMove.count }})
+                                        </el-button>
+                                    </el-tooltip>
+                                    <el-tooltip
+                                        class="box-item"
+                                        effect="dark"
+                                        :content="$t('commons.button.cancel')"
+                                        placement="bottom"
+                                    >
+                                        <el-button plain class="close" icon="Close" @click="closeMove"></el-button>
+                                    </el-tooltip>
+                                </el-button-group>
                                 <template v-if="visibleButtons.length == 0">
                                     <el-dropdown v-if="moreButtons.length">
                                         <el-button>
                                             {{ $t('tabs.more') }}
-                                            <i class="el-icon-arrow-down el-icon--right" />
+                                            <el-icon><arrow-down /></el-icon>
                                         </el-button>
                                         <template #dropdown>
                                             <el-dropdown-menu>
-                                                <el-dropdown-item
+                                                <fu-dropdown-item
+                                                    v-permission
+                                                    v-node-admin
                                                     v-for="btn in moreButtons"
                                                     :key="btn.label"
                                                     @click="btn.action"
                                                     :disabled="selects.length === 0"
                                                 >
                                                     {{ $t(btn.label) }}
-                                                </el-dropdown-item>
+                                                </fu-dropdown-item>
                                             </el-dropdown-menu>
                                         </template>
                                     </el-dropdown>
                                 </template>
                                 <template v-if="visibleButtons.length > 0">
-                                    <el-button-group class="flex items-center">
+                                    <el-button-group class="flex max-w-full flex-nowrap items-center">
                                         <template v-for="btn in visibleButtons" :key="btn.label">
-                                            <el-button plain @click="btn.action" :disabled="selects.length === 0">
+                                            <el-button
+                                                v-permission
+                                                v-node-admin
+                                                plain
+                                                @click="btn.action"
+                                                :disabled="selects.length === 0"
+                                            >
                                                 {{ $t(btn.label) }}
                                             </el-button>
                                         </template>
-
                                         <el-dropdown v-if="moreButtons.length">
                                             <el-button>
                                                 {{ $t('tabs.more') }}
-                                                <i class="el-icon-arrow-down el-icon--right" />
+                                                <el-icon><arrow-down /></el-icon>
                                             </el-button>
                                             <template #dropdown>
                                                 <el-dropdown-menu>
-                                                    <el-dropdown-item
+                                                    <fu-dropdown-item
+                                                        v-permission
+                                                        v-node-admin
                                                         v-for="btn in moreButtons"
                                                         :key="btn.label"
                                                         @click="btn.action"
                                                         :disabled="selects.length === 0"
                                                     >
                                                         {{ $t(btn.label) }}
-                                                    </el-dropdown-item>
+                                                    </fu-dropdown-item>
                                                 </el-dropdown-menu>
                                             </template>
                                         </el-dropdown>
                                     </el-button-group>
                                 </template>
                             </div>
-                            <el-button-group class="copy-button" v-if="moveOpen">
-                                <el-tooltip
-                                    class="box-item"
-                                    effect="dark"
-                                    :content="$t('file.paste')"
-                                    placement="bottom"
-                                >
-                                    <el-button plain @click="openPaste">
-                                        {{ $t('file.paste') }}({{ fileMove.count }})
-                                    </el-button>
-                                </el-tooltip>
-                                <el-tooltip
-                                    class="box-item"
-                                    effect="dark"
-                                    :content="$t('commons.button.cancel')"
-                                    placement="bottom"
-                                >
-                                    <el-button plain class="close" icon="Close" @click="closeMove"></el-button>
-                                </el-tooltip>
-                            </el-button-group>
-                            <div class="w-80">
-                                <el-input
-                                    v-model="req.search"
-                                    clearable
-                                    @clear="search()"
-                                    @keydown.enter="search()"
-                                    :placeholder="$t('file.search')"
-                                >
-                                    <template #prepend>
-                                        <el-checkbox v-model="req.containSub">
-                                            {{ $t('file.sub') }}
-                                        </el-checkbox>
-                                    </template>
-                                    <template #append>
-                                        <el-button icon="Search" @click="search" round />
-                                    </template>
-                                </el-input>
+                            <div class="flex items-center gap-2">
+                                <fu-table-column-select
+                                    :columns="columns"
+                                    trigger="hover"
+                                    :title="$t('commons.table.selectColumn')"
+                                    popper-class="popper-class"
+                                    :only-icon="true"
+                                />
                             </div>
                         </div>
                     </template>
                     <template #main>
                         <ComplexTable
+                            class="file-table"
                             :pagination-config="paginationConfig"
                             v-model:selects="selects"
                             :ref="(el) => setTableRef(item.id, el)"
@@ -456,6 +516,8 @@
                             @cell-mouse-leave="hideFavorite"
                             :heightDiff="heightDiff"
                             :right-buttons="rightButtons"
+                            :columns="columns"
+                            localKey="fileManagementColumn"
                         >
                             <el-table-column type="selection" width="30" />
                             <el-table-column
@@ -471,7 +533,7 @@
                             >
                                 <template #default="{ row }">
                                     <div class="file-row">
-                                        <div>
+                                        <div class="file-row__icon">
                                             <svg-icon
                                                 v-if="row.isDir"
                                                 className="table-icon"
@@ -480,7 +542,7 @@
                                             <svg-icon
                                                 v-else
                                                 className="table-icon"
-                                                :iconName="getIconName(row.extension)"
+                                                :iconName="getIconName(row.name, row.extension)"
                                             ></svg-icon>
                                         </div>
                                         <div class="file-name">
@@ -499,9 +561,23 @@
                                             </span>
                                             <span v-if="row.isSymlink">-> {{ row.linkPath }}</span>
                                         </div>
-                                        <div>
+                                        <div class="file-row__actions">
+                                            <el-button
+                                                v-if="row.shareCode"
+                                                v-permission
+                                                v-node-admin
+                                                link
+                                                type="primary"
+                                                size="large"
+                                                icon="Share"
+                                                @click="openShareFile(row)"
+                                            ></el-button>
+                                        </div>
+                                        <div class="file-row__actions">
                                             <el-button
                                                 v-if="row.favoriteID > 0"
+                                                v-permission
+                                                v-node-admin
                                                 link
                                                 type="warning"
                                                 size="large"
@@ -511,6 +587,8 @@
                                             <div v-else>
                                                 <el-button
                                                     v-if="hoveredRowPath === row.path"
+                                                    v-permission
+                                                    v-node-admin
                                                     link
                                                     icon="Star"
                                                     @click="addToFavorite(row)"
@@ -522,23 +600,25 @@
                             </el-table-column>
                             <el-table-column :label="$t('file.mode')" prop="mode" width="80">
                                 <template #default="{ row }">
-                                    <el-link underline="never" @click="openMode(row)">{{ row.mode }}</el-link>
+                                    <el-link v-permission v-node-admin underline="never" @click="openMode(row)">
+                                        {{ row.mode }}
+                                    </el-link>
                                 </template>
                             </el-table-column>
                             <el-table-column
                                 :label="`${$t('commons.table.user')} / ${$t('file.group')}`"
                                 prop="user"
                                 show-overflow-tooltip
-                                min-width="150"
+                                width="200"
                             >
                                 <template #default="{ row }">
-                                    <el-link underline="never" @click="openChown(row)">
+                                    <el-link v-permission v-node-admin underline="never" @click="openChown(row)">
                                         {{ row.user ? row.user : '-' }} ({{ row.uid }}) /
                                         {{ row.group ? row.group : '-' }} ({{ row.gid }})
                                     </el-link>
                                 </template>
                             </el-table-column>
-                            <el-table-column :label="$t('file.size')" prop="size" width="80" :sortable="'custom'">
+                            <el-table-column :label="$t('file.size')" prop="size" width="120" :sortable="'custom'">
                                 <template #default="{ row }">
                                     <el-button
                                         type="primary"
@@ -563,10 +643,13 @@
                                 :label="$t('file.updateTime')"
                                 prop="modTime"
                                 width="180"
-                                :formatter="dateFormat"
                                 show-overflow-tooltip
                                 :sortable="'custom'"
-                            ></el-table-column>
+                            >
+                                <template #default="{ row }">
+                                    {{ row.modTime ? dateFormatSimpleWithSecond(row.modTime) : '-' }}
+                                </template>
+                            </el-table-column>
                             <el-table-column :label="$t('file.remark')" prop="remark" width="180" show-overflow-tooltip>
                                 <template #default="{ row }">
                                     <span>{{ row.remark ? row.remark : '-' }}</span>
@@ -574,16 +657,16 @@
                             </el-table-column>
                             <fu-table-operations
                                 :max-height="dropdownMaxHeight"
-                                :ellipsis="mobile ? 0 : 2"
+                                :ellipsis="isMobile ? 0 : 2"
                                 :buttons="tableMoreButtons"
                                 :label="$t('commons.table.operate')"
-                                :min-width="mobile ? 'auto' : 200"
-                                :fixed="mobile ? false : 'right'"
+                                :min-width="isMobile ? 'auto' : 200"
+                                :fixed="isMobile ? false : 'right'"
                                 width="200"
                                 fix
                             />
                             <template #paginationLeft>
-                                <div class="flex justify-start items-center">
+                                <div class="file-pagination-summary">
                                     <el-text small>
                                         {{ $t('file.fileDirNum', [dirNum, fileNum]) }}
                                     </el-text>
@@ -613,8 +696,8 @@
 
         <CreateFile ref="createRef" @close="search" />
         <ChangeRole ref="roleRef" @close="search" />
-        <Compress ref="compressRef" @close="search" />
-        <Decompress ref="deCompressRef" @close="search" />
+        <Compress ref="compressRef" @close="search" @task-change="handleFileTaskChange('compress', $event)" />
+        <Decompress ref="deCompressRef" @close="search" @task-change="handleFileTaskChange('decompress', $event)" />
         <CodeEditor ref="codeEditorRef" @close="search" />
         <FileRename ref="renameRef" @close="search" />
         <Upload ref="uploadRef" @close="search" />
@@ -627,17 +710,29 @@
         <DeleteFile ref="deleteRef" @close="search" />
         <RecycleBin ref="recycleBinRef" @close="search" />
         <Favorite ref="favoriteRef" @close="search" @jump="jump" @to-favorite="toFavorite" />
+        <ShareList ref="shareListRef" @close="search" @detail="openShareDetail" />
+        <FileHistoryDrawer ref="historyDrawerRef" @restored="search" />
         <BatchRole ref="batchRoleRef" @close="search" />
         <VscodeOpenDialog ref="dialogVscodeOpenRef" />
         <Preview ref="previewRef" />
         <TextPreview ref="textPreviewRef" />
         <TerminalDialog ref="dialogTerminalRef" />
         <Convert ref="convertRef" @close="search" />
+
+        <FileAiSearchDrawer
+            ref="aiSearchDrawerRef"
+            v-model="aiSearchDrawerVisible"
+            :list-path="req.path"
+            @pick-directory="openAiSearchPathPicker"
+            @open-editor="onAiSearchOpenEditor"
+        />
+        <FileList ref="fileRef" @choose="getSearchPath" />
+        <FileShare ref="fileShareRef" @close="search" />
     </div>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import {
     addFavorite,
     batchGetFileRemarks,
@@ -645,6 +740,8 @@ import {
     computeDirSize,
     fileWgetKeys,
     getFileContent,
+    checkFile,
+    removeFileShare,
     getFilesList,
     setFileRemark,
     removeFavorite,
@@ -652,23 +749,20 @@ import {
     searchFavorite,
     searchHostMount,
 } from '@/api/modules/files';
-import {
-    computeSize,
-    copyText,
-    dateFormat,
-    downloadFile,
-    getFileType,
-    getIcon,
-    getRandomStr,
-    isConvertible,
-} from '@/utils/util';
+import { computeSize } from '@/utils/size';
+import { copyText } from '@/utils/clipboard';
+import { dateFormatSimpleWithSecond } from '@/utils/date';
+import { downloadFile, getFileType, getIcon, isConvertible } from '@/utils/file';
+import { getRandomStr } from '@/utils/id';
 import { File } from '@/api/interface/file';
-import { Languages, Mimetypes } from '@/global/mimetype';
+import { Mimetypes } from '@/global/mimetype';
+import { resolveEditorLanguage } from '@/utils/file';
 import { useRouter } from 'vue-router';
 import { MsgSuccess, MsgWarning } from '@/utils/message';
 import { useMultipleSearchable } from './hooks/searchable';
+import { mergeDirSizeCache, sortFilesByDisplaySize, updateDirSizeCache } from './size-cache';
 import { ResultData } from '@/api/interface';
-import { GlobalStore } from '@/store';
+import { useGlobalStore } from '@/composables/useGlobalStore';
 import { Download as ElDownload, Upload as ElUpload, View, Hide } from '@element-plus/icons-vue';
 
 import i18n from '@/lang';
@@ -688,27 +782,33 @@ import Process from './process/index.vue';
 import Detail from './detail/index.vue';
 import RecycleBin from './recycle-bin/index.vue';
 import Favorite from './favorite/index.vue';
+import ShareList from './share-list/index.vue';
+import FileHistoryDrawer from './code-editor/history/index.vue';
 import BatchRole from './batch-role/index.vue';
 import Preview from './preview/index.vue';
 import TextPreview from './text-preview/index.vue';
 import VscodeOpenDialog from '@/components/vscode-open/index.vue';
 import Convert from './convert/index.vue';
+import FileAiSearchDrawer from './ai-search/file-ai-search-drawer.vue';
+import FileShare from './share/index.vue';
 import { debounce } from 'lodash-es';
 import TerminalDialog from './terminal/index.vue';
 import { Dashboard } from '@/api/interface/dashboard';
-import { CompressExtension, CompressType } from '@/enums/files';
+import { CompressExtension, MimetypeByExtensionObject } from '@/enums/files';
 import type { TabPaneName } from 'element-plus';
 import { getComponentInfo } from '@/api/modules/host';
 import { routerToNameWithQuery } from '@/utils/router';
 import { loadBaseDir } from '@/api/modules/setting';
+import FileList from '@/components/file-list/index.vue';
 
-const globalStore = GlobalStore();
+const { currentNode, isAdminOrNodeAdmin, isMobile, lastFilePath, openMenuTabs } = useGlobalStore();
 
 interface FilePaths {
     url: string;
     name: string;
 }
 
+const fileRef = ref();
 const router = useRouter();
 const data = ref();
 const tableRefs = ref<Record<string, any>>({});
@@ -747,20 +847,28 @@ const initData = () => ({
 let req = reactive(initData());
 let loading = ref(false);
 const paths = ref<FilePaths[]>([]);
-const hidePaths = ref<FilePaths[]>([]);
+const breadcrumbVisiblePaths = ref<FilePaths[]>([]);
+const breadcrumbHiddenPaths = ref<FilePaths[]>([]);
 let pathWidth = ref(0);
 const history: string[] = [];
 let pointer = -1;
 
-const fileCreate = reactive({ path: '/', isDir: false, mode: 0o755 });
+const fileCreate = reactive({ path: '/', isDir: false, mode: 0o755, isAppendOnly: false });
 const fileCompress = reactive({ files: [''], name: '', dst: '', operate: 'compress' });
 const fileDeCompress = reactive({ path: '', name: '', dst: '', type: '' });
-const fileEdit = reactive({ content: '', path: '', name: '', language: 'plaintext', extension: '' });
+const fileEdit = reactive<{
+    content: string;
+    path: string;
+    name: string;
+    language: string;
+    extension: string;
+    initialLine?: number;
+}>({ content: '', path: '', name: '', language: 'plaintext', extension: '' });
 const filePreview = reactive({ path: '', name: '', extension: '', fileType: '', imageFiles: [], currentNode: '' });
 const codeReq = reactive({ path: '', expand: false, page: 1, pageSize: 100, isDetail: false });
-const fileUpload = reactive({ path: '' });
+const fileUpload = reactive({ path: '', isAppendOnly: false });
 const fileRename = reactive({ path: '', oldName: '', newName: '' });
-const fileWget = reactive({ path: '' });
+const fileWget = reactive({ path: '', isAppendOnly: false });
 const fileMove = reactive({ oldPaths: [''], allNames: [''], type: '', path: '', name: '', count: 0, isDir: false });
 const fileConvert = reactive<{
     outputPath: string;
@@ -778,6 +886,21 @@ const fileConvert = reactive<{
     ],
 });
 const ffmpegExist = ref(false);
+
+const aiSearchDrawerVisible = ref(false);
+const aiSearchDrawerRef = ref<InstanceType<typeof FileAiSearchDrawer> | null>(null);
+
+const openAiSearchDrawer = () => {
+    aiSearchDrawerVisible.value = true;
+};
+
+const getSearchPath = (path: string | string[]) => {
+    aiSearchDrawerRef.value?.applyPathFromPicker(path);
+};
+
+const openAiSearchPathPicker = (path?: string) => {
+    fileRef.value.acceptParams({ path: path || req.path, dir: true, multiple: false });
+};
 
 const createRef = ref();
 const roleRef = ref();
@@ -797,6 +920,8 @@ const moveOpen = ref(false);
 const deleteRef = ref();
 const recycleBinRef = ref();
 const favoriteRef = ref();
+const shareListRef = ref();
+const historyDrawerRef = ref<InstanceType<typeof FileHistoryDrawer> | null>(null);
 const hoveredRowPath = ref(null);
 const favorites = ref([]);
 const batchRoleRef = ref();
@@ -806,8 +931,11 @@ const textPreviewRef = ref();
 const processRef = ref();
 
 const MAX_OPEN_SIZE = 10 * 1024 * 1024;
+const MAX_DIR_SIZE_CONCURRENT = 2;
 const hostMount = ref<Dashboard.DiskInfo[]>([]);
 let resizeObserver: ResizeObserver;
+let depthSizeToken = 0;
+const dirSizeCache = new Map<string, number>();
 const dirTotalSize = ref(-1);
 const disableBtn = ref(false);
 const calculateBtn = ref(false);
@@ -815,7 +943,9 @@ const dirNum = ref(0);
 const fileNum = ref(0);
 const imageFiles = ref([]);
 const isEdit = ref(false);
+const isDragOver = ref(false);
 const convertRef = ref();
+const fileTaskStatus = reactive<Record<string, string>>({});
 
 const renameRefs = ref<Record<string, any>>({});
 
@@ -827,6 +957,7 @@ const setRenameRef = (key: string, el: any) => {
 const getCurrentRename = () => renameRefs.value[editableTabsKey.value];
 
 const pathRefs = ref<Record<string, any>>({});
+const columns = ref([]);
 
 const setPathRef = (key: string, el: any) => {
     if (el) {
@@ -844,9 +975,90 @@ const paginationConfig = reactive({
     total: 0,
 });
 
-const mobile = computed(() => {
-    return globalStore.isMobile();
-});
+const btnWrapperRefs = ref<Record<string, any>>({});
+
+const setBtnWrapperRef = (key: string, el: any) => {
+    if (el) {
+        btnWrapperRefs.value[key] = el;
+    }
+};
+const getCurrentBtnWrapper = () => btnWrapperRefs.value[editableTabsKey.value];
+
+const toolButtons = ref([
+    {
+        label: 'commons.button.copy',
+        action: () => openMove('copy'),
+    },
+    {
+        label: 'file.move',
+        action: () => openMove('cut'),
+    },
+    {
+        label: 'file.compress',
+        action: () => openCompress(selects.value),
+    },
+    {
+        label: 'file.role',
+        action: () => openBatchRole(selects.value),
+    },
+    {
+        label: 'commons.button.delete',
+        action: () => batchDelFiles(),
+    },
+]);
+
+const visibleButtons = ref([...toolButtons.value]);
+const moreButtons = ref([]);
+const isRightToolbarWrapped = ref(false);
+const batchButtonMinWidths = [64, 64, 64, 64, 64];
+const moreButtonWidth = 76;
+const toolbarGap = 8;
+
+const updateButtons = async () => {
+    await nextTick();
+    const wrapper = getCurrentBtnWrapper();
+    if (!wrapper) {
+        return;
+    }
+    const slotWrapper = wrapper.parentElement as HTMLElement | null;
+    const titleRow = slotWrapper?.parentElement as HTMLElement | null;
+    const rowWidth = titleRow?.clientWidth || slotWrapper?.clientWidth || wrapper.offsetWidth || 0;
+    if (!rowWidth) {
+        visibleButtons.value = [...toolButtons.value];
+        moreButtons.value = [];
+        return;
+    }
+
+    const pasteEl = wrapper.querySelector('.copy-button') as HTMLElement | null;
+    const leftSibling = slotWrapper?.previousElementSibling as HTMLElement | null;
+    const pasteWidth = pasteEl?.offsetWidth || 0;
+    const pasteReserve = moveOpen.value ? pasteWidth + toolbarGap : 0;
+    const columnSelectWidth = 48;
+    const minBatchWidth = moreButtonWidth;
+    const sameLineReserve = leftSibling ? leftSibling.offsetWidth + 16 : 0;
+    const sameLineAvailable = rowWidth - sameLineReserve - pasteReserve - columnSelectWidth - toolbarGap;
+    isRightToolbarWrapped.value = !!leftSibling && sameLineAvailable < minBatchWidth;
+    const leftReserve = isRightToolbarWrapped.value ? 0 : sameLineReserve;
+    const rightLineWidth = Math.max(0, rowWidth - leftReserve - columnSelectWidth - toolbarGap);
+    const availableWidth = Math.max(0, rightLineWidth - pasteReserve);
+    let usedWidth = 0;
+    let visibleCount = 0;
+
+    for (const buttonWidth of batchButtonMinWidths) {
+        const nextUsedWidth = usedWidth + buttonWidth;
+        const remainingButtonCount = toolButtons.value.length - visibleCount - 1;
+        const reserveMoreWidth = remainingButtonCount > 0 ? moreButtonWidth : 0;
+        if (nextUsedWidth + reserveMoreWidth <= availableWidth) {
+            usedWidth = nextUsedWidth;
+            visibleCount++;
+        } else {
+            break;
+        }
+    }
+
+    visibleButtons.value = toolButtons.value.slice(0, visibleCount);
+    moreButtons.value = toolButtons.value.slice(visibleCount);
+};
 
 const search = async () => {
     dirTotalSize.value = -1;
@@ -878,13 +1090,77 @@ const searchFile = async () => {
     }
 };
 
+const resetDirSizeCache = () => {
+    dirSizeCache.clear();
+};
+
 const handleSearchResult = (res: ResultData<File.File>) => {
-    data.value = res.data.items || [];
+    if (res.data.path && res.data.path !== req.path) {
+        resetDirSizeCache();
+    }
+    let items = mergeDirSizeCache(res.data.items || [], dirSizeCache);
+    if (req.sortBy === 'size') {
+        items = sortFilesByDisplaySize(items, req.sortOrder);
+    }
+    data.value = items;
     paginationConfig.total = res.data.itemTotal;
     dirNum.value = data.value.filter((item) => item.isDir).length;
     fileNum.value = data.value.filter((item) => !item.isDir).length;
-    req.path = res.data.path;
+    if (res.data.path) {
+        req.path = res.data.path;
+    }
+    fileCreate.isAppendOnly = res.data.isAppendOnly;
+    fileUpload.isAppendOnly = res.data.isAppendOnly;
+    fileWget.isAppendOnly = res.data.isAppendOnly;
     scheduleRemarkLoad();
+};
+
+const normalizeFilePath = (filePath: string) => {
+    if (!filePath) {
+        return '/';
+    }
+    const normalized = `/${filePath.split('/').filter(Boolean).join('/')}`;
+    return normalized === '' ? '/' : normalized;
+};
+
+const findExistingPath = async (filePath: string) => {
+    const segments = normalizeFilePath(filePath).split('/').filter(Boolean);
+    while (segments.length > 0) {
+        const current = `/${segments.join('/')}`;
+        try {
+            const res = await checkFile(current, false);
+            if (res.data) {
+                return current;
+            }
+        } catch {
+            // ignore check errors
+        }
+        segments.pop();
+    }
+    return '/';
+};
+
+const loadInitialExistingPath = async (url: string) => {
+    const existingPath = await findExistingPath(url);
+    if (existingPath === normalizeFilePath(url)) {
+        return;
+    }
+    const { pageSize: oldPageSize, sortBy: oldSortBy, sortOrder: oldSortOrder, showHidden } = req;
+    Object.assign(req, initData(), {
+        path: existingPath,
+        containSub: false,
+        search: '',
+        pageSize: oldPageSize,
+        sortBy: oldSortBy,
+        sortOrder: oldSortOrder,
+        showHidden,
+    });
+    lastFilePath.value = req.path;
+    getPaths(req.path);
+    updateTab(req.path);
+    paths.value = buildPaths(req.path);
+    resetPaths();
+    MsgWarning(i18n.global.t('commons.res.notFound'));
 };
 
 const viewHideFile = async () => {
@@ -925,72 +1201,48 @@ const copyDir = (row: File.File) => {
     }
 };
 
-const leftWrapper = ref<HTMLElement | null>(null);
-const btnWrapperRefs = ref<Record<string, any>>({});
-
-const setBtnWrapperRef = (key: string, el: any) => {
-    if (el) {
-        btnWrapperRefs.value[key] = el;
+const formatBreadcrumbName = (path: FilePaths, index: number) => {
+    const isLast = index === breadcrumbVisiblePaths.value.length - 1;
+    if (isLast || path.name.length <= 25) {
+        return path.name;
     }
+    return `${path.name.substring(0, 22)}...`;
 };
-const getCurrentBtnWrapper = () => btnWrapperRefs.value[editableTabsKey.value];
 
-const toolButtons = ref([
-    {
-        label: 'commons.button.copy',
-        action: () => openMove('copy'),
-    },
-    {
-        label: 'file.move',
-        action: () => openMove('cut'),
-    },
-    {
-        label: 'file.compress',
-        action: () => openCompress(selects.value),
-    },
-    {
-        label: 'file.role',
-        action: () => openBatchRole(selects.value),
-    },
-    {
-        label: 'commons.button.delete',
-        action: () => batchDelFiles(),
-    },
-]);
+const getBreadcrumbElement = () => {
+    return (getCurrentPath()?.querySelector('.address-url') as HTMLElement | null) || breadCrumbRef.value;
+};
 
-const visibleButtons = ref([...toolButtons.value]);
-const moreButtons = ref([]);
+const resetPaths = () => {
+    breadcrumbVisiblePaths.value = [...paths.value];
+    breadcrumbHiddenPaths.value = [];
+};
 
-const updateButtons = async () => {
+const handlePath = async () => {
+    resetPaths();
+    if (paths.value.length <= 2) {
+        return;
+    }
+
     await nextTick();
-    if (!getCurrentBtnWrapper()) return;
-    const pathWidth = toolRef.value.offsetWidth;
-    const leftWidth = leftWrapper.value.offsetWidth;
-    let num = Math.floor((pathWidth - leftWidth - 450) / 100);
-    if (num < 0) {
-        visibleButtons.value = toolButtons.value;
-        moreButtons.value = [];
-    } else {
-        visibleButtons.value = toolButtons.value.slice(0, num);
-        moreButtons.value = toolButtons.value.slice(num);
+    const breadcrumbEl = getBreadcrumbElement();
+    const pathEl = getCurrentPath();
+    const maxWidth = (pathEl?.clientWidth || toolRef.value?.clientWidth || 0) - 24;
+    if (!breadcrumbEl || maxWidth <= 0) {
+        return;
     }
-};
 
-const handlePath = (depth = 0) => {
-    if (depth > 10) return;
-    nextTick(function () {
-        let breadCrumbWidth = breadCrumbRef.value?.offsetWidth;
-        let pathWidth = toolRef.value?.offsetWidth;
-        if (pathWidth - breadCrumbWidth < 50 && paths.value.length > 1) {
-            const removed = paths.value.shift();
-            if (removed) hidePaths.value.push(removed);
-            handlePath(depth + 1);
-        }
-    });
+    let hiddenCount = 0;
+    const maxHiddenCount = Math.max(paths.value.length - 2, 0);
+    while (hiddenCount < maxHiddenCount && breadcrumbEl.scrollWidth > maxWidth) {
+        hiddenCount++;
+        breadcrumbHiddenPaths.value = paths.value.slice(1, 1 + hiddenCount);
+        breadcrumbVisiblePaths.value = [paths.value[0], ...paths.value.slice(1 + hiddenCount)];
+        await nextTick();
+    }
 };
 
 const resizeHandler = debounce(() => {
-    resetPaths();
     handlePath();
 }, 100);
 
@@ -1001,19 +1253,22 @@ const btnResizeHandler = debounce(() => {
 const observeResize = () => {
     const el = getCurrentPath();
     const ele = getCurrentBtnWrapper();
-    if (!el || !ele) return;
+    const titleRow = ele?.parentElement?.parentElement as HTMLElement | null;
+    if (!el && !ele && !titleRow) return;
 
     const observe = new ResizeObserver((entries) => {
         const isElChanged = entries.some((entry) => entry.target === el);
         const isEleChanged = entries.some((entry) => entry.target === ele);
+        const isTitleChanged = entries.some((entry) => entry.target === titleRow);
 
         if (isElChanged) resizeHandler();
-        if (isEleChanged) btnResizeHandler();
+        if (isEleChanged || isTitleChanged) btnResizeHandler();
         updateHeight();
     });
 
-    observe.observe(el);
-    observe.observe(ele);
+    if (el) observe.observe(el);
+    if (ele) observe.observe(ele);
+    if (titleRow) observe.observe(titleRow);
 
     resizeObserver = observe;
 };
@@ -1025,11 +1280,6 @@ function watchTitleHeight() {
         heightDiff.value = 325 + titleHeight;
     }
 }
-
-const resetPaths = () => {
-    paths.value = [...hidePaths.value, ...paths.value];
-    hidePaths.value = [];
-};
 
 const right = () => {
     if (pointer < history.length - 1) {
@@ -1063,17 +1313,28 @@ const jump = async (url: string) => {
     history.push(url);
     pointer = history.length - 1;
 
-    const { path: oldUrl, pageSize: oldPageSize } = req;
-    Object.assign(req, initData(), { path: url, containSub: false, search: '', pageSize: oldPageSize });
+    const { path: oldUrl, pageSize: oldPageSize, sortBy: oldSortBy, sortOrder: oldSortOrder, showHidden } = req;
+    if (oldUrl !== url) {
+        resetDirSizeCache();
+    }
+    Object.assign(req, initData(), {
+        path: url,
+        containSub: false,
+        search: '',
+        pageSize: oldPageSize,
+        sortBy: oldSortBy,
+        sortOrder: oldSortOrder,
+        showHidden,
+    });
     let searchResult = await searchFile();
     if (!searchResult.data.path) {
         req.path = oldUrl;
-        globalStore.setLastFilePath(req.path);
+        lastFilePath.value = req.path;
         MsgWarning(i18n.global.t('commons.res.notFound'));
         return;
     }
     req.path = searchResult.data.path;
-    globalStore.setLastFilePath(req.path);
+    lastFilePath.value = req.path;
     handleSearchResult(searchResult);
     getPaths(req.path);
     updateTab(req.path);
@@ -1083,12 +1344,19 @@ const jump = async (url: string) => {
 };
 
 const backForwardJump = async (url: string) => {
-    const oldPageSize = req.pageSize;
-    Object.assign(req, initData());
-    req.path = url;
-    req.containSub = false;
-    req.search = '';
-    req.pageSize = oldPageSize;
+    const { pageSize: oldPageSize, sortBy: oldSortBy, sortOrder: oldSortOrder, showHidden } = req;
+    if (req.path !== url) {
+        resetDirSizeCache();
+    }
+    Object.assign(req, initData(), {
+        path: url,
+        containSub: false,
+        search: '',
+        pageSize: oldPageSize,
+        sortBy: oldSortBy,
+        sortOrder: oldSortOrder,
+        showHidden,
+    });
     let searchResult = await searchFile();
     handleSearchResult(searchResult);
     getPaths(req.path);
@@ -1114,7 +1382,7 @@ const getPaths = (reqPath: string | undefined | null) => {
     }
 
     paths.value = breadcrumbs;
-    hidePaths.value = [];
+    resetPaths();
 };
 
 const handleCreate = (command: string) => {
@@ -1124,15 +1392,44 @@ const handleCreate = (command: string) => {
 };
 
 const delFile = async (row: File.File | null) => {
-    deleteRef.value.acceptParams([row]);
+    deleteRef.value.acceptParams([row], currentNode.value);
 };
 
 const batchDelFiles = () => {
-    deleteRef.value.acceptParams(selects.value);
+    deleteRef.value.acceptParams(selects.value, currentNode.value);
 };
 
 const formatFileSize = (size: number) => {
     return computeSize(size);
+};
+
+const dirSizeQueue: Array<() => Promise<void>> = [];
+const dirSizeLoadingPaths = new Set<string>();
+let activeDirSizeRequests = 0;
+
+const flushDirSizeQueue = () => {
+    while (activeDirSizeRequests < MAX_DIR_SIZE_CONCURRENT && dirSizeQueue.length > 0) {
+        const task = dirSizeQueue.shift()!;
+        activeDirSizeRequests++;
+        task().finally(() => {
+            activeDirSizeRequests--;
+            flushDirSizeQueue();
+        });
+    }
+};
+
+const enqueueDirSizeTask = (task: () => Promise<void>) => {
+    return new Promise<void>((resolve, reject) => {
+        dirSizeQueue.push(async () => {
+            try {
+                await task();
+                resolve();
+            } catch (err) {
+                reject(err);
+            }
+        });
+        flushDirSizeQueue();
+    });
 };
 
 const getFileSize = async (path: string) => {
@@ -1142,6 +1439,7 @@ const getFileSize = async (path: string) => {
     updateByPath(path, { btnLoading: true });
     try {
         const res = await getFileContent(codeReq);
+        updateDirSizeCache(dirSizeCache, [{ path, size: res.data.size }]);
         updateByPath(path, { dirSize: res.data.size });
     } finally {
         updateByPath(path, { btnLoading: false });
@@ -1149,14 +1447,22 @@ const getFileSize = async (path: string) => {
 };
 
 const getDirSize = async (path: string) => {
+    if (dirSizeLoadingPaths.has(path)) {
+        return;
+    }
     const req = {
         path: path,
     };
+    dirSizeLoadingPaths.add(path);
     updateByPath(path, { btnLoading: true });
     try {
-        const res = await computeDirSize(req);
-        updateByPath(path, { dirSize: res.data.size });
+        await enqueueDirSizeTask(async () => {
+            const res = await computeDirSize(req);
+            updateDirSizeCache(dirSizeCache, [{ path, size: res.data.size }]);
+            updateByPath(path, { dirSize: res.data.size });
+        });
     } finally {
+        dirSizeLoadingPaths.delete(path);
         updateByPath(path, { btnLoading: false });
     }
 };
@@ -1166,37 +1472,45 @@ const updateByPath = (path: string, patch: Partial<(typeof data.value)[0]>) => {
 };
 
 const getDirTotalSize = async (path: string) => {
-    const req = {
+    const sizeReq = {
         path: path,
     };
     calculateBtn.value = true;
-    const res = await computeDirSize(req);
-    dirTotalSize.value = res.data.size;
-    calculateBtn.value = false;
+    try {
+        const res = await computeDirSize(sizeReq);
+        dirTotalSize.value = res.data.size;
+    } finally {
+        calculateBtn.value = false;
+    }
 };
 
 const calculateSize = (path: string) => {
-    const req = { path };
+    const token = ++depthSizeToken;
+    const sizeReq = { path };
     disableBtn.value = true;
     setTimeout(async () => {
         try {
-            const res = await computeDepthDirSize(req);
+            const res = await computeDepthDirSize(sizeReq);
+            if (token !== depthSizeToken || req.path !== path) {
+                return;
+            }
             const sizeMap = new Map(res.data.map((dir) => [dir.path, dir.size]));
-            data.value.forEach((item) => {
-                if (sizeMap.has(item.path)) {
-                    item.dirSize = sizeMap.get(item.path)!;
-                }
-            });
+            updateDirSizeCache(dirSizeCache, res.data);
+            data.value = data.value.map((item) =>
+                sizeMap.has(item.path) ? { ...item, dirSize: sizeMap.get(item.path)! } : item,
+            );
         } catch (err) {
             console.error('Error computing dir size:', err);
         } finally {
-            disableBtn.value = false;
+            if (token === depthSizeToken) {
+                disableBtn.value = false;
+            }
         }
     }, 0);
 };
 
-const getIconName = (extension: string) => {
-    return getIcon(extension);
+const getIconName = (name: string, extension: string) => {
+    return getIcon(getFileExtension(name, extension));
 };
 
 const openMode = (item: File.File) => {
@@ -1224,16 +1538,18 @@ const openCompress = (items: File.File[]) => {
 };
 
 const openDeCompress = (item: File.File) => {
-    if (Mimetypes.get(item.mimeType) == undefined) {
+    const extension = getFileExtension(item.name, item.extension);
+    const mimeType = item.mimeType || MimetypeByExtensionObject[extension];
+    const typeByMime = mimeType ? Mimetypes.get(mimeType) : undefined;
+    const typeByExtension = getEnumKeyByValue(extension);
+
+    if (typeByMime && (!typeByExtension || CompressExtension[typeByMime] === extension)) {
+        fileDeCompress.type = typeByMime;
+    } else if (typeByExtension) {
+        fileDeCompress.type = typeByExtension;
+    } else {
         MsgWarning(i18n.global.t('file.canNotDeCompress'));
         return;
-    }
-    fileDeCompress.type = Mimetypes.get(item.mimeType);
-    if (CompressExtension[Mimetypes.get(item.mimeType)] != item.extension) {
-        fileDeCompress.type = getEnumKeyByValue(item.extension);
-    }
-    if (item.name.endsWith('.tar.gz') || item.name.endsWith('.tgz')) {
-        fileDeCompress.type = CompressType.TarGz;
     }
 
     fileDeCompress.name = item.name;
@@ -1244,13 +1560,39 @@ const openDeCompress = (item: File.File) => {
 };
 
 function getEnumKeyByValue(value: string): keyof typeof CompressExtension | undefined {
+    const normalizedValue = value.toLowerCase();
     return (Object.keys(CompressExtension) as Array<keyof typeof CompressExtension>).find(
-        (k) => CompressExtension[k] === value,
+        (k) => CompressExtension[k] === normalizedValue,
     );
 }
 
+const sortedCompressExtensions = Object.values(CompressExtension).sort((a, b) => b.length - a.length);
+
+const getFileExtension = (name: string, extension?: string): string => {
+    const lowerName = name?.toLowerCase().split('?')[0] ?? '';
+    if (lowerName.startsWith('.') && lowerName.indexOf('.', 1) === -1) {
+        return extension.toLowerCase();
+    }
+    const compoundMatch = sortedCompressExtensions.find((compressExtension) => lowerName.endsWith(compressExtension));
+    if (compoundMatch) {
+        return compoundMatch;
+    }
+
+    if (extension) {
+        const lowerExt = extension.toLowerCase();
+        return lowerExt.startsWith('.') ? lowerExt : `.${lowerExt}`;
+    }
+
+    const extensionIndex = lowerName.lastIndexOf('.');
+    return extensionIndex === -1 ? '' : lowerName.slice(extensionIndex);
+};
+
 const openView = (item: File.File) => {
     const fileType = getFileType(item.extension);
+    if (fileType == 'pdf') {
+        MsgWarning(i18n.global.t('file.fileCanNotRead'));
+        return;
+    }
     if (fileType === 'image') {
         imageFiles.value = data.value
             .filter((item) => !item.isDir)
@@ -1263,17 +1605,20 @@ const openView = (item: File.File) => {
         return openPreview(item, fileType);
     }
 
+    if (fileType === 'compress') {
+        return openDeCompress(item);
+    }
+
     const path = item.isSymlink ? item.linkPath : item.path;
     if (item.size > MAX_OPEN_SIZE) {
         return openTextPreview(path, item.name);
     }
 
     const actionMap = {
-        compress: openDeCompress,
-        text: () => openCodeEditor(item.path, item.extension),
+        text: () => openCodeEditor(path),
     };
 
-    return actionMap[fileType] ? actionMap[fileType](item) : openCodeEditor(path, item.extension);
+    return actionMap[fileType] ? actionMap[fileType](item) : openCodeEditor(path);
 };
 
 const openPreview = (item: File.File, fileType: string) => {
@@ -1286,23 +1631,24 @@ const openPreview = (item: File.File, fileType: string) => {
     filePreview.extension = item.extension;
     filePreview.fileType = fileType;
     filePreview.imageFiles = imageFiles.value;
-    filePreview.currentNode = globalStore.currentNode;
+    filePreview.currentNode = currentNode.value;
 
     previewRef.value.acceptParams(filePreview);
 };
 
-const openCodeEditor = (path: string, extension: string) => {
+const openPathInCodeEditor = (
+    path: string,
+    opts?: {
+        initialLine?: number;
+    },
+) => {
+    if (!path) {
+        return;
+    }
     codeReq.path = path;
     codeReq.expand = true;
 
-    if (extension != '') {
-        Languages.forEach((language) => {
-            const ext = extension.substring(1);
-            if (language.value.indexOf(ext) > -1) {
-                fileEdit.language = language.label;
-            }
-        });
-    }
+    const line = opts?.initialLine && opts.initialLine > 0 ? Math.floor(opts.initialLine) : undefined;
 
     getFileContent(codeReq)
         .then((res) => {
@@ -1310,10 +1656,20 @@ const openCodeEditor = (path: string, extension: string) => {
             fileEdit.path = res.data.path;
             fileEdit.name = res.data.name;
             fileEdit.extension = res.data.extension;
-
+            fileEdit.language = resolveEditorLanguage(res.data.path, res.data.extension, res.data.name);
+            fileEdit.initialLine = line;
             codeEditorRef.value.acceptParams(fileEdit);
+            fileEdit.initialLine = undefined;
         })
         .catch(() => {});
+};
+
+const onAiSearchOpenEditor = (payload: { path: string; initialLine?: number }) => {
+    openPathInCodeEditor(payload.path, { initialLine: payload.initialLine });
+};
+
+const openCodeEditor = (path: string) => {
+    openPathInCodeEditor(path);
 };
 
 const openTextPreview = (path: string, name: string) => {
@@ -1334,14 +1690,14 @@ const openBatchRole = (items: File.File[]) => {
     batchRoleRef.value.acceptParams({ files: items });
 };
 
-const closeWget = (submit: Boolean) => {
+const closeWget = (submit: boolean) => {
     search();
     if (submit) {
         openProcess();
     }
 };
 
-const closeMovePage = (submit: Boolean) => {
+const closeMovePage = (submit: boolean) => {
     if (submit) {
         search();
         closeMove();
@@ -1371,7 +1727,7 @@ const getWgetProcess = async () => {
     } catch (error) {}
 };
 
-const openRename = (item: File.File, source: String) => {
+const openRename = (item: File.File, source: string) => {
     fileRename.path = req.path;
     fileRename.oldName = item.name;
     if (source === 'right') {
@@ -1456,6 +1812,7 @@ const openMove = (type: string) => {
     } else {
         MsgSuccess(i18n.global.t('file.copySuccess') + '! ' + i18n.global.t('file.pasteMsg'));
     }
+    updateButtons();
 };
 
 const openMoveBtn = (type: string, item: File.File) => {
@@ -1473,6 +1830,7 @@ const closeMove = () => {
     fileMove.count = 0;
     fileMove.isDir = false;
     moveOpen.value = false;
+    updateButtons();
 };
 
 const openPaste = () => {
@@ -1485,7 +1843,15 @@ function onLoading(isLoading: boolean) {
 }
 
 const openDownload = (file: File.File) => {
-    downloadFile(file.path, globalStore.currentNode);
+    downloadFile(file.path, currentNode.value);
+};
+
+const fileShareRef = ref<InstanceType<typeof FileShare> | null>(null);
+const openShareFile = (row: File.File) => {
+    fileShareRef.value?.acceptParams({ path: row.path });
+};
+const openShareDetail = (path: string) => {
+    fileShareRef.value?.acceptParams({ path });
 };
 
 const openDetail = (row: File.File) => {
@@ -1498,6 +1864,36 @@ const openRecycleBin = () => {
 
 const openFavorite = () => {
     favoriteRef.value.acceptParams();
+};
+
+const openShareList = () => {
+    shareListRef.value.acceptParams();
+};
+
+const openFileHistoryCenter = () => {
+    historyDrawerRef.value?.acceptParams({
+        path: '',
+        content: '',
+        language: 'plaintext',
+        extension: '',
+        dirty: false,
+        scope: 'all',
+    });
+};
+
+const handleFileTaskChange = (type: string, payload: { taskID: string; status: string }) => {
+    if (!payload.taskID) {
+        return;
+    }
+    const taskKey = `${type}:${payload.taskID}`;
+    const previous = fileTaskStatus[taskKey];
+    fileTaskStatus[taskKey] = payload.status;
+    if (previous === 'Executing' && payload.status === 'Success') {
+        MsgSuccess(i18n.global.t('commons.msg.operationSuccess'));
+    }
+    if (payload.status && payload.status !== 'Executing') {
+        delete fileTaskStatus[taskKey];
+    }
 };
 
 const changeSort = ({ prop, order }) => {
@@ -1544,13 +1940,28 @@ const getFavorites = async () => {
     } catch (error) {}
 };
 
+const removeShareByPath = async (path: string) => {
+    ElMessageBox.confirm(i18n.global.t('file.shareCancelConfirm'), i18n.global.t('commons.msg.remove'), {
+        confirmButtonText: i18n.global.t('commons.button.confirm'),
+        cancelButtonText: i18n.global.t('commons.button.cancel'),
+    }).then(async () => {
+        try {
+            await removeFileShare(path);
+            await search();
+        } catch (error) {}
+    });
+};
+
 const toFavorite = (row: File.Favorite) => {
     if (row.isDir) {
         jump(row.path);
     } else {
         let file = {} as File.File;
+        const extension = getFileExtension(row.name);
         file.path = row.path;
-        file.extension = '.' + row.name.split('.').pop();
+        file.name = row.name;
+        file.extension = extension;
+        file.mimeType = MimetypeByExtensionObject[extension] || '';
         openView(file);
     }
 };
@@ -1586,7 +1997,7 @@ const beforeButtons = [
         label: i18n.global.t('commons.button.open'),
         click: open,
         show: (row: File.File) => {
-            return row?.isDir || row?.size <= MAX_OPEN_SIZE;
+            return row?.isDir || row?.size <= MAX_OPEN_SIZE || isDecompressFile(row);
         },
     },
     {
@@ -1596,7 +2007,7 @@ const beforeButtons = [
             openTextPreview(path, row.name);
         },
         show: (row: File.File) => {
-            return !row?.isDir && row?.size > MAX_OPEN_SIZE;
+            return !row?.isDir && row?.size > MAX_OPEN_SIZE && !isDecompressFile(row);
         },
     },
     {
@@ -1610,14 +2021,20 @@ const beforeButtons = [
     },
     {
         label: i18n.global.t('commons.button.copy'),
+        permission: true,
+        nodeAdmin: true,
         click: (row: File.File) => openMoveBtn('copy', row),
     },
     {
         label: i18n.global.t('file.move'),
+        permission: true,
+        nodeAdmin: true,
         click: (row: File.File) => openMoveBtn('cut', row),
     },
     {
         label: i18n.global.t('file.paste'),
+        permission: true,
+        nodeAdmin: true,
         click: openPaste,
         disabled: () => {
             return !moveOpen.value;
@@ -1625,6 +2042,8 @@ const beforeButtons = [
     },
     {
         label: i18n.global.t('file.compress'),
+        permission: true,
+        nodeAdmin: true,
         click: (row: File.File) => {
             openCompress([row]);
         },
@@ -1638,6 +2057,8 @@ const beforeButtons = [
     },
     {
         label: i18n.global.t('file.editPermissions'),
+        permission: true,
+        nodeAdmin: true,
         click: (row: File.File) => {
             openBatchRole([row]);
         },
@@ -1645,6 +2066,8 @@ const beforeButtons = [
     {
         label: i18n.global.t('file.setRemark'),
         hideOnRemarkBlackList: true,
+        permission: true,
+        nodeAdmin: true,
         click: (row: File.File) => {
             openRemark(row);
         },
@@ -1653,6 +2076,8 @@ const beforeButtons = [
 const afterButtons = [
     {
         label: i18n.global.t('commons.button.delete'),
+        permission: true,
+        nodeAdmin: true,
         disabled: (row: File.File) => {
             return row.name == '.1panel_clash';
         },
@@ -1664,17 +2089,47 @@ const afterButtons = [
         click: copyDir,
     },
     {
-        label: i18n.global.t('file.addFavorite'),
+        label: i18n.global.t('file.addFavoriteAction'),
+        permission: true,
+        nodeAdmin: true,
         click: (row: File.File) => {
-            if (row?.favoriteID > 0) {
-                remove(row?.favoriteID);
-            } else {
-                addToFavorite(row);
-            }
+            addToFavorite(row);
+        },
+        show: (row: File.File) => row?.favoriteID === 0,
+    },
+    {
+        label: i18n.global.t('file.removeFavoriteAction'),
+        permission: true,
+        nodeAdmin: true,
+        click: (row: File.File) => {
+            remove(row?.favoriteID);
+        },
+        show: (row: File.File) => row?.favoriteID > 0,
+    },
+    {
+        label: i18n.global.t('file.shareFile'),
+        permission: true,
+        nodeAdmin: true,
+        click: openShareFile,
+        show: (row: File.File) => {
+            return !row?.isDir && !row?.shareCode;
+        },
+    },
+    {
+        label: i18n.global.t('file.shareCancel'),
+        permission: true,
+        nodeAdmin: true,
+        click: (row: File.File) => {
+            removeShareByPath(row.path);
+        },
+        show: (row: File.File) => {
+            return !row?.isDir && !!row?.shareCode;
         },
     },
     {
         label: i18n.global.t('file.convert'),
+        permission: true,
+        nodeAdmin: true,
         click: (row: File.File) => {
             openConvert(row);
         },
@@ -1696,6 +2151,8 @@ const afterButtons = [
 const rightBtnRename = [
     {
         label: i18n.global.t('file.rename'),
+        permission: true,
+        nodeAdmin: true,
         click: (row: File.File) => {
             openRename(row, 'right');
         },
@@ -1704,6 +2161,8 @@ const rightBtnRename = [
 const moreBtnRename = [
     {
         label: i18n.global.t('file.rename'),
+        permission: true,
+        nodeAdmin: true,
         click: (row: File.File) => {
             openRename(row, 'more');
         },
@@ -1753,14 +2212,19 @@ const isDecompressFile = (row: File.File) => {
     if (row.isDir) {
         return false;
     }
-    if (getFileType(row.extension) === 'compress') {
+
+    const extension = getFileExtension(row.name, row.extension);
+    const mimeType = row.mimeType || MimetypeByExtensionObject[extension];
+
+    if (getFileType(extension) === 'compress') {
         return true;
     }
-    if (row.mimeType == 'application/octet-stream') {
+
+    if (!mimeType || mimeType === 'application/octet-stream') {
         return false;
-    } else {
-        return Mimetypes.get(row.mimeType) != undefined;
     }
+
+    return Mimetypes.get(mimeType) != undefined;
 };
 
 const getHostMount = async () => {
@@ -1774,6 +2238,7 @@ const getHostMount = async () => {
 
 const handleDrop = async (event: DragEvent) => {
     event.preventDefault();
+    isDragOver.value = false;
     fileUpload.path = req.path;
     if (!uploadRef.value?.open) {
         await uploadRef.value?.handleDrop(event);
@@ -1783,10 +2248,12 @@ const handleDrop = async (event: DragEvent) => {
 
 const handleDragover = (event: DragEvent) => {
     event.preventDefault();
+    isDragOver.value = true;
 };
 
 const handleDragleave = (event: { preventDefault: () => void }) => {
     event.preventDefault();
+    isDragOver.value = false;
 };
 
 function hideRightMenu() {
@@ -1848,6 +2315,7 @@ function initTabsAndPaths() {
     getPaths(path);
     updateTab(path);
     paths.value = buildPaths(path);
+    resetPaths();
     pathWidth.value = getCurrentPath()?.offsetWidth;
 }
 
@@ -1867,8 +2335,9 @@ function buildPaths(path: string) {
         }, []);
 }
 
-function initHistory() {
-    search();
+async function initHistory() {
+    await loadInitialExistingPath(req.path);
+    await search();
     history.push(req.path);
     pointer = history.length - 1;
 }
@@ -1878,18 +2347,18 @@ function getInitialPath(): string {
     if (routePath && typeof routePath === 'string') {
         const p = routePath.trim();
         if (p !== '') {
-            globalStore.setLastFilePath(p);
+            lastFilePath.value = p;
             return p;
         }
     }
     const tab = editableTabs.value.find((t) => t.id === editableTabsKey.value);
     if (tab && typeof tab.path === 'string' && tab.path.trim() !== '') {
         const p = tab.path.trim();
-        globalStore.setLastFilePath(p);
+        lastFilePath.value = p;
         return p;
     }
-    if (typeof globalStore.lastFilePath === 'string' && globalStore.lastFilePath.trim() !== '') {
-        return globalStore.lastFilePath;
+    if (typeof lastFilePath.value === 'string' && lastFilePath.value.trim() !== '') {
+        return lastFilePath.value;
     }
 
     return '/';
@@ -1979,8 +2448,11 @@ const changeTab = (targetPath: TabPaneName) => {
     editableTabsKey.value = current.id;
     saveStorageTabs();
     saveStorageTabsKey();
+    if (req.path !== current?.path) {
+        resetDirSizeCache();
+    }
     req.path = current ? current.path : '';
-    globalStore.setLastFilePath(req.path);
+    lastFilePath.value = req.path;
     getPaths(req.path);
     search();
 };
@@ -2005,7 +2477,7 @@ const removeTab = (targetId: TabPaneName) => {
 };
 
 const checkFFmpeg = () => {
-    getComponentInfo('ffmpeg', globalStore.currentNode).then((res) => {
+    getComponentInfo('ffmpeg', currentNode.value).then((res) => {
         ffmpegExist.value = res.data.exists ?? false;
     });
 };
@@ -2013,7 +2485,7 @@ const checkFFmpeg = () => {
 const updateHeight = () => {
     const el = fileTableRef.value;
     if (!el) return;
-    let tabHeight = globalStore.openMenuTabs ? 40 : -4;
+    let tabHeight = openMenuTabs.value ? 40 : -4;
     const half = (el.offsetHeight + tabHeight) / 2;
     dropdownMaxHeight.value = Math.max(half, 300);
 };
@@ -2028,7 +2500,7 @@ onMounted(async () => {
     initShowHidden();
     initTabsAndPaths();
     await getHostMount();
-    initHistory();
+    await initHistory();
     checkFFmpeg();
     await nextTick(function () {
         handlePath();
@@ -2047,6 +2519,202 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped lang="scss">
+.file-management-page {
+    position: relative;
+
+    &::after {
+        position: absolute;
+        inset: 52px 12px 12px;
+        z-index: 20;
+        pointer-events: none;
+        content: '';
+        border: 1px dashed transparent;
+        border-radius: 8px;
+        transition:
+            background-color 0.2s,
+            border-color 0.2s;
+    }
+
+    &.is-drag-over::after {
+        background-color: var(--el-color-primary-light-9);
+        border-color: var(--el-color-primary);
+    }
+}
+
+.file-navigation {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 2px 0 12px;
+}
+
+.file-navigation__actions {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 6px;
+    .el-button + .el-button {
+        margin-left: 0px;
+    }
+}
+
+.file-navigation__path {
+    flex: 1;
+    min-width: 0;
+}
+
+.address-input {
+    width: 100%;
+}
+
+.address-bar {
+    display: flex;
+    flex-grow: 1;
+    align-items: center;
+    padding: 4px 8px;
+    overflow: hidden;
+    cursor: text;
+    background-color: var(--el-fill-color-lighter);
+    border: 1px solid var(--el-border-color-light);
+    border-radius: 6px;
+    transition:
+        border-color 0.2s,
+        box-shadow 0.2s;
+
+    &:hover {
+        border-color: var(--el-color-primary-light-5);
+        box-shadow: 0 0 0 2px var(--el-color-primary-light-9);
+    }
+
+    .arrow {
+        color: var(--el-text-color-placeholder);
+    }
+}
+
+.address-url {
+    gap: 2px;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.breadcrumb-root {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 24px;
+    color: var(--el-text-color-secondary);
+    transition: color 0.2s;
+
+    &:hover {
+        color: var(--el-color-primary);
+    }
+}
+
+.breadcrumb-item {
+    flex-shrink: 0;
+
+    &:last-child {
+        flex-shrink: 1;
+
+        .path-segment {
+            max-width: none;
+        }
+    }
+}
+
+.arrow {
+    margin: 0 2px;
+    font-size: 12px;
+    color: var(--el-text-color-placeholder);
+}
+
+.path-segment {
+    display: inline-block;
+    max-width: 180px;
+    padding: 0 2px;
+    overflow: hidden;
+    color: var(--el-text-color-regular);
+    text-overflow: ellipsis;
+    vertical-align: bottom;
+    white-space: nowrap;
+    transition: color 0.2s;
+
+    &:hover {
+        color: var(--el-color-primary);
+    }
+
+    &.path-segment--overflow {
+        font-weight: 600;
+        color: var(--el-text-color-secondary);
+    }
+}
+
+.file-left-toolbar,
+.file-right-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 100%;
+}
+
+.file-left-toolbar {
+    flex-wrap: wrap;
+}
+
+.file-utility-group {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 0;
+}
+
+.file-right-toolbar {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    width: 100%;
+}
+
+.file-batch-actions {
+    display: flex;
+    align-items: center;
+    order: 1;
+    min-width: 0;
+}
+
+.file-batch-group {
+    display: flex;
+    align-items: center;
+    flex-wrap: nowrap;
+    max-width: 100%;
+}
+
+.file-search-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    order: 2;
+    gap: 8px;
+    min-width: 0;
+}
+
+.file-search-input {
+    max-width: 310px;
+    min-width: 290px;
+}
+
+.file-search-input-shell {
+    flex: 1 1 320px;
+    min-width: 240px;
+    max-width: 420px;
+}
+
+.file-ai-button {
+    flex-shrink: 0;
+}
+
 .path {
     display: flex;
     align-items: center;
@@ -2072,20 +2740,17 @@ onBeforeUnmount(() => {
     }
 }
 
-.copy-button {
-    .close {
-        width: 10px;
-        .close-icon {
-            color: red;
-        }
-    }
-}
-
 .btn-container {
     display: flex;
     justify-content: space-between;
     align-items: center;
     width: 100%;
+}
+
+.copy-button {
+    .close {
+        width: 10px;
+    }
 }
 
 .favorite-item {
@@ -2094,25 +2759,29 @@ onBeforeUnmount(() => {
 }
 
 .file-row {
-    display: flex;
+    display: grid;
+    grid-template-columns: 24px minmax(0, 1fr) auto auto;
     align-items: center;
     width: 100%;
+    min-height: 28px;
+    column-gap: 6px;
 }
 
 .file-name {
-    flex-grow: 1;
-    margin-left: 1px;
-    width: 95%;
+    min-width: 0;
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
 }
-.address-bar {
-    border: var(--el-border);
-    .arrow {
-        color: #726e6e;
-    }
+
+.file-pagination-summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    flex-wrap: wrap;
 }
+
 .search-button {
     width: 20vw;
 }
@@ -2131,5 +2800,93 @@ onBeforeUnmount(() => {
 }
 :deep(.file-tabs .el-tabs--card .el-tabs__header .el-tabs__nav) {
     border-bottom: none !important;
+}
+:deep(.file-tool) {
+    padding: 0 !important;
+    .el-button.is-link {
+        padding: 8px 15px !important;
+    }
+}
+.file-tool:hover {
+    color: var(--el-color-primary) !important;
+    .el-button {
+        color: var(--el-color-primary) !important;
+    }
+}
+
+:deep(.file-layout .content-container__toolbar) {
+    row-gap: 10px;
+}
+
+:deep(.file-layout .content-container__title > .flex) {
+    width: 100%;
+}
+
+:deep(.file-layout .content-container__title > .flex > div:last-child) {
+    flex: 0 1 auto;
+    margin-left: auto;
+    min-width: 0;
+}
+
+:deep(.file-layout .content-container__title > .flex > div:last-child:has(.file-batch-toolbar.is-toolbar-wrapped)) {
+    flex: 1 1 100%;
+    margin-left: 0;
+}
+
+:deep(.file-table .el-table__row) {
+    cursor: default;
+}
+
+:deep(.file-table .el-table__row:hover > td.el-table__cell) {
+    background-color: var(--el-fill-color-light);
+}
+
+@media (max-width: 1200px) {
+    .file-right-toolbar {
+        width: 100%;
+    }
+}
+
+@media (max-width: 768px) {
+    .file-navigation {
+        align-items: stretch;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .file-navigation__actions,
+    .file-search-actions,
+    .file-batch-actions,
+    .copy-button {
+        width: 100%;
+    }
+
+    .file-right-toolbar {
+        align-items: stretch;
+        justify-content: stretch;
+    }
+
+    .file-search-actions {
+        flex-wrap: wrap;
+        justify-content: stretch;
+    }
+
+    .file-batch-group {
+        flex-wrap: wrap;
+    }
+
+    .file-search-input,
+    .file-ai-button {
+        width: 100%;
+        min-width: 0;
+    }
+
+    .file-search-input-shell {
+        max-width: none;
+    }
+
+    .file-batch-actions {
+        justify-content: flex-start;
+    }
 }
 </style>

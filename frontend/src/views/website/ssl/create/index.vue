@@ -70,7 +70,7 @@
                 <span class="input-help" v-if="ssl.provider === 'dnsManual'">
                     {{ $t('ssl.dnsMauanlHelper') }}
                 </span>
-                <span class="input-help text-red-500" v-if="ssl.provider === 'http'">
+                <span class="input-help ssl-http-helper" v-if="ssl.provider === 'http'">
                     {{ $t('ssl.httpHelper') }}
                 </span>
             </el-form-item>
@@ -145,8 +145,8 @@
                         {{ $t('ssl.shellHelper') }}
                     </span>
                 </el-form-item>
-                <PushtoNode
-                    v-if="isMaster && isMasterProductPro"
+                <PushToNode
+                    v-if="isMaster && isXpackOrEE"
                     :push-node="ssl.pushNode"
                     :nodes="ssl.pushNodes"
                     type="ssl"
@@ -158,7 +158,12 @@
         <template #footer>
             <span class="dialog-footer">
                 <el-button @click="handleClose" :disabled="loading">{{ $t('commons.button.cancel') }}</el-button>
-                <el-button type="primary" @click="submit(sslForm)" :disabled="loading">
+                <el-button
+                    v-permission="'website_cert_manage'"
+                    type="primary"
+                    @click="submit(sslForm)"
+                    :disabled="loading"
+                >
                     {{ $t('commons.button.confirm') }}
                 </el-button>
             </span>
@@ -177,12 +182,12 @@ import { FormInstance } from 'element-plus';
 import { computed, reactive, ref } from 'vue';
 import { MsgSuccess } from '@/utils/message';
 import { KeyTypes } from '@/global/mimetype';
-import { getDNSName, getAccountName } from '@/utils/util';
+import { getDNSName, getAccountName } from '@/utils/ssl';
 import { defineAsyncComponent } from 'vue';
 import { useGlobalStore } from '@/composables/useGlobalStore';
-const { isMasterProductPro, isMaster } = useGlobalStore();
+const { isMaster, isXpackOrEE } = useGlobalStore();
 
-const PushtoNode = defineAsyncComponent(async () => {
+const PushToNode = defineAsyncComponent(async () => {
     const modules = import.meta.glob('@/xpack/views/ssl/index.vue');
     const loader = modules['/src/xpack/views/ssl/index.vue'];
     if (loader) {
@@ -242,7 +247,7 @@ const initData = () => ({
     acmeAccountId: undefined,
     dnsAccountId: undefined,
     autoRenew: true,
-    keyType: 'P256',
+    keyType: 'EC256',
     pushDir: false,
     dir: '',
     description: '',
@@ -289,12 +294,12 @@ const changeIP = () => {
     }
 };
 
-const acceptParams = (op: string, websiteSSL: Website.SSLDTO) => {
+const acceptParams = (op: string, websiteSSL?: Website.SSLDTO) => {
     operate.value = op;
     if (op == 'create') {
         resetForm();
     }
-    if (op == 'edit') {
+    if (op == 'edit' && websiteSSL) {
         ssl.value.acmeAccountId = websiteSSL.acmeAccountId;
         if (websiteSSL.dnsAccountId > 0) {
             ssl.value.dnsAccountId = websiteSSL.dnsAccountId;
@@ -451,5 +456,9 @@ defineExpose({
     text-overflow: ellipsis;
     white-space: nowrap;
     vertical-align: top;
+}
+
+.ssl-http-helper {
+    color: var(--el-color-danger);
 }
 </style>

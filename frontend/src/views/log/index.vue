@@ -2,7 +2,7 @@
     <div>
         <RouterButton :buttons="buttons" />
         <LayoutContent>
-            <router-view></router-view>
+            <RouterViewCache />
         </LayoutContent>
     </div>
 </template>
@@ -14,6 +14,10 @@ const buttons = [
     {
         label: i18n.global.t('logs.panelLog'),
         path: '/logs/operation',
+    },
+    {
+        label: i18n.global.t('logs.hostSystem'),
+        path: '/logs/host',
     },
     {
         label: i18n.global.t('ssh.loginLogs'),

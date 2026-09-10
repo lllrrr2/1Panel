@@ -39,7 +39,7 @@ export namespace Cronjob {
         files: Array<Item>;
         sourceDir: string;
         snapshotRule: snapshotRule;
-        ignoreAppIDs: Array<Number>;
+        ignoreAppIDs: Array<number>;
         withImage: boolean;
 
         websiteList: Array<string>;
@@ -165,7 +165,7 @@ export namespace Cronjob {
     }
     export interface snapshotRule {
         withImage: boolean;
-        ignoreAppIDs: Array<Number>;
+        ignoreAppIDs: Array<number>;
     }
     export interface SpecObj {
         specType: string;
@@ -195,12 +195,13 @@ export namespace Cronjob {
     }
     export interface SearchRecord extends ReqPage {
         cronjobID: number;
-        startTime: Date;
-        endTime: Date;
+        startTime: string | Date;
+        endTime: string | Date;
         status: string;
     }
     export interface Record {
         id: number;
+        cronjobName?: string;
         taskID: string;
         file: string;
         startTime: string;

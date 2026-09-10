@@ -6,7 +6,10 @@
                 <div class="mt-2"><el-alert type="info" :title="$t('ssh.sshAlert')" :closable="false" /></div>
             </template>
             <template #leftToolBar>
-                <el-button type="primary" @click="onExport">
+                <el-button v-permission v-node-admin type="primary" plain @click="onClean">
+                    {{ $t('logs.deleteLogs') }}
+                </el-button>
+                <el-button v-permission v-node-admin type="primary" @click="onExport">
                     {{ $t('commons.button.export') }}
                 </el-button>
             </template>
@@ -79,24 +82,30 @@
                     <el-button @click="open = false" :disabled="loading">
                         {{ $t('commons.button.cancel') }}
                     </el-button>
-                    <el-button type="primary" @click="onSubmitExport" :disabled="loading">
+                    <el-button v-permission v-node-admin type="primary" @click="onSubmitExport" :disabled="loading">
                         {{ $t('commons.button.confirm') }}
                     </el-button>
                 </span>
             </template>
         </DialogPro>
+        <ConfirmDialog ref="confirmDialogRef" @confirm="onSubmitClean" />
     </div>
 </template>
 
 <script setup lang="ts">
-import { dateFormat, downloadFile } from '@/utils/util';
+import ConfirmDialog from '@/components/confirm-dialog/index.vue';
+import { dateFormat } from '@/utils/date';
+import { downloadFile } from '@/utils/file';
 import { onMounted, reactive, ref } from 'vue';
-import { exportSSHLogs, loadSSHLogs } from '@/api/modules/host';
-import { GlobalStore } from '@/store';
-const globalStore = GlobalStore();
+import { cleanSSHLogs, exportSSHLogs, loadSSHLogs } from '@/api/modules/host';
+import { useGlobalStore } from '@/composables/useGlobalStore';
+import i18n from '@/lang';
+import { MsgSuccess } from '@/utils/message';
+const { currentNode } = useGlobalStore();
 
 const loading = ref();
 const data = ref();
+const confirmDialogRef = ref();
 const paginationConfig = reactive({
     cacheSizeKey: 'ssh-log-page-size',
     currentPage: 1,
@@ -137,6 +146,27 @@ const onExport = async () => {
     exportConfig.count = -1;
 };
 
+const onClean = () => {
+    confirmDialogRef.value.acceptParams({
+        header: i18n.global.t('logs.deleteLogs'),
+        operationInfo: i18n.global.t('commons.msg.delete'),
+        submitInputInfo: i18n.global.t('logs.deleteLogs'),
+    });
+};
+
+const onSubmitClean = async () => {
+    loading.value = true;
+    await cleanSSHLogs()
+        .then(() => {
+            paginationConfig.currentPage = 1;
+            MsgSuccess(i18n.global.t('commons.msg.operationSuccess'));
+            search();
+        })
+        .catch(() => {
+            loading.value = false;
+        });
+};
+
 const onSubmitExport = async () => {
     let params = {
         info: '',
@@ -147,7 +177,7 @@ const onSubmitExport = async () => {
     await exportSSHLogs(params)
         .then((res) => {
             if (res.data) {
-                downloadFile(res.data, globalStore.currentNode);
+                downloadFile(res.data, currentNode.value);
             }
             open.value = false;
         })

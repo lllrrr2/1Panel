@@ -19,7 +19,6 @@ import (
 	cmd2 "github.com/1Panel-dev/1Panel/agent/utils/cmd"
 
 	"github.com/1Panel-dev/1Panel/agent/i18n"
-	"github.com/1Panel-dev/1Panel/agent/utils/common"
 
 	"github.com/1Panel-dev/1Panel/agent/app/dto"
 	"github.com/1Panel-dev/1Panel/agent/app/dto/request"
@@ -33,7 +32,6 @@ import (
 	"github.com/1Panel-dev/1Panel/agent/utils/compose"
 	"github.com/1Panel-dev/1Panel/agent/utils/docker"
 	"github.com/1Panel-dev/1Panel/agent/utils/files"
-	"github.com/1Panel-dev/1Panel/agent/utils/re"
 	"github.com/pkg/errors"
 	"github.com/subosito/gotenv"
 	"gopkg.in/yaml.v3"
@@ -41,19 +39,24 @@ import (
 
 func handleRuntime(create request.RuntimeCreate, runtime *model.Runtime, fileOp files.FileOp, appVersionDir string) (err error) {
 	runtimeDir := path.Join(global.Dir.RuntimeDir, create.Type)
+	projectDir := path.Join(runtimeDir, create.Name)
+	if create.CodeDir != "" && isPathInsideOrEqual(projectDir, create.CodeDir) {
+		return buserr.New("ErrRuntimeProjectDirContainsCodeDir")
+	}
 	if err = fileOp.CopyDir(appVersionDir, runtimeDir); err != nil {
 		return
 	}
 	versionDir := path.Join(runtimeDir, filepath.Base(appVersionDir))
-	projectDir := path.Join(runtimeDir, create.Name)
+	cleanupTarget := versionDir
 	defer func() {
 		if err != nil {
-			_ = fileOp.DeleteDir(projectDir)
+			_ = fileOp.DeleteDir(cleanupTarget)
 		}
 	}()
 	if err = fileOp.Rename(versionDir, projectDir); err != nil {
 		return
 	}
+	cleanupTarget = projectDir
 	composeContent, envContent, _, err := handleParams(create, projectDir)
 	if err != nil {
 		return
@@ -62,26 +65,43 @@ func handleRuntime(create request.RuntimeCreate, runtime *model.Runtime, fileOp 
 	runtime.Env = string(envContent)
 	runtime.Status = constant.StatusCreating
 	runtime.CodeDir = create.CodeDir
-
-	nodeDetail, err := appDetailRepo.GetFirst(repo.WithByID(runtime.AppDetailID))
-	if err != nil {
-		return err
-	}
-
-	go func() {
-		RequestDownloadCallBack(nodeDetail.DownloadCallBackUrl)
-	}()
-	go startRuntime(runtime)
-
 	return
+}
+
+func runtimeNodeShouldInstallDependencies(create request.RuntimeCreate) bool {
+	return create.NodeConfig.Install == nil || *create.NodeConfig.Install
+}
+
+func isPathInsideOrEqual(baseDir, targetDir string) bool {
+	baseAbs := resolveRuntimePath(baseDir)
+	targetAbs := resolveRuntimePath(targetDir)
+	rel, err := filepath.Rel(baseAbs, targetAbs)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)))
+}
+
+func resolveRuntimePath(dir string) string {
+	cleanDir := filepath.Clean(dir)
+	if realDir, err := filepath.EvalSymlinks(cleanDir); err == nil {
+		return realDir
+	}
+	if absDir, err := filepath.Abs(cleanDir); err == nil {
+		return absDir
+	}
+	return cleanDir
 }
 
 func handlePHP(create request.RuntimeCreate, runtime *model.Runtime, fileOp files.FileOp, appVersionDir string) (err error) {
 	runtimeDir := path.Join(global.Dir.RuntimeDir, create.Type)
+	projectDir := path.Join(runtimeDir, create.Name)
+	if create.CodeDir != "" && isPathInsideOrEqual(projectDir, create.CodeDir) {
+		return buserr.New("ErrRuntimeProjectDirContainsCodeDir")
+	}
 	if err = fileOp.CopyDirWithNewName(appVersionDir, runtimeDir, create.Name); err != nil {
 		return
 	}
-	projectDir := path.Join(runtimeDir, create.Name)
 	defer func() {
 		if err != nil {
 			_ = fileOp.DeleteDir(projectDir)
@@ -102,32 +122,28 @@ func handlePHP(create request.RuntimeCreate, runtime *model.Runtime, fileOp file
 	runtime.Env = string(envContent)
 	runtime.Params = string(forms)
 	runtime.Status = constant.StatusBuilding
-
-	go func() {
-		appDetail, err := appDetailRepo.GetFirst(repo.WithByID(runtime.AppDetailID))
-		if err == nil {
-			RequestDownloadCallBack(appDetail.DownloadCallBackUrl)
-		}
-	}()
-
-	go buildRuntime(runtime, "", "", false)
 	return
 }
 
 func startRuntime(runtime *model.Runtime) {
+	_ = startRuntimeWithResult(runtime)
+}
+
+func startRuntimeWithResult(runtime *model.Runtime) error {
 	if err := runComposeCmdWithLog("up", runtime.GetComposePath(), runtime.GetLogPath()); err != nil {
 		runtime.Status = constant.StatusError
 		runtime.Message = err.Error()
 		_ = runtimeRepo.Save(runtime)
-		return
+		return err
 	}
 
 	if err := SyncRuntimeContainerStatus(runtime); err != nil {
 		runtime.Status = constant.StatusError
 		runtime.Message = err.Error()
 		_ = runtimeRepo.Save(runtime)
-		return
+		return err
 	}
+	return nil
 }
 
 func reCreateRuntime(runtime *model.Runtime) {
@@ -150,21 +166,28 @@ func reCreateRuntime(runtime *model.Runtime) {
 	}
 }
 
-func getComposeCmd(composePath, operate string) *exec.Cmd {
+func getComposeCmd(composePath, operate string, projectName ...string) *exec.Cmd {
+	return getComposeCmdWithEnv(composePath, operate, "", projectName...)
+}
+
+func getComposeCmdWithEnv(composePath, operate, envFile string, projectName ...string) *exec.Cmd {
 	dockerCommand := global.CONF.DockerConfig.Command
+	args := make([]string, 0, 9)
+	if envFile != "" {
+		args = append(args, "--env-file", envFile)
+	}
+	if len(projectName) > 0 && strings.TrimSpace(projectName[0]) != "" {
+		args = append(args, "--project-name", projectName[0])
+	}
+	args = append(args, "-f", composePath, operate)
+	if operate == "up" {
+		args = append(args, "-d")
+	}
 	var cmd *exec.Cmd
 	if dockerCommand == "docker-compose" {
-		if operate == "up" {
-			cmd = exec.Command("docker-compose", "-f", composePath, operate, "-d")
-		} else {
-			cmd = exec.Command("docker-compose", "-f", composePath, operate)
-		}
+		cmd = exec.Command("docker-compose", args...)
 	} else {
-		if operate == "up" {
-			cmd = exec.Command("docker", "compose", "-f", composePath, operate, "-d")
-		} else {
-			cmd = exec.Command("docker", "compose", "-f", composePath, operate)
-		}
+		cmd = exec.Command("docker", append([]string{"compose"}, args...)...)
 	}
 	return cmd
 }
@@ -299,6 +322,10 @@ func deleteImageByID(oldImageID, imageName string, client docker.Client) {
 }
 
 func buildRuntime(runtime *model.Runtime, oldImageID string, oldEnv string, rebuild bool) {
+	_ = buildRuntimeWithResult(runtime, oldImageID, oldEnv, rebuild)
+}
+
+func buildRuntimeWithResult(runtime *model.Runtime, oldImageID string, oldEnv string, rebuild bool) error {
 	runtimePath := runtime.GetPath()
 	composePath := runtime.GetComposePath()
 	logPath := path.Join(runtimePath, "build.log")
@@ -306,10 +333,16 @@ func buildRuntime(runtime *model.Runtime, oldImageID string, oldEnv string, rebu
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, constant.FilePerm)
 	if err != nil {
 		global.LOG.Errorf("failed to open log file: %v", err)
-		return
+		runtime.Status = constant.StatusError
+		runtime.Message = err.Error()
+		_ = runtimeRepo.Save(runtime)
+		return err
 	}
 	defer func() {
 		_ = logFile.Close()
+	}()
+	defer func() {
+		_ = runtimeRepo.Save(runtime)
 	}()
 
 	newPHPVersion := getRuntimeEnv(runtime.Env, "PHP_VERSION")
@@ -342,16 +375,19 @@ func buildRuntime(runtime *model.Runtime, oldImageID string, oldEnv string, rebu
 		} else {
 			runtime.Message = buserr.New("ErrImageBuildErr").Error() + ":" + stderrBuf.String()
 		}
-		_ = runtimeRepo.Save(runtime)
-		return
+		return err
 	}
 	if err = runComposeCmdWithLog(constant.RuntimeDown, runtime.GetComposePath(), runtime.GetLogPath()); err != nil {
-		return
+		runtime.Status = constant.StatusError
+		runtime.Message = err.Error()
+		return err
 	}
 	client, err := docker.NewClient()
 	if err != nil {
 		_, _ = logFile.WriteString(fmt.Sprintf("failed to connect to docker client: %v", err))
-		return
+		runtime.Status = constant.StatusError
+		runtime.Message = err.Error()
+		return err
 	}
 	runtime.Message = ""
 	if rebuild && runtime.ID > 0 {
@@ -377,14 +413,10 @@ func buildRuntime(runtime *model.Runtime, oldImageID string, oldEnv string, rebu
 		}
 	}
 
-	defer func() {
-		_ = runtimeRepo.Save(runtime)
-	}()
-
 	if out, err := compose.Up(composePath); err != nil {
 		runtime.Status = constant.StatusStartErr
 		runtime.Message = out
-		return
+		return err
 	}
 	deleteImageID := ""
 	extensions := getRuntimeEnv(runtime.Env, "PHP_EXTENSIONS")
@@ -394,14 +426,14 @@ func buildRuntime(runtime *model.Runtime, oldImageID string, oldEnv string, rebu
 		if err = cmdMgr.Run("docker", "exec", "-i", runtime.ContainerName, "install-ext", extensions); err != nil {
 			runtime.Status = constant.StatusError
 			runtime.Message = buserr.New("ErrImageBuildErr").Error() + ":" + err.Error()
-			return
+			return err
 		}
 		commitMgr := cmd2.NewCommandMgr(cmd2.WithTimeout(10*time.Minute), cmd2.WithOutputFile(logPath))
 		err = commitMgr.Run("docker", "commit", runtime.ContainerName, runtime.Image)
 		if err != nil {
 			runtime.Status = constant.StatusError
 			runtime.Message = buserr.New("ErrImageBuildErr").Error() + ":" + err.Error()
-			return
+			return err
 		}
 	}
 	if oldImageID != "" {
@@ -414,10 +446,10 @@ func buildRuntime(runtime *model.Runtime, oldImageID string, oldEnv string, rebu
 	if out, err := compose.DownAndUp(composePath); err != nil {
 		runtime.Status = constant.StatusStartErr
 		runtime.Message = out
-		return
+		return err
 	}
 	runtime.Status = constant.StatusRunning
-	_ = runtimeRepo.Save(runtime)
+	return nil
 }
 
 func handleParams(create request.RuntimeCreate, projectDir string) (composeContent []byte, envContent []byte, forms []byte, err error) {
@@ -435,7 +467,7 @@ func handleParams(create request.RuntimeCreate, projectDir string) (composeConte
 		return
 	}
 	for k := range env {
-		if strings.HasPrefix(k, "CONTAINER_PORT_") || strings.HasPrefix(k, "HOST_PORT_") || strings.HasPrefix(k, "HOST_IP_") || strings.Contains(k, "APP_PORT") {
+		if isComposePortEnvKey(k) || strings.Contains(k, "APP_PORT") {
 			delete(env, k)
 		}
 	}
@@ -481,7 +513,7 @@ func handleParams(create request.RuntimeCreate, projectDir string) (composeConte
 	case constant.RuntimeNode:
 		create.Params["CODE_DIR"] = create.CodeDir
 		create.Params["NODE_VERSION"] = create.Version
-		if create.NodeConfig.Install {
+		if runtimeNodeShouldInstallDependencies(create) {
 			create.Params["RUN_INSTALL"] = "1"
 		} else {
 			create.Params["RUN_INSTALL"] = "0"
@@ -592,15 +624,16 @@ func handleCompose(env gotenv.Env, composeContent []byte, create request.Runtime
 		if len(create.ExposedPorts) > 0 {
 			var ports []interface{}
 			for i, port := range create.ExposedPorts {
-				containerPortStr := fmt.Sprintf("CONTAINER_PORT_%d", i)
-				hostPortStr := fmt.Sprintf("HOST_PORT_%d", i)
+				containerPortStr, hostPortStr, hostIPStr, protocolStr := composePortEnvKeys(i)
 				existMap[containerPortStr] = struct{}{}
 				existMap[hostPortStr] = struct{}{}
-				hostIPStr := fmt.Sprintf("HOST_IP_%d", i)
-				ports = append(ports, fmt.Sprintf("${%s}:${%s}:${%s}", hostIPStr, hostPortStr, containerPortStr))
+				existMap[hostIPStr] = struct{}{}
+				existMap[protocolStr] = struct{}{}
+				ports = append(ports, formatComposePortMapping(hostIPStr, hostPortStr, containerPortStr, port.Protocol))
 				create.Params[containerPortStr] = port.ContainerPort
 				create.Params[hostPortStr] = port.HostPort
 				create.Params[hostIPStr] = port.HostIP
+				create.Params[protocolStr] = normalizeComposeProtocol(port.Protocol)
 			}
 			if create.Type == constant.RuntimePHP {
 				ports = append(ports, "127.0.0.1:${PANEL_APP_PORT_HTTP}:9000")
@@ -633,14 +666,14 @@ func handleCompose(env gotenv.Env, composeContent []byte, create request.Runtime
 			volumes = append(volumes, fmt.Sprintf("%s:%s", k, v))
 		}
 		for _, volume := range create.Volumes {
-			volumes = append(volumes, fmt.Sprintf("%s:%s", volume.Source, volume.Target))
+			volumes = append(volumes, formatComposeVolume(volume.Source, volume.Target, volume.Mode))
 		}
 
 		var extraHosts []interface{}
 		for _, host := range create.ExtraHosts {
 			extraHosts = append(extraHosts, fmt.Sprintf("%s:%s", host.Hostname, host.IP))
 		}
-		delete(serviceValue, "extraHosts")
+		delete(serviceValue, "extra_hosts")
 		if len(extraHosts) > 0 {
 			serviceValue["extra_hosts"] = extraHosts
 		}
@@ -649,7 +682,7 @@ func handleCompose(env gotenv.Env, composeContent []byte, create request.Runtime
 		break
 	}
 	for k := range env {
-		if strings.Contains(k, "CONTAINER_PORT_") || strings.Contains(k, "HOST_PORT_") {
+		if isComposePortEnvKey(k) {
 			if _, ok := existMap[k]; !ok {
 				delete(env, k)
 			}
@@ -805,21 +838,49 @@ func restartRuntime(runtime *model.Runtime) (err error) {
 }
 
 func getDockerComposeEnvironments(yml []byte) ([]request.Environment, error) {
-	var (
-		composeProject docker.ComposeProject
-		err            error
-	)
-	err = yaml.Unmarshal(yml, &composeProject)
-	if err != nil {
+	var project struct {
+		Services yaml.Node `yaml:"services"`
+	}
+	if err := yaml.Unmarshal(yml, &project); err != nil {
 		return nil, err
 	}
+	services := &project.Services
+	if services.Kind == yaml.AliasNode {
+		services = services.Alias
+	}
+	if services.Kind != 0 && services.Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("unsupported services format")
+	}
 	var res []request.Environment
-	for _, service := range composeProject.Services {
-		for key, value := range service.Environment.Variables {
-			res = append(res, request.Environment{
-				Key:   key,
-				Value: value,
-			})
+	// Keep the file order for both services and environment entries.
+	for i := 1; i < len(services.Content); i += 2 {
+		var service struct {
+			Environment yaml.Node `yaml:"environment"`
+		}
+		if err := services.Content[i].Decode(&service); err != nil {
+			return nil, err
+		}
+		environment := &service.Environment
+		if environment.Kind == yaml.AliasNode {
+			environment = environment.Alias
+		}
+		switch environment.Kind {
+		case yaml.MappingNode:
+			for j := 0; j < len(environment.Content); j += 2 {
+				res = append(res, request.Environment{Key: environment.Content[j].Value, Value: environment.Content[j+1].Value})
+			}
+		case yaml.SequenceNode:
+			for _, item := range environment.Content {
+				var entry string
+				if err := item.Decode(&entry); err != nil {
+					return nil, err
+				}
+				key, value, _ := strings.Cut(entry, "=")
+				res = append(res, request.Environment{Key: key, Value: value})
+			}
+		case 0:
+		default:
+			return nil, fmt.Errorf("unsupported environment format")
 		}
 	}
 	return res, nil
@@ -843,9 +904,14 @@ func getDockerComposeVolumes(yml []byte) ([]request.Volume, error) {
 			if len(envArray) > 1 {
 				target = envArray[1]
 			}
+			mode := ""
+			if len(envArray) > 2 {
+				mode = envArray[2]
+			}
 			res = append(res, request.Volume{
 				Source: source,
 				Target: target,
+				Mode:   normalizeComposeVolumeMode(mode),
 			})
 		}
 	}
@@ -879,7 +945,31 @@ func getDockerComposeExtraHosts(yml []byte) ([]request.ExtraHost, error) {
 	return res, nil
 }
 
+func composePortCheckKey(port int, protocol string) string {
+	return fmt.Sprintf("%d/%s", port, normalizeComposeProtocol(protocol))
+}
+
+func runtimeOwnedPortKeys(envStr string) map[string]struct{} {
+	portKeys := make(map[string]struct{})
+	envs, err := gotenv.Unmarshal(envStr)
+	if err != nil {
+		return portKeys
+	}
+	exposedPorts, err := loadComposeExposedPortsFromEnv(envs, "", false)
+	if err != nil {
+		return portKeys
+	}
+	for _, port := range exposedPorts {
+		portKeys[composePortCheckKey(port.HostPort, port.Protocol)] = struct{}{}
+	}
+	return portKeys
+}
+
 func checkRuntimePortExist(port int, scanPort bool, runtimeID uint) error {
+	return checkRuntimePortExistWithProtocol(port, "", scanPort, runtimeID)
+}
+
+func checkRuntimePortExistWithProtocol(port int, protocol string, scanPort bool, runtimeID uint) error {
 	errMap := make(map[string]interface{})
 	errMap["port"] = port
 	appInstall, _ := appInstallRepo.GetFirst(appInstallRepo.WithPort(port))
@@ -904,7 +994,7 @@ func checkRuntimePortExist(port int, scanPort bool, runtimeID uint) error {
 		errMap["name"] = domain.Domain
 		return buserr.WithMap("ErrPortExist", errMap, nil)
 	}
-	if scanPort && common.ScanPort(port) {
+	if scanPort && isPortInUse(port, protocol) {
 		return buserr.WithDetail("ErrPortInUsed", port, nil)
 	}
 	return nil
@@ -977,30 +1067,15 @@ func handleRuntimeDTO(res *response.RuntimeDTO, runtime model.Runtime) error {
 		return err
 	}
 	for k, v := range envs {
-		if strings.Contains(k, "CONTAINER_PORT") || strings.Contains(k, "HOST_PORT") {
-			if strings.Contains(k, "CONTAINER_PORT") {
-				matches := re.GetRegex(re.TrailingDigitsPattern).FindStringSubmatch(k)
-				if len(matches) < 2 {
-					return fmt.Errorf("invalid container port key: %s", k)
-				}
-				containerPort, err := strconv.Atoi(v)
-				if err != nil {
-					return err
-				}
-				hostPort, err := strconv.Atoi(envs[fmt.Sprintf("HOST_PORT_%s", matches[1])])
-				if err != nil {
-					return err
-				}
-				hostIP := envs[fmt.Sprintf("HOST_IP_%s", matches[1])]
-				res.ExposedPorts = append(res.ExposedPorts, request.ExposedPort{
-					ContainerPort: containerPort,
-					HostPort:      hostPort,
-					HostIP:        hostIP,
-				})
-			}
+		if isComposePortEnvKey(k) {
+			continue
 		} else {
 			res.Params[k] = v
 		}
+	}
+	res.ExposedPorts, err = loadComposeExposedPortsFromEnv(envs, "", true)
+	if err != nil {
+		return err
 	}
 	if v, ok := envs["CONTAINER_PACKAGE_URL"]; ok {
 		res.Source = v

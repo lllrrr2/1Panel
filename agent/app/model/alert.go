@@ -1,5 +1,12 @@
 package model
 
+import (
+	"strings"
+
+	"github.com/google/uuid"
+	"gorm.io/gorm"
+)
+
 type Alert struct {
 	BaseModel
 
@@ -9,17 +16,20 @@ type Alert struct {
 	Count          uint   `gorm:"type:integer;not null" json:"count"`
 	Project        string `gorm:"type:varchar(64)" json:"project"`
 	Status         string `gorm:"type:varchar(64);not null" json:"status"`
-	Method         string `gorm:"type:varchar(64);not null" json:"method"`
+	Method         string `gorm:"type:text;not null" json:"method"`
 	SendCount      uint   `gorm:"type:integer" json:"sendCount"`
 	AdvancedParams string `gorm:"type:longText" json:"advancedParams"`
+	CreateUser     string `gorm:"type:varchar(256)" json:"createUser"`
+	UpdateUser     string `gorm:"type:varchar(256)" json:"updateUser"`
 }
 
 type AlertTask struct {
 	BaseModel
-	Type      string `gorm:"type:varchar(64);not null" json:"type"`
-	Quota     string `gorm:"type:varchar(64)" json:"quota"`
-	QuotaType string `gorm:"type:varchar(64)" json:"quotaType"`
-	Method    string `gorm:"type:varchar(64);not null;default:'sms'" json:"method"`
+	Type          string `gorm:"type:varchar(64);not null" json:"type"`
+	Quota         string `gorm:"type:varchar(64)" json:"quota"`
+	QuotaType     string `gorm:"type:varchar(64)" json:"quotaType"`
+	Method        string `gorm:"type:varchar(128);not null;default:'sms'" json:"method"`
+	DeliveryLogID *uint  `gorm:"uniqueIndex" json:"-"`
 }
 
 type AlertLog struct {
@@ -34,15 +44,26 @@ type AlertLog struct {
 	Message     string `gorm:"type:varchar(256);" json:"message"`
 	RecordId    uint   `gorm:"type:integer;" json:"recordId"`
 	LicenseId   string `gorm:"type:varchar(256);not null;" json:"licenseId" `
-	Method      string `gorm:"type:varchar(64);not null;default:'sms'" json:"method"`
+	Method      string `gorm:"type:varchar(128);not null;default:'sms'" json:"method"`
 }
 
 type AlertConfig struct {
 	BaseModel
-	Type   string `gorm:"type:varchar(64);not null" json:"type"`
-	Title  string `gorm:"type:varchar(64);not null" json:"title"`
-	Status string `gorm:"type:varchar(64);not null" json:"status"`
-	Config string `gorm:"type:varchar(256);not null" json:"config"`
+	UID          string `gorm:"type:varchar(64);not null;uniqueIndex" json:"uid"`
+	Type         string `gorm:"type:varchar(64);not null" json:"type"`
+	Title        string `gorm:"type:varchar(64);not null" json:"title"`
+	Status       string `gorm:"type:varchar(64);not null" json:"status"`
+	Config       string `gorm:"type:text;not null" json:"config"`
+	SecretConfig string `gorm:"type:text;not null;default:''" json:"-"`
+	CreateUser   string `gorm:"type:varchar(256)" json:"createUser"`
+	UpdateUser   string `gorm:"type:varchar(256)" json:"updateUser"`
+}
+
+func (a *AlertConfig) BeforeCreate(_ *gorm.DB) error {
+	if strings.TrimSpace(a.UID) == "" {
+		a.UID = uuid.NewString()
+	}
+	return nil
 }
 
 type LoginLog struct {

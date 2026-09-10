@@ -19,6 +19,12 @@ func WithByID(id uint) DBOption {
 	}
 }
 
+func WithByGroupID(id uint) DBOption {
+	return func(g *gorm.DB) *gorm.DB {
+		return g.Where("group_id = ?", id)
+	}
+}
+
 func WithByNOTID(id uint) DBOption {
 	return func(g *gorm.DB) *gorm.DB {
 		return g.Where("id != ?", id)
@@ -40,6 +46,18 @@ func WithByIDNotIn(ids []uint) DBOption {
 func WithByName(name string) DBOption {
 	return func(g *gorm.DB) *gorm.DB {
 		return g.Where("name = ?", name)
+	}
+}
+
+func WithByPath(path string) DBOption {
+	return func(g *gorm.DB) *gorm.DB {
+		return g.Where("path = ?", path)
+	}
+}
+
+func WithByAddr(addr string) DBOption {
+	return func(g *gorm.DB) *gorm.DB {
+		return g.Where("addr = ?", addr)
 	}
 }
 
@@ -82,6 +100,18 @@ func WithByProvider(provider string) DBOption {
 	}
 }
 
+func WithByAPIType(apiType string) DBOption {
+	return func(g *gorm.DB) *gorm.DB {
+		return g.Where("api_type = ?", apiType)
+	}
+}
+
+func WithTextAPIType() DBOption {
+	return func(g *gorm.DB) *gorm.DB {
+		return g.Where("api_type NOT LIKE ? AND api_type <> ?", "%-images", "openai-embeddings")
+	}
+}
+
 func WithByModel(model string) DBOption {
 	return func(g *gorm.DB) *gorm.DB {
 		if len(model) == 0 {
@@ -97,6 +127,24 @@ func WithByAccountID(accountID uint) DBOption {
 			return g
 		}
 		return g.Where("account_id = ?", accountID)
+	}
+}
+
+func WithByWebsiteID(websiteID uint) DBOption {
+	return func(g *gorm.DB) *gorm.DB {
+		if websiteID == 0 {
+			return g
+		}
+		return g.Where("website_id = ?", websiteID)
+	}
+}
+
+func WithByAppInstallID(appInstallID uint) DBOption {
+	return func(g *gorm.DB) *gorm.DB {
+		if appInstallID == 0 {
+			return g
+		}
+		return g.Where("app_install_id = ?", appInstallID)
 	}
 }
 

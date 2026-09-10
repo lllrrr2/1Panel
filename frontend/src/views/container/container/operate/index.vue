@@ -2,7 +2,7 @@
     <div>
         <LayoutContent
             back-name="ContainerItem"
-            :title="isCreate ? $t('container.create') : $t('commons.button.edit') + ' - ' + form.name"
+            :title="isCreate ? $t('commons.button.create') : $t('commons.button.edit') + ' - ' + form.name"
         >
             <template #main>
                 <el-form
@@ -23,7 +23,14 @@
                                     type="error"
                                 />
 
-                                <el-button v-if="isCreate" type="primary" icon="EditPen" plain @click="toTerminal()">
+                                <el-button
+                                    v-if="isCreate"
+                                    :disabled="!isAdminOrNodeAdmin"
+                                    type="primary"
+                                    icon="EditPen"
+                                    plain
+                                    @click="toTerminal()"
+                                >
                                     {{ $t('container.commandInput') }}
                                 </el-button>
                                 <el-form-item class="mt-5" :label="$t('commons.table.name')" prop="name">
@@ -163,6 +170,9 @@
 
                                 <el-tab-pane :label="$t('container.mount')">
                                     <Volume ref="volumeRef" :volumes="form.volumes" />
+                                </el-tab-pane>
+                                <el-tab-pane :label="$t('runtime.extraHosts')">
+                                    <ExtraHosts :extraHosts="form.extraHosts" />
                                 </el-tab-pane>
 
                                 <el-tab-pane :label="$t('terminal.command')">
@@ -342,6 +352,7 @@ import { ElForm } from 'element-plus';
 import Confirm from '@/views/container/container/operate/confirm.vue';
 import Volume from '@/views/container/container/operate/volume.vue';
 import Network from '@/views/container/container/operate/network.vue';
+import ExtraHosts from '@/views/website/runtime/components/extra-hosts/index.vue';
 import {
     listImage,
     createContainer,
@@ -353,10 +364,14 @@ import {
 import { Container } from '@/api/interface/container';
 import { MsgError } from '@/utils/message';
 import TaskLog from '@/components/log/task/index.vue';
-import { checkIpV4V6, checkPort, newUUID } from '@/utils/util';
+import { checkIpV4V6, checkPort } from '@/utils/validate';
+import { newUUID } from '@/utils/id';
 import router from '@/routers';
 import TerminalDialog from '@/views/host/file-management/terminal/index.vue';
 import { routerToName, routerToNameWithQuery } from '@/utils/router';
+import { useGlobalStore } from '@/composables/useGlobalStore';
+
+const { isAdminOrNodeAdmin } = useGlobalStore();
 
 const loading = ref(false);
 const isCreate = ref();
@@ -388,6 +403,7 @@ const form = reactive<Container.ContainerHelper>({
     cpuShares: 1024,
     memory: 0,
     volumes: [],
+    extraHosts: [],
     privileged: false,
     autoRemove: false,
     labels: [],
@@ -450,6 +466,7 @@ const search = async () => {
                     }
                 }
                 form.volumes = res.data.volumes || [];
+                form.extraHosts = res.data.extraHosts || [];
             })
             .catch(() => {
                 loading.value = false;

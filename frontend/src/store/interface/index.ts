@@ -27,36 +27,51 @@ export interface Watermark {
 }
 
 export interface GlobalState {
-    isLoading: boolean;
-    loadingText: string;
-    isLogin: boolean;
-    entrance: string;
     language: string; // zh | en | tw
+    device: DeviceType;
     themeConfig: ThemeConfigProp;
+    // ui
     isFullScreen: boolean;
     openMenuTabs: boolean;
-    watermark: Watermark;
+    menuAccordion: boolean;
+    watermark: Watermark | null;
     watermarkShow: boolean;
-    isOnRestart: boolean;
-    agreeLicense: boolean;
-    hasNewVersion: boolean;
+    isLoading: boolean;
+    loadingText: string;
+    // auth
     ignoreCaptcha: boolean;
-    device: DeviceType;
+    agreeLicense: boolean;
+    isLogin: boolean;
+    entrance: string;
+    csrfToken: string;
+    // context
+    hasNewVersion: boolean;
     lastFilePath: string;
     currentDB: string;
     currentPgDB: string;
     currentRedisDB: string;
+    currentMongodbDB: string;
     showEntranceWarn: boolean;
     defaultNetwork: string;
     defaultIO: string;
-    isFxplay: boolean;
-
-    isProductPro: boolean;
+    isOnRestart: boolean;
+    // tags
+    isAdmin: boolean;
+    permissions: string[];
+    masterOnlyPermissions: string[];
+    nodeRoles: Array<{ nodeId: number; nodeName: string; roleId: number; roleName: string }>;
+    isEnterprise: boolean;
     isIntl: boolean;
+    docWithRegion: boolean;
+    isFxplay: boolean;
+    isOffline: boolean;
+    // license
+    isProductPro: boolean;
     productProExpires: number;
     isMasterProductPro: boolean;
-    isOffLine: boolean;
-
+    isEnterpriseLicensed: boolean;
+    isEnterpriseLicenseLoaded: boolean;
+    // multi-node
     masterAlias: string;
     currentNode: string;
     currentNodeAddr: string;
@@ -69,6 +84,7 @@ export interface MenuState {
 }
 
 export interface TerminalState {
+    showTerminalButton: boolean;
     lineHeight: number;
     letterSpacing: number;
     fontSize: number;

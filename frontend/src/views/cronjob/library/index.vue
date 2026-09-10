@@ -2,7 +2,7 @@
     <div>
         <LayoutContent v-loading="loading" :title="$t('logs.login')">
             <template #leftToolBar>
-                <el-button type="primary" @click="onOpenDialog('create')">
+                <el-button v-permission v-node-admin type="primary" @click="onOpenDialog('create')">
                     {{ $t('commons.button.create') }}
                 </el-button>
                 <el-dropdown @command="handleSyncOp" class="mr-2.5">
@@ -12,23 +12,33 @@
                     </el-button>
                     <template #dropdown>
                         <el-dropdown-menu>
-                            <el-dropdown-item command="sync">
+                            <fu-dropdown-item v-permission v-node-admin command="sync">
                                 {{ $t('cronjob.library.syncNow') }}
-                            </el-dropdown-item>
-                            <el-dropdown-item v-if="scriptSync === 'Disable'" command="turnOnSync">
+                            </fu-dropdown-item>
+                            <fu-dropdown-item
+                                v-if="scriptSync === 'Disable'"
+                                v-permission
+                                v-node-admin
+                                command="turnOnSync"
+                            >
                                 {{ $t('cronjob.library.turnOnSync') }}
-                            </el-dropdown-item>
-                            <el-dropdown-item v-if="scriptSync === 'Enable'" command="turnOffSync">
+                            </fu-dropdown-item>
+                            <fu-dropdown-item
+                                v-if="scriptSync === 'Enable'"
+                                v-permission
+                                v-node-admin
+                                command="turnOffSync"
+                            >
                                 {{ $t('cronjob.library.turnOffSync') }}
-                            </el-dropdown-item>
+                            </fu-dropdown-item>
                         </el-dropdown-menu>
                     </template>
                 </el-dropdown>
 
-                <el-button type="primary" plain @click="onOpenGroupDialog()">
+                <el-button v-permission v-node-admin type="primary" plain @click="onOpenGroupDialog()">
                     {{ $t('commons.table.group') }}
                 </el-button>
-                <el-button plain :disabled="selects.length === 0" @click="onDelete(null)">
+                <el-button v-permission v-node-admin plain :disabled="selects.length === 0" @click="onDelete(null)">
                     {{ $t('commons.button.delete') }}
                 </el-button>
             </template>
@@ -102,8 +112,8 @@
                         :buttons="buttons"
                         :ellipsis="10"
                         :label="$t('commons.table.operate')"
-                        min-width="mobile ? 'auto' : 200"
-                        :fixed="mobile ? false : 'right'"
+                        min-width="isMobile ? 'auto' : 200"
+                        :fixed="isMobile ? false : 'right'"
                         fix
                     />
                 </ComplexTable>
@@ -120,7 +130,9 @@
 </template>
 
 <script setup lang="ts">
-import { dateFormat, deepCopy, getCurrentDateFormatted, newUUID } from '@/utils/util';
+import { dateFormat, getCurrentDateFormatted } from '@/utils/date';
+import { deepCopy } from '@/utils/misc';
+import { newUUID } from '@/utils/id';
 import GroupDialog from '@/components/group/index.vue';
 import TaskLog from '@/components/log/task/index.vue';
 import OperateDialog from '@/views/cronjob/library/operate/index.vue';
@@ -129,16 +141,14 @@ import { deleteScript, searchScript, syncScript } from '@/api/modules/cronjob';
 import { onMounted, reactive, ref } from 'vue';
 import { Cronjob } from '@/api/interface/cronjob';
 import i18n from '@/lang';
-import { GlobalStore } from '@/store';
+import { useGlobalStore } from '@/composables/useGlobalStore';
 import { getGroupList } from '@/api/modules/group';
 import CodemirrorDrawer from '@/components/codemirror-pro/drawer.vue';
 import { MsgSuccess } from '@/utils/message';
-import { getSettingBy, updateSetting } from '@/api/modules/setting';
+import { getSettingBaseInfo, updateSetting } from '@/api/modules/setting';
 
-const globalStore = GlobalStore();
-const mobile = computed(() => {
-    return globalStore.isMobile();
-});
+const { globalStore, currentNode, isAdminOrNodeAdmin, isMobile } = useGlobalStore();
+
 const myDetail = ref();
 
 const loading = ref();
@@ -237,8 +247,8 @@ const openTaskLog = (taskID: string) => {
 };
 
 const loadSyncStatus = async () => {
-    const res = await getSettingBy('ScriptSync');
-    scriptSync.value = res.data;
+    const res = await getSettingBaseInfo();
+    scriptSync.value = res.data.scriptSync;
 };
 const handleSyncOp = async (command: string) => {
     let val = 'Enable';
@@ -303,10 +313,13 @@ const loadGroupOptions = async () => {
 const buttons = [
     {
         label: i18n.global.t('commons.button.handle'),
+        disabled: () => {
+            return !isAdminOrNodeAdmin.value;
+        },
         click: (row: Cronjob.ScriptInfo) => {
             ElMessageBox.confirm(
                 i18n.global.t('cronjob.library.handleHelper', [
-                    globalStore.currentNode === 'local' ? globalStore.getMasterAlias() : globalStore.currentNode,
+                    currentNode.value === 'local' ? globalStore.getMasterAlias() : currentNode.value,
                     row.name,
                 ]),
                 i18n.global.t('commons.button.handle'),
@@ -322,6 +335,8 @@ const buttons = [
     },
     {
         label: i18n.global.t('commons.button.clone'),
+        permission: true,
+        nodeAdmin: true,
         disabled: (row: any) => {
             return !row.isSystem;
         },
@@ -336,6 +351,8 @@ const buttons = [
     },
     {
         label: i18n.global.t('commons.button.edit'),
+        permission: true,
+        nodeAdmin: true,
         disabled: (row: any) => {
             return row.isSystem;
         },
@@ -345,6 +362,8 @@ const buttons = [
     },
     {
         label: i18n.global.t('commons.button.delete'),
+        permission: true,
+        nodeAdmin: true,
         disabled: (row: any) => {
             return row.isSystem;
         },

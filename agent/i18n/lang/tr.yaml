@@ -1,34 +1,61 @@
-ErrInvalidParams: 'İstek parametre hatası: {{ .detail }}'
-ErrTokenParse: 'Token oluşturma hatası: {{ .detail }}'
+# temel hatalar
+ErrInvalidParams: 'İstek geçersiz: {{ .detail }}'
+ErrMcpGatewayArgsParse: 'MCP özel bağımsız değişken biçimi geçersiz'
+ErrMcpGatewayArgsConflict: '{{ .name }} bağımsız değişkeni 1Panel tarafından yönetilir ve özel bağımsız değişkenlerde ayarlanamaz'
+ErrTokenParse: 'Token hatası: {{ .detail }}'
 ErrInitialPassword: 'Orijinal şifre yanlış'
-ErrInternalServer: 'Dahili sunucu hatası: {{ .detail }}'
-ErrRecordExist: 'Kayıt zaten mevcut'
+ErrInternalServer: 'Sunucu hatası: {{ .detail }}'
+ErrRecordExist: 'Kayıt zaten var'
 ErrRecordNotFound: 'Kayıt bulunamadı'
-ErrStructTransform: 'Tür dönüştürme başarısız: {{ .err }}'
-ErrNotLogin: 'Kullanıcı giriş yapmamış: {{ .detail }}'
-ErrPasswordExpired: 'Mevcut şifrenin süresi dolmuş: {{ .detail }}'
-ErrNotSupportType: 'Sistem mevcut türü desteklemiyor: {{ .name }}'
-ErrProxy: 'İstek hatası, lütfen düğüm durumunu kontrol edin: {{ .detail }}'
-ErrApiConfigStatusInvalid: 'API arayüzüne erişim yasak: {{ .detail }}'
-ErrApiConfigKeyInvalid: 'API arayüz anahtarı hatası: {{ .detail }}'
-ErrApiConfigIPInvalid: 'API arayüzünü çağırmak için kullanılan IP beyaz listede değil: {{ .detail }}'
-ErrApiConfigDisable: 'Bu arayüz API arayüz çağrılarının kullanımını yasaklıyor: {{ .detail }}'
-ErrApiConfigKeyTimeInvalid: 'API arayüz zaman damgası hatası: {{ .detail }}'
-StartPushSSLToNode: "Sertifika düğüme gönderilmeye başlandı"
-PushSSLToNodeFailed: "Sertifika düğüme gönderilemedi: {{ .err }}"
-PushSSLToNodeSuccess: "Sertifika düğüme başarıyla gönderildi"
-ErrShutDown: "Komut manuel olarak sonlandırıldı!"
+WafLogExport: 'WAF günlüğü dışa aktarma'
+MonitorLogExport: 'Web sitesi izleme günlüğü dışa aktarma'
+LogExportNoData: 'Seçilen filtrelerle eşleşen günlük yok'
+LogExportDiskSpace: 'Kullanılabilir alan 1 GiB altında; dışa aktarma durduruldu'
+LogExportRetentionInvalid: 'Dışa aktarma kayıtları 1 ile 30 gün arasında saklanmalıdır'
+ErrSystemLogKeywordFilterUnsupported: 'Mevcut sistem sürümü sistem günlüklerinde anahtar kelime filtrelemeyi desteklemiyor (systemd 237 veya üzeri gerekir)'
+ErrStructTransform: 'Dönüşüm hatası: {{ .err }}'
+ErrNotSupportType: 'Bu tür desteklenmiyor: {{ .name }}'
 
-ErrMinQuickJump: "Lütfen en az bir hızlı atlama girişi ayarlayın!"
-ErrMaxQuickJump: "En fazla dört hızlı atlama girişi ayarlayabilirsiniz!"
+# dosya AI
+ErrFileAINotEnabled: 'Dosya yönetimi AI araması kapalı veya hesap yok. Dosya Yönetimi’nde AI hesabını açıp etkinleştirin ve bir hesap seçin.'
+ErrFileAISearchBadPattern: 'Geçersiz arama deseni (regex vb.): {{ .detail }}'
+FileAISearchEmptyDir: 'Bu yol altında listelenecek dosya veya klasör yok (veya tümü filtrelendi).'
 
-#common
-ErrUsernameIsExist: 'Kullanıcı adı zaten mevcut'
-ErrNameIsExist: 'İsim zaten mevcut'
-ErrDemoEnvironment: 'Demo sunucu, bu işlem yasak!'
-ErrCmdTimeout: 'Komut yürütme zaman aşımına uğradı!'
-ErrCmdIllegal: 'Yürütme komutunda yasak karakterler var, lütfen değiştirin ve tekrar deneyin!'
-ErrPortExist: '{{ .port }} portu zaten {{ .type }} [{{ .name }}] tarafından kullanılıyor'
+# uzaktan indirme
+ErrWgetRemoteFailed: 'Uzak indirme başarısız veya URL erişilemiyor: {{ .detail }}'
+ErrWgetInvalidContentType: 'Uzak URL bir dosya değil, muhtemelen bir hata sayfası döndürdü, {{ .detail }}'
+ErrWgetProxyNotConfigured: 'Önce panel ayarlarında bir proxy sunucusu yapılandırın'
+ErrWgetProxyInvalid: 'Proxy sunucusu adresi geçersiz: {{ .detail }}'
+
+# oturum açma ve güvenlik
+ErrNotLogin: 'Oturum açılmamış: {{ .detail }}'
+ErrPasswordExpired: 'Şifre süresi doldu: {{ .detail }}'
+
+# istek ve API
+ErrProxy: 'İstek başarısız: {{ .detail }}'
+ErrApiConfigStatusInvalid: 'API kapalı: {{ .detail }}'
+ErrApiConfigKeyInvalid: 'Geçersiz API anahtarı: {{ .detail }}'
+ErrApiConfigIPInvalid: 'IP izinli değil: {{ .detail }}'
+ErrApiConfigDisable: 'API erişimi kapalı: {{ .detail }}'
+ErrApiConfigKeyTimeInvalid: 'Zaman damgası hatalı: {{ .detail }}'
+ErrCreateHttpClient: 'İstek oluşturma başarısız {{ .err }}'
+ErrHttpReqTimeOut: 'İstek zaman aşımı {{ .err }}'
+ErrHttpReqFailed: 'İstek başarısız {{ .err }}'
+ErrNoSuchHost: 'İstenen sunucu bulunamıyor {{ .err }}'
+ErrHttpReqNotFound: 'İstenen kaynak {{ .err }} bulunamadı'
+
+# hızlı geçiş
+ErrMinQuickJump: 'En az bir hızlı erişim ekle'
+ErrMaxQuickJump: '4 hızlı erişim hakkı var'
+
+# genel
+ErrShutDown: 'Komut manuel durduruldu'
+ErrUsernameIsExist: 'Kullanıcı adı mevcut'
+ErrNameIsExist: 'İsim mevcut'
+ErrDemoEnvironment: 'Demo modunda yok'
+ErrCmdTimeout: 'Komut zaman aşımına uğradı'
+ErrCmdIllegal: 'Komut geçersiz karakter içeriyor'
+ErrPortExist: '{{ .port }} portu {{ .type }} [{{ .name }}] tarafından kullanılıyor'
 TYPE_APP: 'Uygulama'
 TYPE_RUNTIME: 'Çalışma ortamı'
 TYPE_DOMAIN: 'Alan Adı'
@@ -39,129 +66,169 @@ Failed: 'Başarısız'
 SystemRestart: 'Sistem yeniden başlatması nedeniyle görev kesildi'
 ErrGroupIsDefault: 'Varsayılan grup, silinemez'
 ErrGroupIsInWebsiteUse: 'Grup başka bir web sitesi tarafından kullanılıyor ve silinemez.'
-Decrypt: "Şifre Çöz"
+Decrypt: 'Şifre Çöz'
 
-#agent
-ErrAgentAccountBound: 'Bu hesap bir ajana bağlı ve silinemez. Kontrol edip tekrar deneyin!'
-ErrAgentAccountUnavailable: 'Hesap bağlantı bilgileri kullanılamıyor. Hata: {{ .err }}. Kontrol edip tekrar deneyin!'
-ErrAgentProviderNotSupported: 'Bu ajan sağlayıcısı desteklenmiyor. Kontrol edip tekrar deneyin!'
-ErrAgentAccountRequired: 'Lütfen bir ajan hesabı seçip tekrar deneyin.'
-ErrAgentAccountNotVerified: 'Hesap doğrulanmadı. Kontrol edip tekrar deneyin!'
-ErrAgentProviderMismatch: 'Hesap sağlayıcısı eşleşmiyor. Kontrol edip tekrar deneyin!'
-ErrAgentBaseURLRequired: 'Base URL boş olamaz. Kontrol edip tekrar deneyin!'
-ErrAgentApiKeyRequired: 'API Key boş olamaz. Kontrol edip tekrar deneyin!'
-ErrAgentComposeRequired: 'Özel compose içeriği boş olamaz. Kontrol edip tekrar deneyin!'
-ErrAgentIDRequired: 'Ajan ID boş olamaz. Kontrol edip tekrar deneyin!'
-ErrAgentAccountIDRequired: 'Hesap ID boş olamaz. Kontrol edip tekrar deneyin!'
+# ajan
+ErrAgentAccountBound: 'Hesap bir ajana bağlı'
+ErrTerminalAIAccountInUse: 'Bu model hesabi su anda Terminal AI tarafindan kullaniliyor. Terminal AI ayarlarinda baska bir hesaba gecin veya Terminal AI yi devre disi birakip tekrar deneyin.'
+ErrFileAIAccountInUse: 'Bu model hesabı dosya yönetimi yapay zekası tarafından kullanılıyor. Ayarlardan hesabı değiştirin veya yapay zekayı devre dışı bırakıp yeniden deneyin.'
+ErrAgentAccountUnavailable: 'Hesap bağlantısı yok: {{ .err }}'
+ErrAgentProviderNotSupported: 'Ajans sağlayıcısı desteklenmiyor'
+ErrAgentAccountRequired: 'Önce bir ajans hesabı seçin'
+ErrAgentAccountNotVerified: 'Ajans hesabı doğrulanmadı'
+ErrAgentAccountModelsRequired: 'Lütfen en az bir model yapılandırın'
+ErrAgentAccountSingleInitialModel: 'Hesap oluştururken yalnızca bir başlangıç modeli yapılandırılabilir'
+ErrAgentModelNotInAccount: 'Model seçilen hesapta yapılandırılmadı'
+ErrAgentVerifyModelInUse: 'Bu model hesap doğrulaması için kullanılıyor. Silmeden önce başka bir doğrulama modeli seçin'
+ErrAgentFallbackModelDuplicate: 'Yedek modeller tekrar edemez'
+ErrAgentFallbackModelPrimary: 'Yedek model birincil modelle aynı olamaz'
+ErrAgentModelInUse: 'Bu modeli hâlâ kullanan bağlı bir ajan var: {{ .name }}'
+ErrAgentBaseURLRequired: 'Temel URL gerekli'
+ErrAgentApiKeyRequired: 'API anahtarı gerekli'
+ErrAgentComposeRequired: 'Compose içeriği gerekli'
+ErrAgentIDRequired: 'Ajans ID gerekli'
+ErrAgentAccountIDRequired: 'Hesap ID gerekli'
+ErrAgentLimitReached: 'Community sürümü en fazla {{ .max }} AI ajanını destekler. Sınırsız kullanım için Business Sürüme yükseltin'
+ErrAgentWebsiteBound: 'Bu ajan zaten bir web sitesine bağlı'
+ErrAgentWebsiteTypeUnsupported: 'Yalnızca proxy veya statik web siteleri bağlanabilir'
+ErrAgentWebsiteInUse: 'Bu web sitesi zaten başka bir ajana bağlı'
+ErrAgentWebsiteUnbindUnsupported: 'Tek tıkla dağıtılan web sitelerinin bağlantısı manuel olarak kaldırılamaz'
+ErrQwenPawAuthRequest: 'QwenPaw kimlik bilgileri güncellenemedi: {{ .err }}'
+ErrQwenPawAuthOutOfSync: 'Geçerli QwenPaw kimlik bilgileri 1Panel kaydıyla eşleşmiyor. QwenPaw parolasını sıfırlayın veya uygulamanın .env dosyasındaki kimlik bilgilerini geri yükleyin'
+ErrQwenPawAuthDisabled: 'QwenPaw oturum açma kimlik doğrulaması etkin değil'
+ErrHermesPairingCodeUnavailable: 'Eşleştirme kodu Hermes içinde geçici olarak bulunamıyor; bu durum ağ kaynaklı olabilir. Lütfen daha sonra tekrar deneyin.'
+ErrHermesFeishuGroupAllowlistRequiresAllowlist: 'Feishu grup ilkesi izin listesi olduğunda, DM ilkesi eşleştirme kodu olamaz.'
 
-#backup
+# yedekleme ve uyarı ayarları
 Localhost: 'Yerel Makine'
-ErrBackupInUsed: 'Yedekleme hesabı zamanlanmış görevde kullanıldı ve silinemez.'
-ErrBackupCheck: 'Yedekleme hesabı test bağlantısı başarısız {{ .err }}'
-ErrBackupLocalDelete: 'Yerel sunucu yedekleme hesabını silme henüz desteklenmiyor'
-ErrBackupLocalCreate: 'Yerel sunucu yedekleme hesapları oluşturma henüz desteklenmiyor'
+ErrBackupInUsed: 'Yedek hesabı görevde kullanılıyor'
+ErrBackupCheck: 'Bağlantı testi başarısız: {{ .err }}'
+ErrBackupLocalDelete: 'Yerel yedek silme yok'
+ErrBackupLocalCreate: 'Yerel yedek oluşturma yok'
+ErrAlertConfigInUse: 'Uyarı yapılandırması kullanımda ve silinemez'
+ErrAlertConfigPhoneExist: 'Telefon numarasi zaten mevcut'
 
-#app
-ErrPortInUsed: '{{ .detail }} portu zaten kullanılıyor!'
+# uygulama
+ErrPortInUsed: '{{ .detail }} portu zaten kullanılıyor'
 ErrAppLimit: 'Yüklenen uygulama sayısı sınırı aştı'
 ErrNotInstall: 'Uygulama yüklenmedi'
-ErrPortInOtherApp: '{{ .port }} portu zaten {{ .apps }} uygulaması tarafından kullanılıyor!'
-ErrDbUserNotValid: 'Mevcut veritabanı, kullanıcı adı ve şifre eşleşmiyor!'
-ErrUpdateBuWebsite: 'Uygulama başarıyla güncellendi, ancak web sitesi yapılandırma dosyası değiştirme başarısız. Lütfen yapılandırmayı kontrol edin! '
-Err1PanelNetworkFailed: 'Varsayılan konteyner ağ oluşturma başarısız! {{ .detail }}'
-ErrFileParse: 'Uygulama docker-compose dosya ayrıştırma başarısız!'
+ErrPortInOtherApp: '{{ .port }} portu zaten {{ .apps }} uygulaması tarafından kullanılıyor'
+ErrDbUserNotValid: 'Mevcut veritabanı, kullanıcı adı ve şifre eşleşmiyor'
+ErrMysqlUserUsedByApps: 'Bu veritabanı kullanıcısı [{{ .detail }}] tarafından kullanılıyor; ana bilgisayarı değiştirilemez, kullanıcı silinemez veya yetkisi kaldırılamaz'
+ErrUpdateBuWebsite: 'Uygulama başarıyla güncellendi, ancak web sitesi yapılandırma dosyası değiştirme başarısız. Lütfen yapılandırmayı kontrol edin'
+Err1PanelNetworkFailed: 'Varsayılan konteyner ağ oluşturma başarısız {{ .detail }}'
+ErrFileParse: 'Uygulama docker-compose dosya ayrıştırma başarısız'
 ErrInstallDirNotFound: 'Kurulum dizini mevcut değil. Kaldırmanız gerekiyorsa, lütfen Zorla Kaldır seçeneğini seçin'
 AppStoreIsUpToDate: 'Uygulama mağazası zaten en son sürüm'
-LocalAppVersionNull: '{{ .name }} uygulaması sürüme senkronize edilmedi! Uygulama listesine eklenemez'
-LocalAppVersionErr: '{{ .name }} senkronizasyon sürümü {{ .version }} başarısız! {{ .err }}'
+LocalAppVersionNull: '{{ .name }} uygulaması sürüme senkronize edilmedi Uygulama listesine eklenemez'
+LocalAppVersionErr: '{{ .name }} senkronizasyon sürümü {{ .version }} başarısız {{ .err }}'
 ErrFileNotFound: '{{ .name }} dosyası mevcut değil'
 ErrFileParseApp: '{{ .name }} dosya ayrıştırma başarısız {{ .err }}'
 ErrAppDirNull: 'Sürüm klasörü mevcut değil'
-LocalAppErr: 'Uygulama {{ .name }} senkronizasyonu başarısız! {{ .err }}'
+LocalAppErr: 'Uygulama {{ .name }} senkronizasyonu başarısız {{ .err }}'
 ErrContainerName: 'Konteyner adı zaten mevcut'
-ErrCreateHttpClient: 'İstek oluşturma başarısız {{ .err }}'
-ErrHttpReqTimeOut: 'İstek zaman aşımı {{ .err }}'
-ErrHttpReqFailed: 'İstek başarısız {{ .err }}'
-ErrNoSuchHost: 'İstenen sunucu bulunamıyor {{ .err }}'
-ErrHttpReqNotFound: 'İstenen kaynak {{ .err }} bulunamadı'
 ErrContainerNotFound: '{{ .name }} konteyneri mevcut değil'
 ErrContainerMsg: '{{ .name }} konteyneri anormal. Lütfen ayrıntılar için konteyner sayfasındaki günlüğü kontrol edin'
 ErrAppBackup: '{{ .name }} uygulama yedeklemesi başarısız {{ .err }}'
 ErrVersionTooLow: 'Mevcut 1Panel sürümü Uygulama Mağazasını güncellemek için çok düşük. Lütfen işlemden önce sürümü yükseltin.'
 ErrAppNameExist: 'Uygulama adı zaten mevcut'
+ErrAppInstallNameExist: '{{ .name }} uygulama kurulum adı zaten mevcut'
 AppStoreIsSyncing: 'Uygulama Mağazası senkronize ediliyor, lütfen daha sonra tekrar deneyin'
-ErrGetCompose: 'docker-compose.yml dosyası alınamadı! {{ .detail }}'
+ErrGetCompose: 'docker-compose.yml dosyası alınamadı {{ .detail }}'
+ErrComposeProjectNameParse: 'Docker Compose yapılandırma çıktısından proje adı ayrıştırılamadı: {{ .detail }}'
+ErrComposeProjectNameEmpty: 'Docker Compose yapılandırmasından veya dosyanın üst dizininden proje adı türetilemedi. Bir ad girip yeniden deneyin.'
+ErrComposeNameInvalid: 'Geçersiz Compose proje adı: küçük harf veya rakamla başlamalı, yalnızca küçük harf, rakam, kısa çizgi ve alt çizgi içermeli ve 1-256 karakter uzunluğunda olmalıdır.'
+ErrAppVersionUnavailable: 'Bu uygulama sürümü uzak hizmetten kaldırıldı. Lütfen başka bir sürüm seçip tekrar deneyin.'
+ErrVllmGB10ProOnly: 'Bu vLLM sürümü yalnızca 1Panel Professional Edition sürümünde kullanılabilir.'
 ErrAppWarn: 'Anormal durum, lütfen günlüğü kontrol edin'
 ErrAppParamKey: 'Parametre {{ .name }} alanı anormal'
 ErrAppUpgrade: 'Uygulama {{ .name }} yükseltmesi başarısız {{ .err }}'
 AppRecover: 'Uygulama {{ .name }} geri alma'
 PullImageStart: 'Image [{{ .name }}] çekmeye başla'
 PullImageSuccess: 'Image çekme başarılı'
-AppStoreIsLastVersion: 'Uygulama Mağazası zaten en son sürüm'
 AppStoreSyncSuccess: 'Uygulama Mağazası senkronizasyonu başarılı'
 SyncAppDetail: 'Uygulama yapılandırmasını senkronize et'
 AppVersionNotMatch: '{{ .name }} uygulaması daha yüksek 1Panel sürümü gerektiriyor, senkronizasyon atlanıyor'
-MoveSiteDir: "Web sitesi dizini değişikliği tespit edildi. OpenResty web sitesi dizinini {{ .name }} adresine taşımak gerekiyor"
+MoveSiteDir: 'Web sitesi dizini değişikliği tespit edildi. OpenResty web sitesi dizinini {{ .name }} adresine taşımak gerekiyor'
 MoveSiteDirSuccess: 'Web sitesi dizini taşıma başarılı'
 DeleteRuntimePHP: 'PHP çalışma zamanını sil'
-CustomAppStoreFileValid: 'Uygulama mağazası paketlerinin .tar.gz formatında olması gerekiyor'
+CustomAppStoreFileValid: 'Uygulama mağazası paketlerinin.tar.gz formatında olması gerekiyor'
 PullImageTimeout: 'Image çekme zaman aşımı, lütfen image hızlandırmayı artırmayı deneyin veya başka bir image hızlandırmaya geçin'
 ErrAppIsDown: '{{ .name }} uygulama durumu anormal, lütfen kontrol edin'
 ErrCustomApps: 'Yüklü bir uygulama var, lütfen önce kaldırın'
 ErrCustomRuntimes: 'Yüklü bir çalışma ortamı var, lütfen önce silin'
-ErrAppVersionDeprecated: "{{ .name }} uygulaması mevcut 1Panel sürümü ile uyumlu değil, atlandı"
-ErrDockerFailed: "Docker durumu anormal, lütfen servis durumunu kontrol edin"
-ErrDockerComposeCmdNotFound: "Docker Compose komutu mevcut değil, lütfen önce bu komutu host makinesine yükleyin"
+ErrAppVersionDeprecated: '{{ .name }} uygulaması mevcut 1Panel sürümü ile uyumlu değil, atlandı'
+ErrDockerFailed: 'Docker durumu anormal, lütfen servis durumunu kontrol edin'
+ErrDockerIptablesChainUnavailable: 'Docker DOCKER-USER zinciri bulunamadı. Docker’ı yeniden başlatıp tekrar deneyin'
+ErrDockerNftablesChainUnavailable: 'Docker nftables IPv4 güvenlik duvarı zinciri bulunamadı. Geçerli Docker sürümünün nftables güvenlik duvarı arka ucunu desteklediğini doğrulayın, Docker’ı yeniden başlatıp tekrar deneyin'
+ErrUFWRuleAdopt: 'UFW kuralı yönetilemedi: {{ .detail }}. Geçerli UFW sürümü 0.35’ten eskiyse UFW’yi yükseltip tekrar deneyin'
+ErrDockerComposeCmdNotFound: 'Docker Compose komutu mevcut değil, lütfen önce bu komutu host makinesine yükleyin'
 UseExistImage: 'Görüntü zaten mevcut, mevcut görüntü kullanılıyor'
+UpgradePrepare: 'Uygulama yükseltmesini hazırla'
+UpgradeStop: 'Özgün uygulamayı durdur'
+UpgradeWaitReady: 'Uygulamanın hazır olmasını bekle'
+UpgradeBackupDisabled: 'Yükseltme yedeği devre dışı; yükseltme betiklerinin veri değişiklikleri tamamen geri alınamaz'
+UpgradeRollbackFailed: 'Geri alma başarısız'
 ErrDatabaseNotFound: '{{ .name }} veritabanı mevcut değil'
 
-#ssh
-ExportIP: "Giriş IP"
-ExportArea: "Konum"
-ExportPort: "Port"
-ExportAuthMode: "Giriş Yöntemi"
-ExportUser: "Kullanıcı"
-ExportStatus: "Giriş Durumu"
-ExportDate: "Zaman"
+# SSH
+ExportIP: 'Giriş IP'
+ExportArea: 'Konum'
+ExportPort: 'Bağlantı noktası'
+ExportAuthMode: 'Giriş Yöntemi'
+ExportUser: 'Kullanıcı'
+ExportStatus: 'Giriş Durumu'
+ExportDate: 'Zaman'
 
-#file
+# dosya
 ErrFileCanNotRead: 'Bu dosya önizlemeyi desteklemiyor'
+ErrSensitiveFileRead: 'Hassas dosyaların okunmasına izin verilmez'
 ErrFileToLarge: 'Dosya 10M dan büyük ve açılamıyor'
 ErrPathNotFound: 'Dizin mevcut değil'
-ErrMovePathFailed: 'Hedef yol orijinal yolu içeremez!'
-ErrLinkPathNotFound: 'Hedef yol mevcut değil!'
-ErrFileIsExist: 'Dosya veya klasör zaten mevcut!'
+ErrMovePathFailed: 'Hedef yol orijinal yolu içeremez'
+ErrLinkPathNotFound: 'Hedef yol mevcut değil'
+ErrFileIsExist: 'Dosya veya klasör zaten mevcut'
 ErrFileUpload: '{{ .name }} dosya yükleme başarısız {{ .detail }}'
 ErrFileDownloadDir: 'Klasör indirme desteklenmiyor'
-ErrCmdNotFound: '{{ .name}} komutu mevcut değil, lütfen önce bu komutu host a yükleyin'
+ErrFileSharePath: 'Geçersiz dosya yolu veya hedef bir dosya değil'
+ErrFileShareInvalid: 'Geçersiz veya süresi dolmuş paylaşım bağlantısı'
+ErrFileShareExpired: 'Paylaşım bağlantısının süresi doldu'
+ErrFileSharePassword: 'Yanlış paylaşım parolası'
+ErrFileShareExhausted: 'Bu paylaşım için indirme sınırına ulaşıldı'
+ErrFileSharePasswordPolicy: 'Parola en az 4 karakter olmalıdır'
+ErrFileShareRateLimit: 'Çok fazla istek gönderildi, lütfen daha sonra tekrar deneyin'
+ErrCmdNotFound: '{{ .name }} komutu mevcut değil, lütfen önce bu komutu host a yükleyin'
 ErrSourcePathNotFound: 'Kaynak dizin mevcut değil'
 ErrFavoriteExist: 'Bu yol zaten favorilere eklendi'
 ErrInvalidChar: 'Yasak karakterlere izin verilmiyor'
 ErrPathNotDelete: 'Seçilen dizin silinemez'
-ErrLogFileToLarge: "Günlük dosyası 500MB'ı aşıyor ve açılamıyor"
-FileDropFailed: "{{ .name }} dosyası temizlenemedi: {{ .err }}"
-FileDropSuccess: "{{ .name }} dosyası başarıyla temizlendi, {{ .count }} dosya silindi, {{ .size }} disk alanı boşaltıldı"
-FileDropSum: "Dosya temizleme tamamlandı, toplam {{ .count }} dosya silindi, toplam {{ .size }} disk alanı boşaltıldı"
-ErrBadDecrypt: "Sıkıştırılmış paket şifre çözme parolası hatalı, açma başarısız, lütfen kontrol edip tekrar deneyin!"
+ErrLogFileToLarge: 'Günlük dosyası 500MB''ı aşıyor ve açılamıyor'
+FileDropFailed: '{{ .name }} dosyası temizlenemedi: {{ .err }}'
+FileDropSuccess: '{{ .name }} dosyası başarıyla temizlendi, {{ .count }} dosya silindi, {{ .size }} disk alanı boşaltıldı'
+FileDropSum: 'Dosya temizleme tamamlandı, toplam {{ .count }} dosya silindi, toplam {{ .size }} disk alanı boşaltıldı'
+ErrBadDecrypt: 'Sıkıştırılmış paket şifre çözme parolası hatalı, açma başarısız, lütfen kontrol edip tekrar deneyin'
 
-
-#website
+# web sitesi
 ErrAliasIsExist: 'Takma ad zaten mevcut'
 ErrBackupMatch: 'Yedekleme dosyası mevcut web sitesi verilerinin bir kısmıyla eşleşmiyor {{ .detail }}'
 ErrBackupExist: 'Yedekleme dosyasındaki kaynak verilerin karşılık gelen kısmı mevcut değil {{ .detail }}'
-ErrPHPResource: 'Yerel işletim ortamı değiştirmeyi desteklemiyor! '
+ErrPHPResource: 'Yerel işletim ortamı değiştirmeyi desteklemiyor'
 ErrPathPermission: 'Dizin dizininde 1000:1000 olmayan izinlere sahip bir klasör tespit edildi, bu web sitesinde Erişim reddedildi hatasına neden olabilir. Lütfen yukarıdaki Kaydet düğmesine tıklayın'
 ErrDomainIsUsed: 'Alan adı zaten [{{ .name }}] web sitesi tarafından kullanılıyor'
 ErrDomainFormat: '{{ .name }} alan adı formatı yanlış'
 ErrDefaultAlias: 'default ayrılmış bir kod, lütfen başka bir kod kullanın'
 ErrParentWebsite: 'Önce {{ .name }} alt sitesini silmeniz gerekiyor'
 ErrBuildDirNotFound: 'Yapı dizini mevcut değil'
+ErrBrotliDisabled: 'brotli modülü etkin değil, önce etkinleştirin ve derleyin'
+ErrBrotliUnsupported: 'Panel brotli ayarlarını nginx.conf dosyasına otomatik olarak bağlayamadı; dosyayı kontrol edin veya OpenResty yi yükseltin'
+ErrModuleBuildUnsupported: 'Bu OpenResty sürümü modül derleyemez, önce yükseltin'
 ErrImageNotExist: 'İşletim ortamı {{ .name }} image mevcut değil, lütfen işletim ortamını yeniden düzenleyin'
-ErrProxyIsUsed: "Yük dengeleme ters proxy tarafından kullanıldı, silinemez"
-ErrSSLValid: 'Sertifika dosyası anormal, lütfen sertifika durumunu kontrol edin!'
-ErrWebsiteDir: "Lütfen web sitesi dizini içindeki bir dizin seçin."
-ErrComposerFileNotFound: "composer.json dosyası mevcut değil"
-ErrRuntimeNoPort: "Çalışma zamanı ortamı bir porta sahip değil, lütfen önce çalışma zamanı ortamını düzenleyin."
+ErrProxyIsUsed: 'Yük dengeleme ters proxy tarafından kullanıldı, silinemez'
+ErrSSLValid: 'Sertifika dosyası anormal, lütfen sertifika durumunu kontrol edin'
+ErrWebsiteDir: 'Lütfen web sitesi dizini içindeki bir dizin seçin.'
+ErrComposerFileNotFound: 'composer.json dosyası mevcut değil'
+ErrRuntimeNoPort: 'Çalışma zamanı ortamı bir porta sahip değil, lütfen önce çalışma zamanı ortamını düzenleyin.'
+ErrRuntimeProjectDirContainsCodeDir: 'Çalışma zamanı dizini, seçilen proje dizinini içeriyor. Lütfen başka bir proje dizini seçip yeniden oluşturun.'
 Status: 'Durum'
 start: 'Başlat'
 stop: 'Durdur'
@@ -171,27 +238,27 @@ pause: 'Duraklat'
 unpause: 'Devam Et'
 remove: 'Sil'
 delete: 'Sil'
-ErrDefaultWebsite: "Varsayılan bir web sitesi zaten ayarlanmış. Yeni bir tane ayarlamadan önce lütfen iptal edin!"
+ErrDefaultWebsite: 'Varsayılan bir web sitesi zaten ayarlanmış. Yeni bir tane ayarlamadan önce lütfen iptal edin'
 SSL: 'Sertifika'
 Set: 'Ayarlar'
 
-#ssl
+# SSL sertifikası
 ErrSSLCannotDelete: '{{ .name }} sertifikası bir web sitesi tarafından kullanılıyor ve silinemez'
 ErrAccountCannotDelete: 'Hesap bir sertifikayla ilişkili ve silinemez'
-ErrSSLApply: 'Sertifika yenileme başarılı, openresty yeniden yükleme başarısız, lütfen yapılandırmayı kontrol edin!'
+ErrSSLApply: 'Sertifika yenileme başarılı, openresty yeniden yükleme başarısız, lütfen yapılandırmayı kontrol edin'
 ErrEmailIsExist: 'Posta kutusu zaten mevcut'
 ErrSSLKeyNotFound: 'Özel anahtar dosyası mevcut değil'
 ErrSSLCertificateNotFound: 'Sertifika dosyası mevcut değil'
 ErrSSLKeyFormat: 'Özel anahtar dosyası doğrulama başarısız'
 ErrSSLCertificateFormat: 'Sertifika dosyası formatı yanlış, lütfen pem formatını kullanın'
 ErrEabKidOrEabHmacKeyCannotBlank: 'EabKid veya EabHmacKey boş olamaz'
-ErrOpenrestyNotFound: 'Http modu önce Openresty yüklenmesini gerektiriyor'
-ApplySSLStart: 'Sertifika başvurusu başlatılıyor, alan adı [{{ .domain }}] başvuru yöntemi [{{ .type }}] '
+ErrOpenrestyNotFound: 'HTTP modu için OpenResty gereklidir'
+ApplySSLStart: 'Sertifika başvurusu başlatılıyor, alan adı [{{ .domain }}] başvuru yöntemi [{{ .type }}]'
 dnsAccount: 'DNS Otomatik'
 dnsManual: 'DNS Manuel'
 http: 'HTTP'
-ApplySSLFailed: '[{{ .domain }}] sertifika başvurusu başarısız, {{ .detail }} '
-ApplySSLSuccess: '[{{ .domain }}] sertifika başvurusu başarılı!'
+ApplySSLFailed: '[{{ .domain }}] sertifika başvurusu başarısız, {{ .detail }}'
+ApplySSLSuccess: '[{{ .domain }}] sertifika başvurusu başarılı'
 DNSAccountName: 'DNS hesabı [{{ .name }}] sağlayıcı [{{ .type }}]'
 PushDirLog: 'Sertifika [{{ .path }}] dizinine gönderildi {{ .status }}'
 ErrDeleteCAWithSSL: 'Mevcut kuruluşun verilmiş bir sertifikası var ve silinemez.'
@@ -206,49 +273,82 @@ ExecShellSuccess: 'Betik yürütme başarılı'
 StartUpdateSystemSSL: 'Sistem sertifikası güncellemeyi başlat'
 UpdateSystemSSLSuccess: 'Sistem sertifikası güncelleme başarılı'
 ErrWildcardDomain: 'HTTP modunda joker alan adı sertifikası başvurusu yapılamıyor'
-ErrApplySSLCanNotDelete: "İşlemde olan sertifika {{.name}} silinemez, lütfen daha sonra tekrar deneyin."
+ErrApplySSLCanNotDelete: 'İşlemde olan sertifika {{ .name }} silinemez, lütfen daha sonra tekrar deneyin.'
+StartPushSSLToNode: 'Sertifika düğüme gönderilmeye başlandı'
+PushSSLToNodeFailed: 'Sertifika düğüme gönderilemedi: {{ .err }}'
+PushSSLToNodeSuccess: 'Sertifika düğüme başarıyla gönderildi'
 
-#mysql
+# MySQL
 ErrUserIsExist: 'Mevcut kullanıcı zaten mevcut, lütfen yeniden girin'
 ErrDatabaseIsExist: 'Mevcut veritabanı zaten mevcut, lütfen yeniden girin'
 ErrExecTimeOut: 'SQL yürütme zaman aşımı, lütfen veritabanını kontrol edin'
 ErrRemoteExist: 'Uzak veritabanında bu adla zaten mevcut, lütfen değiştirin ve tekrar deneyin'
 ErrLocalExist: 'Yerel veritabanında bu ad zaten mevcut, lütfen değiştirin ve tekrar deneyin'
-RemoteBackup: "Uzak veritabanını yedeklemek için önce {{ .name }} görüntüsü kullanılarak yerel konteyner veritabanı hizmetinin başlatılması gerekiyor, lütfen bekleyin..."
-RemoteRecover: "Uzak veritabanını geri yüklemek için önce {{ .name }} görüntüsü kullanılarak yerel konteyner veritabanı hizmetinin başlatılması gerekiyor, lütfen bekleyin..."
-Arg: "Argüman"
+RemoteBackup: 'Uzak veritabanını yedeklemek için önce {{ .name }} görüntüsü kullanılarak yerel konteyner veritabanı hizmetinin başlatılması gerekiyor, lütfen bekleyin...'
+RemoteRecover: 'Uzak veritabanını geri yüklemek için önce {{ .name }} görüntüsü kullanılarak yerel konteyner veritabanı hizmetinin başlatılması gerekiyor, lütfen bekleyin...'
+Arg: 'Argüman'
 
-#redis
+# Redis
 ErrTypeOfRedis: 'Kurtarma dosyası türü mevcut kalıcılık yöntemiyle eşleşmiyor, lütfen değiştirin ve tekrar deneyin'
 
-#container
-ErrInUsed: "{{ .detail }} kullanımda ve silinemez!"
-ErrObjectInUsed: "Bu nesne kullanımda ve silinemez!"
-ErrObjectBeDependent: "Bu görüntü diğer görüntüler tarafından bağımlıdır ve silinemez!"
-ErrPortRules: 'Port numarası eşleşmiyor, lütfen yeniden girin!'
+# konteyner
+ErrInUsed: '{{ .detail }} kullanımda ve silinemez'
+ErrObjectInUsed: 'Bu nesne kullanımda ve silinemez'
+ErrObjectBeDependent: 'Bu görüntü diğer görüntüler tarafından bağımlıdır ve silinemez'
+ErrPortRules: 'Port numarası eşleşmiyor, lütfen yeniden girin'
 ErrPgImagePull: 'Image çekme zaman aşımı, lütfen image hızlandırma yapılandırın veya manuel olarak {{ .name }} imageını çekin ve tekrar deneyin'
-PruneHelper: "Bu temizlik {{ .name }} disk alanı {{ .size }} boşalttı"
-ImageRemoveHelper: "{{ .name }} imajı silindi, {{ .size }} disk alanı boşalttı"
-BuildCache: "Derleme önbelleği"
-Volume: "Depolama hacmi"
-Network: "Ağ"
-PruneStart: "Temizlik devam ediyor, lütfen bekleyin..."
+PruneHelper: 'Bu temizlik {{ .name }} disk alanı {{ .size }} boşalttı'
+ImageRemoveHelper: '{{ .name }} imajı silindi, {{ .size }} disk alanı boşalttı'
+BuildCache: 'Derleme önbelleği'
+Volume: 'Depolama hacmi'
+Network: 'Ağ'
+PruneStart: 'Temizlik devam ediyor, lütfen bekleyin...'
+ContainerBackupPrepare: 'Konteyner yedekleme çalışma alanını hazırla'
+ContainerBackupStop: 'Yedeklemeden önce konteyneri durdur'
+ContainerBackupInspect: 'Konteyner inspect ve ağ bilgisini yedekle'
+ContainerBackupMounts: 'Konteyner mount verilerini yedekle'
+ContainerBackupMeta: 'Konteyner yedekleme meta verisini yaz'
+ContainerBackupStart: 'Yedeklemeden sonra konteyneri başlat'
+ContainerRecoverPrepare: 'Konteyner geri yükleme çalışma alanını hazırla'
+ContainerRecoverExtract: 'Konteyner yedek arşivini çıkar'
+ContainerRecoverParse: 'Konteyner yedek meta verisini yükle'
+ContainerRecoverCreate: 'Konteyneri yeniden oluştur'
+ContainerRecoverMounts: 'Konteyner mount verilerini geri yükle'
+ContainerRecoverStart: 'Geri yüklenen konteyneri başlat'
+ContainerRecoverCleanup: 'Konteyner geri yükleme çalışma alanını temizle'
+ComposeBackupPrepare: 'Compose yedekleme çalışma alanını hazırla'
+ComposeBackupStop: 'Yedeklemeden önce compose’u durdur'
+ComposeBackupFiles: 'Compose dosyalarını yedekle'
+ComposeBackupContainers: 'Compose konteynerlerini yedekle'
+ComposeBackupMeta: 'Compose yedek meta verisini yaz'
+ComposeBackupStart: 'Yedeklemeden sonra compose’u başlat'
+ComposeBackupCleanup: 'Compose yedekleme çalışma alanını temizle'
+ComposeRecoverPrepare: 'Compose geri yükleme çalışma alanını hazırla'
+ComposeRecoverExtract: 'Compose yedek arşivini çıkar'
+ComposeRecoverMeta: 'Compose yedek meta verisini yükle'
+ComposeRecoverMetaLogName: 'Compose geri yükleme meta: ad={{ .name }}'
+ComposeRecoverMetaLogPath: 'Compose geri yükleme meta: yedekYolu={{ .backupPath }} hedefYol={{ .targetDir }}'
+ComposeRecoverMetaLogCount: 'Compose geri yükleme meta: dosya={{ .files }} konteyner={{ .containers }}'
+ComposeRecoverFiles: 'Compose dosyalarını geri yükle'
+ComposeRecoverContainers: 'Compose konteynerlerini geri yükle'
+ComposeRecoverRecord: 'Compose kaydını sakla'
+ComposeRecoverCleanup: 'Compose geri yükleme çalışma alanını temizle'
 
-#runtime
-ErrFileNotExist: '{{ .detail }} dosyası mevcut değil! Lütfen kaynak dosyanın bütünlüğünü kontrol edin!'
+# çalışma zamanı
+ErrFileNotExist: '{{ .detail }} dosyası mevcut değil Lütfen kaynak dosyanın bütünlüğünü kontrol edin'
 ErrImageBuildErr: 'Image yapı başarısız'
-ErrImageExist: "Görüntü zaten var! Lütfen görüntü adını değiştirin."
+ErrImageExist: 'Görüntü zaten var Lütfen görüntü adını değiştirin.'
 ErrDelWithWebsite: 'İşletim ortamı zaten bir web sitesiyle ilişkili ve silinemez'
 ErrRuntimeStart: 'Başlatma başarısız'
 ErrPackageJsonNotFound: 'package.json dosyası mevcut değil'
 ErrScriptsNotFound: 'package.json içinde scripts yapılandırma öğesi bulunamadı'
-ErrContainerNameNotFound: 'Konteyner adı alınamıyor, lütfen .env dosyasını kontrol edin'
-ErrNodeModulesNotFound: 'node_modules klasörü mevcut değil! Lütfen çalışma ortamını düzenleyin veya çalışma ortamının başarıyla başlatılmasını bekleyin'
+ErrContainerNameNotFound: 'Konteyner adı alınamıyor, lütfen.env dosyasını kontrol edin'
+ErrNodeModulesNotFound: 'node_modules klasörü mevcut değil Lütfen çalışma ortamını düzenleyin veya çalışma ortamının başarıyla başlatılmasını bekleyin'
 ErrContainerNameIsNull: 'Konteyner adı mevcut değil'
-ErrPHPPortIsDefault: "9000 portu varsayılan port, lütfen değiştirin ve tekrar deneyin"
-ErrPHPRuntimePortFailed: "{{ .name }} portu mevcut çalışma ortamı tarafından zaten kullanılıyor, lütfen değiştirin ve tekrar deneyin"
+ErrPHPPortIsDefault: '9000 portu varsayılan port, lütfen değiştirin ve tekrar deneyin'
+ErrPHPRuntimePortFailed: '{{ .name }} portu mevcut çalışma ortamı tarafından zaten kullanılıyor, lütfen değiştirin ve tekrar deneyin'
 
-#tool
+# araç
 ErrConfigNotFound: 'Yapılandırma dosyası mevcut değil'
 ErrConfigParse: 'Yapılandırma dosyası formatı yanlış'
 ErrConfigIsNull: 'Yapılandırma dosyası boş olamaz'
@@ -256,44 +356,44 @@ ErrConfigDirNotFound: 'Çalışma dizini mevcut değil'
 ErrConfigAlreadyExist: 'Aynı ada sahip bir yapılandırma dosyası zaten mevcut'
 ErrUserFindErr: 'Kullanıcı {{ .name }} arama başarısız {{ .err }}'
 
-#cronjob
+# cron görevi
 CutWebsiteLogSuccess: '{{ .name }} web sitesi günlüğü başarıyla kesildi, yedekleme yolu {{ .path }}'
 HandleShell: 'Betik {{ .name }} yürüt'
-HandleCurl: "URL'ye Eriş {{ .name }}"
+HandleCurl: 'URL''ye Eriş {{ .name }}'
 HandleNtpSync: 'Sistem zaman senkronizasyonu'
 HandleSystemClean: 'Sistem önbellek temizliği'
 SystemLog: 'Sistem Günlüğü'
 CutWebsiteLog: 'Web Sitesi Günlüğünü Döndür'
 FileOrDir: 'Dizin / Dosya'
 UploadFile: 'Yedekleme dosyası {{ .file }} {{ .backup }} konumuna yükleniyor'
-Upload: "Yükle"
-IgnoreBackupErr: "Yedekleme başarısız, hata: {{ .detail }}, bu hata yoksayılıyor..."
-IgnoreUploadErr: "Yükleme başarısız, hata: {{ .detail }}, bu hata yoksayılıyor..."
-LoadBackupFailed: "Yedek hesap bağlantısı alınamadı, hata: {{ .detail }}"
-InExecuting: "Mevcut görev yürütülüyor, lütfen tekrar yürütmeyin!"
-NoSuchResource: "Veritabanında yedek içeriği bulunamadı, atlanıyor..."
-CleanLog: "Günlüğü temizle"
-CleanLogByName: "{{.name}} günlüğünü temizle"
-WafIpGroupNotFound: "WAF IP grubu bulunamadı. Lütfen [Gelişmiş Özellikler - WAF - Kara/Beyaz Liste - IP Grubu] bölümüne giderek uzaktan indirme yöntemiyle bir IP grubu ekleyin."
+Upload: 'Yükle'
+IgnoreBackupErr: 'Yedekleme başarısız, hata: {{ .detail }}, bu hata yoksayılıyor...'
+IgnoreUploadErr: 'Yükleme başarısız, hata: {{ .detail }}, bu hata yoksayılıyor...'
+LoadBackupFailed: 'Yedek hesap bağlantısı alınamadı, hata: {{ .detail }}'
+InExecuting: 'Mevcut görev yürütülüyor, lütfen tekrar yürütmeyin'
+NoSuchResource: 'Veritabanında yedek içeriği bulunamadı, atlanıyor...'
+CleanLog: 'Günlüğü temizle'
+CleanLogByName: '{{ .name }} günlüğünü temizle'
+WafIpGroupNotFound: 'WAF IP grubu bulunamadı. Lütfen [Gelişmiş Özellikler - WAF - Kara/Beyaz Liste - IP Grubu] bölümüne giderek uzaktan indirme yöntemiyle bir IP grubu ekleyin.'
 
-#toolbox
-ErrNotExistUser: 'Mevcut kullanıcı mevcut değil, lütfen değiştirin ve tekrar deneyin!'
-ErrBanAction: 'Ayarlama başarısız. Mevcut {{ .name }} servisi kullanılamıyor. Lütfen kontrol edin ve tekrar deneyin!'
-ErrClamdscanNotFound: 'clamdscan komutu tespit edilmedi, lütfen yüklemek için belgeleri inceleyin!'
-TaskSwapSet: "Swap Ayarla"
-SetSwap: "Swap Ayarla {{ .path }} - {{ .size }}"
-CreateSwap: "Swap Dosyası Oluştur"
-FormatSwap: "Swap Dosyasını Biçimlendir"
-EnableSwap: "Swap Etkinleştir"
+# araç kutusu
+ErrNotExistUser: 'Mevcut kullanıcı mevcut değil, lütfen değiştirin ve tekrar deneyin'
+ErrBanAction: 'Ayarlama başarısız. Mevcut {{ .name }} servisi kullanılamıyor. Lütfen kontrol edin ve tekrar deneyin'
+ErrClamdscanNotFound: 'clamdscan komutu tespit edilmedi, lütfen yüklemek için belgeleri inceleyin'
+TaskSwapSet: 'Swap Ayarla'
+SetSwap: 'Swap Ayarla {{ .path }} - {{ .size }}'
+CreateSwap: 'Swap Dosyası Oluştur'
+FormatSwap: 'Swap Dosyasını Biçimlendir'
+EnableSwap: 'Swap Etkinleştir'
 
-#tamper
-CleanTamperSetting: "Geçmiş koruma ayarlarını temizle"
-SetTamperWithRules: "Kurallara göre dizin korumasını başlat"
-ProtectDir: "Dizini koru {{ .name }}"
-IgnoreFile: "Dosyayı koru {{ .name }}"
-TamperSetSuccessful: "Koruma ayarları tamamlandı, aşağıdaki dizinler izlenmeye başlanıyor:"
+# kurcalama koruması
+CleanTamperSetting: 'Geçmiş koruma ayarlarını temizle'
+SetTamperWithRules: 'Kurallara göre dizin korumasını başlat'
+ProtectDir: 'Dizini koru {{ .name }}'
+IgnoreFile: 'Dosyayı koru {{ .name }}'
+TamperSetSuccessful: 'Koruma ayarları tamamlandı, aşağıdaki dizinler izlenmeye başlanıyor:'
 
-#waf
+# WAF
 ErrScope: 'Bu yapılandırmayı değiştirme desteklenmiyor'
 ErrStateChange: 'Durum değiştirme başarısız'
 ErrRuleExist: 'Kural zaten mevcut'
@@ -301,7 +401,10 @@ ErrRuleNotExist: 'Kural mevcut değil'
 ErrParseIP: 'Yanlış IP formatı'
 ErrDefaultIP: 'default ayrılmış bir isim, lütfen başka bir isme değiştirin'
 ErrGroupInUse: 'IP grubu kara liste/beyaz liste tarafından kullanılıyor ve silinemez'
-ErrIPGroupAclUse: "IP grubu {{ .name }} web sitesinin özel kuralları tarafından kullanılıyor, silinemez"
+ErrIPGroupAclUse: 'IP grubu {{ .name }} web sitesinin özel kuralları tarafından kullanılıyor, silinemez'
+ErrIPGroupOriginProtectionUse: 'IP grubu {{ .name }} web sitesinin CDN kaynak koruması tarafından kullanılıyor'
+ErrOriginProtectionIPGroupRequired: 'Kaynak korumasını etkinleştirmeden önce en az bir boş olmayan IP grubu seçin'
+ErrOriginProtectionIPGroupInvalid: 'IP grubu {{ .name }} mevcut değil veya boş'
 ErrGroupExist: 'IP grup adı zaten mevcut'
 ErrIPRange: 'Yanlış IP aralığı'
 ErrIPExist: 'IP zaten mevcut'
@@ -312,10 +415,10 @@ xss: 'XSS'
 phpExec: 'PHP betik yürütme'
 oneWordTrojan: 'Tek Kelime Truva Atı'
 appFilter: 'Tehlikeli dizin filtreleme uygula'
-webshell: 'Webshell'
+webShell: 'Webshell'
 args: 'Parametre kuralları'
 protocolFilter: 'Protokol filtreleme'
-javaFileter: 'Java tehlikeli dosya filtresi'
+javaFilter: 'Java tehlikeli dosya filtresi'
 scannerFilter: 'Tarayıcı filtresi'
 escapeFilter: 'kaçış filtresi'
 customRule: 'Özel kural'
@@ -344,11 +447,12 @@ sqlInject: 'SQL enjeksiyonu'
 ErrDBNotExist: 'Veritabanı mevcut değil'
 allow: 'izin ver'
 deny: 'reddet'
-OpenrestyNotFound: 'Openresty yüklü değil'
-remoteIpIsNull: "IP listesi boş"
-OpenrestyVersionErr: "Openresty sürümü çok düşük, lütfen Openresty'i 1.27.1.2-2-2-focal olarak güncelleyin"
+OpenrestyNotFound: 'OpenResty yüklü değil'
+remoteIpIsNull: 'IP listesi boş'
+OpenrestyVersionErr: 'OpenResty sürümü çok eski. 1.27.1.2-2-2-focal sürümüne yükseltin'
+ErrFileTooLarge: 'Dosya 1 MB''den büyük olduğu için yüklenemiyor'
 
-#task
+# görev
 TaskStart: '{{ .name }} görevi başlıyor [BAŞLAT]'
 TaskEnd: '{{ .name }} Görev tamamlandı [TAMAMLANDI]'
 TaskFailed: '{{ .name }} görev başarısız'
@@ -363,8 +467,13 @@ TaskCreate: 'Oluştur'
 TaskDelete: 'Sil'
 TaskUpgrade: 'Yükselt'
 TaskUpdate: 'Güncelle'
+AgentPluginInstall: 'Eklenti yükle'
+AgentPluginEnable: 'Eklentiyi etkinleştir'
+AgentPluginDisable: 'Eklentiyi devre dışı bırak'
+AgentPluginUpdate: 'Eklentiyi güncelle'
+AgentPluginUninstall: 'Eklentiyi kaldır'
 TaskRestart: 'Yeniden Başlat'
-TaskProtect: "Koru"
+TaskProtect: 'Koru'
 TaskBackup: 'Yedekle'
 TaskRecover: 'Kurtar'
 TaskRollback: 'Geri Al'
@@ -372,16 +481,16 @@ TaskPull: 'Çek'
 TaskCommit: 'işleme'
 TaskBuild: 'Yapı'
 TaskPush: 'Gönder'
-TaskClean: "Temizleme"
+TaskClean: 'Temizleme'
 TaskHandle: 'Yürüt'
-TaskImport: "İçe Aktar"
-TaskExport: "Dışa Aktar"
+TaskImport: 'İçe Aktar'
+TaskExport: 'Dışa Aktar'
 Website: 'Web Sitesi'
 App: 'Uygulama'
 Runtime: 'Çalışma ortamı'
 Database: 'Veritabanı'
 ConfigFTP: 'FTP kullanıcısı {{ .name }} oluştur'
-ConfigOpenresty: 'Openresty yapılandırma dosyası oluştur'
+ConfigOpenresty: 'OpenResty yapılandırma dosyası oluştur'
 InstallAppSuccess: 'Uygulama {{ .name }} başarıyla yüklendi'
 ConfigRuntime: 'Çalışma ortamını yapılandır'
 ConfigApp: 'Uygulama Yapılandırması'
@@ -400,6 +509,24 @@ Container: 'Konteyner'
 AppLink: 'Bağlantılı Uygulama'
 EnableSSL: 'HTTPS Etkinleştir'
 AppStore: 'Uygulama Mağazası'
+Firewall: 'Güvenlik duvarı'
+FirewallSyncStep: 'Kuralları {{ .name }} ile eşitle'
+FirewallSyncResult: 'Eşitleme sonucu: {{ .succeeded }} başarılı, {{ .existing }} mevcut, {{ .failed }} başarısız'
+FirewallSyncFailed: '{{ .failed }} güvenlik duvarı kuralı eşitlenemedi'
+FirewallSyncFailedResetSkipped: '{{ .failed }} kural eşitlenemedi; kaynak güvenlik duvarı sıfırlanmadı'
+FirewallResetSourceStep: 'Kaynak güvenlik duvarı {{ .name }} sıfırla ve devre dışı bırak'
+FirewallResetSourceResult: 'Kaynak güvenlik duvarı sıfırlandı; {{ .removed }} veritabanı kuralı silindi'
+FirewallVerifyTargetStep: 'Hedef güvenlik duvarı kurallarını doğrula'
+FirewallInitializeChainsStep: '{{ .name }} temel zincirlerini başlat ve bağla'
+FirewallRestoreRulesStep: 'Veritabanı kurallarını {{ .name }} üzerine geri yükle'
+FirewallSyncWhitelistStep: 'Güvenlik duvarı bağlantı noktası izin listesini eşitle'
+FirewallEnableForwardingStep: 'Bağlantı noktası yönlendirme zincirlerini etkinleştir ve bağla'
+FirewallRestoreForwardingRulesStep: 'Veritabanı bağlantı noktası yönlendirme kurallarını geri yükle'
+FirewallInspectDockerGuardStep: 'Docker güvenlik duvarı arka ucunu ve ilkelerini denetle'
+FirewallInitializeDockerGuardStep: '{{ .name }} bağlantı noktası koruma zincirlerini başlat ve bağla'
+FirewallPersistDockerGuardStep: 'Docker bağlantı noktası koruma durumunu kaydet'
+FirewallTargetRuleIneffective: 'Hedef kural artık etkili değil'
+FirewallVerifyRuleFailed: 'Eşitlenen {{ .name }} kuralı doğrulanamadı: {{ .detail }}'
 TaskSync: 'Senkronize Et'
 LocalApp: 'Yerel Uygulama'
 SubTask: 'Alt görev'
@@ -407,18 +534,19 @@ RuntimeExtension: 'Çalışma Ortamı Uzantısı'
 TaskIsExecuting: 'Görev çalışıyor'
 CustomAppstore: 'Özel uygulama deposu'
 TaskExec: 'Çalıştır'
-TaskBatch: "Toplu İşlem"
+TaskBatch: 'Toplu İşlem'
 FileConvert: 'Dosya Formatı Dönüştürme'
 
-# task - clam
-Clamscan: "{{ .name }} Tara"
-TaskScan: "Tara"
+# görev - ClamAV
+Clamscan: '{{ .name }} Tara'
+TaskScan: 'Tara'
 
-# task - ai
+# görev - AI
 OllamaModelPull: 'Ollama modeli {{ .name }} çek'
 OllamaModelSize: 'Ollama modeli {{ .name }} boyutunu al'
+AIBenchmarkRun: "AI kıyaslama testini çalıştır"
 
-# task-snapshot
+# görev - anlık görüntü
 Snapshot: 'Anlık Görüntü'
 SnapDBInfo: '1Panel veritabanı bilgilerini yaz'
 SnapCopy: 'Dosya ve dizinleri {{ .name }} kopyala'
@@ -444,7 +572,6 @@ SnapCompressSize: 'Anlık görüntü dosya boyutu {{ .name }}'
 SnapUpload: 'Anlık görüntü dosyasını yükle'
 SnapUploadTo: 'Anlık görüntü dosyasını {{ .name }} konumuna yükle'
 SnapUploadRes: 'Anlık görüntü dosyasını {{ .name }} konumuna yükle'
-
 SnapshotRecover: 'Anlık Görüntü Geri Yükleme'
 RecoverDownload: 'Anlık görüntü dosyasını indir'
 Download: 'İndir'
@@ -452,10 +579,10 @@ RecoverDownloadAccount: 'Anlık görüntü indirme yedek hesabı al {{ .name }}'
 RecoverDecompress: 'Anlık görüntü sıkıştırılmış dosyalarını açma'
 Decompress: 'Açma'
 BackupBeforeRecover: 'Anlık görüntü öncesi sistem ilgili verileri yedekleme'
-Readjson: 'Anlık görüntüdeki Json dosyasını oku'
-ReadjsonPath: 'Anlık görüntüdeki Json dosya yolunu al'
-ReadjsonContent: 'Json dosyasını oku'
-ReadjsonMarshal: 'Json kaçış işlemesi'
+ReadJson: 'Anlık görüntüdeki Json dosyasını oku'
+ReadJsonPath: 'Anlık görüntüdeki Json dosya yolunu al'
+ReadJsonContent: 'Json dosyasını oku'
+ReadJsonMarshal: 'Json kaçış işlemesi'
 RecoverApp: 'Yüklü uygulamaları geri yükle'
 RecoverWebsite: 'Web sitesi dizinini kurtar'
 RecoverAppImage: 'Anlık görüntü imaj yedeklemesini geri yükle'
@@ -470,8 +597,7 @@ RecoverDBData: 'Veritabanı verilerini kurtar'
 RecoverBackups: 'Yerel yedekleme dizinini geri yükle'
 RecoverPanelData: 'Veri dizinini kurtar'
 
-# task - container
-ContainerNewCliet: 'Docker İstemcisini Başlat'
+# görev - konteyner
 ContainerImagePull: 'Konteyner imajını çek {{ .name }}'
 ContainerRemoveOld: 'Orijinal konteyneri kaldır {{ .name }}'
 ContainerImageCheck: 'İmajın normal çekilip çekilmediğini kontrol et'
@@ -480,22 +606,35 @@ ContainerRecreate: 'Konteyner güncellemesi başarısız, şimdi orijinal kontey
 ContainerCreate: 'Yeni konteyner oluştur {{ .name }}'
 ContainerCreateFailed: 'Konteyner oluşturma başarısız, başarısız konteyneri sil'
 ContainerStartCheck: 'Konteynerin başlatılıp başlatılmadığını kontrol et'
+ContainerAcquireLock: '{{ .name }} konteyneri işlem kilidini bekle'
+ContainerUpgradeItem: '{{ .name }} konteynerini yükselt'
+ContainerUpgradeSummary: 'Konteyner yükseltme sonuçlarını özetle'
+ContainerCleanupWarning: 'Güncelleme tamamlandı ancak {{ .name }} yedek konteyneri kaldırılamadı. Yeni konteynerin düzgün çalıştığını doğruladıktan sonra yedek konteyneri elle kaldırın. Hata: {{ .err }}'
+ContainerStopOld: 'Eski {{ .name }} konteynerini durdur'
+ContainerRenameOld: 'Geri alma için eski {{ .name }} konteynerini yeniden adlandır'
+ContainerDisconnectOld: 'Eski {{ .name }} konteynerinin ağ adreslerini serbest bırak'
+ContainerCreateReplacement: 'Yeni {{ .name }} konteynerini oluştur'
+ContainerStartReplacement: 'Yeni {{ .name }} konteynerini başlat'
+ContainerWaitReplacement: 'Yeni {{ .name }} konteynerinin hazır olduğunu kontrol et'
+ContainerStartupDiagnostic: 'Yeni {{ .name }} konteynerinin başlatma hatası tanılaması'
+ContainerRecentLogs: 'Son konteyner günlükleri (son 200 satır)'
+ContainerDiagnosticLogsFailed: 'Başarısız {{ .name }} konteynerinin günlükleri alınamadı: {{ .err }}'
+ContainerDiagnosticLogsEmpty: 'Kullanılabilir konteyner günlüğü yok'
+ContainerRollbackRestartOld: 'Eski {{ .name }} konteynerini yeniden başlat'
+ContainerRollbackRemoveReplacement: 'Başlatılamayan yeni {{ .name }} konteynerini kaldır'
+ContainerRollbackRenameOld: 'Eski {{ .name }} konteynerinin adını geri yükle'
+ContainerRollbackReconnectOld: 'Eski {{ .name }} konteynerinin ağlarını geri yükle'
 
-# task - image
+# görev - imaj
 ImageBuild: 'İmaj Oluşturma'
-ImageBuildStdoutCheck: 'İmaj çıktı içeriğini ayrıştır'
-ImageBuildRes: 'İmaj oluşturma çıktısı: {{ .name }}'
 ImagePull: 'İmaj çek'
 ImageRepoAuthFromDB: 'Veritabanından depo kimlik doğrulama bilgilerini al'
-ImaegPullRes: 'İmaj çekme çıktısı: {{ .name }}'
 ImagePush: 'İmaj gönder'
 ImageRenameTag: 'İmaj etiketini değiştir'
 ImageNewTag: 'Yeni imaj etiketi {{ .name }}'
-ImaegPushRes: 'İmaj gönderme çıktısı: {{ .name }}'
 ComposeCreate: 'Kompozisyon oluştur'
-ComposeCreateRes: 'Compose oluşturma çıktısı: {{ .name }}'
 
-# task - website
+# görev - web sitesi
 BackupNginxConfig: 'Web sitesi OpenResty yapılandırma dosyasını yedekle'
 CompressFileSuccess: 'Dizin başarıyla sıkıştırıldı, şuraya sıkıştırıldı {{ .name }}'
 CompressDir: 'Sıkıştırma dizini'
@@ -507,39 +646,56 @@ RecoverFailedStartRollBack: 'Kurtarma başarısız, geri almayı başlat'
 AppBackupFileIncomplete: 'Yedekleme dosyası eksik ve app.json veya app.tar.gz dosyalarından yoksun'
 AppAttributesNotMatch: 'Uygulama türü veya adı eşleşmiyor'
 
-#alert
-ErrAlert: 'Uyarı mesajının formatı yanlış, lütfen kontrol edin ve tekrar deneyin!'
-ErrAlertPush: 'Uyarı bilgisi gönderiminde hata, lütfen kontrol edin ve tekrar deneyin!'
-ErrAlertSave: 'Alarm bilgisini kaydetmede hata, lütfen kontrol edin ve tekrar deneyin!'
-ErrAlertSync: 'Alarm bilgisi senkronizasyon hatası, lütfen kontrol edin ve tekrar deneyin!'
-ErrAlertRemote: 'Alarm mesajı uzak hata, lütfen kontrol edin ve tekrar deneyin!'
+# uyarı
+ErrAlertMethodNotSupported: 'Bu sürüm bu uyarı yöntemini desteklemiyor'
+ErrAlertSync: 'Alarm bilgisi senkronizasyon hatası, lütfen kontrol edin ve tekrar deneyin'
 
-#task - runtime
-ErrInstallExtension: "Zaten devam eden bir kurulum görevi var, görevin bitmesini bekleyin"
+# görev - çalışma zamanı
+ErrInstallExtension: 'Zaten devam eden bir kurulum görevi var, görevin bitmesini bekleyin'
 
-# alert mail template
-PanelAlertTitle: "Panel Uyarı Bildirimi"
-TestAlertTitle: "Test E-postası - E-posta Bağlantısını Doğrula"
-TestAlert: "Bu, e-posta gönderim ayarlarınızın doğru yapılandırıldığını doğrulamak için gönderilen bir test e-postasıdır."
-LicenseExpirationAlert: "Paneliniz {{ .node }}{{ .ip }}, lisans {{ .day }} gün içinde süresi dolacak. Detaylar için paneline giriş yapın."
-CronJobFailedAlert: "Paneliniz {{ .node }}{{ .ip }}, zamanlanmış görev {{ .name }} çalıştırma başarısız oldu. Detaylar için paneline giriş yapın."
-ClamAlert: "Paneliniz {{ .node }}{{ .ip }}, virüs tarama görevi {{ .num }} enfekte dosya tespit etti. Detaylar için paneline giriş yapın."
-WebSiteAlert: "Paneliniz {{ .node }}{{ .ip }}, {{ .num }} web sitesi {{ .day }} gün içinde süresi dolacak. Detaylar için paneline giriş yapın."
-SSLAlert: "Paneliniz {{ .node }}{{ .ip }}, {{ .num }} SSL sertifikası {{ .day }} gün içinde süresi dolacak. Detaylar için paneline giriş yapın."
-DiskUsedAlert: "Paneliniz {{ .node }}{{ .ip }}, {{ .name }} diski kullanımı {{ .used }}'a ulaştı. Detaylar için paneline giriş yapın."
-ResourceAlert: "Paneliniz {{ .node }}{{ .ip }}, son {{ .time }} dakika içindeki ortalama {{ .name }} kullanım oranı {{ .used }}'dır. Detaylar için paneline giriş yapın."
-PanelVersionAlert: "Paneliniz {{ .node }}{{ .ip }}, en son panel sürümü yükseltme için mevcut. Detaylar için paneline giriş yapın."
-PanelPwdExpirationAlert: "Paneliniz {{ .node }}{{ .ip }}, panel şifresi {{ .day }} gün içinde süresi dolacak. Detaylar için paneline giriş yapın."
-CommonAlert: "Paneliniz {{ .node }}{{ .ip }}, {{ .msg }}. Detaylar için paneline giriş yapın."
-NodeExceptionAlert: "Paneliniz {{ .node }}{{ .ip }}, {{ .num }} düğüm anormal durumda. Detaylar için paneline giriş yapın."
-LicenseExceptionAlert: "Paneliniz {{ .node }}{{ .ip }}, {{ .num }} lisans anormal durumda. Detaylar için paneline giriş yapın."
-SSHAndPanelLoginAlert: "Paneliniz {{ .node }}{{ .ip }}, {{ .loginIp }} adresinden {{ .name }} girişi anormal. Detaylar için paneline giriş yapın."
+# uyarı e-posta şablonu
+PanelAlertTitle: 'Panel Uyarı Bildirimi'
+TestAlertTitle: 'Test E-postası - E-posta Bağlantısını Doğrula'
+TestAlert: 'Bu, e-posta gönderim ayarlarınızın doğru yapılandırıldığını doğrulamak için gönderilen bir test e-postasıdır.'
+LicenseExpirationAlert: 'Paneliniz {{ .node }}{{ .ip }}, lisans {{ .day }} gün içinde süresi dolacak. Detaylar için paneline giriş yapın.'
+CronJobFailedAlert: 'Paneliniz {{ .node }}{{ .ip }}, zamanlanmış görev {{ .name }} çalıştırma başarısız oldu. Detaylar için paneline giriş yapın.'
+ClamAlert: 'Paneliniz {{ .node }}{{ .ip }}, virüs tarama görevi {{ .num }} enfekte dosya tespit etti. Detaylar için paneline giriş yapın.'
+WebSiteAlert: 'Paneliniz {{ .node }}{{ .ip }}, {{ .num }} web sitesi {{ .day }} gün içinde süresi dolacak. Detaylar için paneline giriş yapın.'
+SSLAlert: 'Paneliniz {{ .node }}{{ .ip }}, {{ .num }} SSL sertifikası {{ .day }} gün içinde süresi dolacak. Detaylar için paneline giriş yapın.'
+DiskUsedAlert: 'Paneliniz {{ .node }}{{ .ip }}, {{ .name }} diski kullanımı {{ .used }}''a ulaştı. Detaylar için paneline giriş yapın.'
+ResourceAlert: 'Paneliniz {{ .node }}{{ .ip }}, son {{ .time }} dakika içindeki ortalama {{ .name }} kullanım oranı {{ .used }}''dır. Detaylar için paneline giriş yapın.'
+PanelVersionAlert: 'Paneliniz {{ .node }}{{ .ip }}, en son panel sürümü yükseltme için mevcut. Detaylar için paneline giriş yapın.'
+PanelPwdExpirationAlert: 'Paneliniz {{ .node }}{{ .ip }}, panel şifresi {{ .day }} gün içinde süresi dolacak. Detaylar için paneline giriş yapın.'
+CommonAlert: 'Paneliniz {{ .node }}{{ .ip }}, {{ .msg }}. Detaylar için paneline giriş yapın.'
+NodeExceptionAlert: 'Paneliniz {{ .node }}{{ .ip }}, {{ .num }} düğüm anormal durumda. Detaylar için paneline giriş yapın.'
+LicenseExceptionAlert: 'Paneliniz {{ .node }}{{ .ip }}, {{ .num }} lisans anormal durumda. Detaylar için paneline giriş yapın.'
+SSHAndPanelLoginAlert: 'Paneliniz {{ .node }}{{ .ip }}, {{ .loginIp }} adresinden {{ .name }} girişi anormal. Detaylar için paneline giriş yapın.'
 
-#disk
-DeviceNotFound: "Cihaz {{ .name }} bulunamadı"
-DeviceIsMounted: "Cihaz {{ .name }} bağlandı, önce çıkarın"
-PartitionDiskErr: "Bölümleme başarısız, {{ .err }}"
-FormatDiskErr: "Disk biçimlendirme başarısız, {{ .err }}"
-MountDiskErr: "Disk bağlama başarısız, {{ .err }}"
-UnMountDiskErr: "Disk bağının kaldırılması başarısız, {{ .err }}"
-XfsNotFound: "XFS dosya sistemi algılanmadı, lütfen önce xfsprogs'i yükleyin"
+# disk
+DeviceNotFound: 'Cihaz {{ .name }} bulunamadı'
+DeviceIsMounted: 'Cihaz {{ .name }} bağlandı, önce çıkarın'
+PartitionDiskErr: 'Bölümleme başarısız, {{ .err }}'
+FormatDiskErr: 'Disk biçimlendirme başarısız, {{ .err }}'
+MountDiskErr: 'Disk bağlama başarısız, {{ .err }}'
+XfsNotFound: 'XFS dosya sistemi algılanmadı, lütfen önce xfsprogs''i yükleyin'
+
+# terminal
+TerminalAIBlockedRiskyCommand: 'Riskli komut engellendi: {{ .command }}'
+TerminalAIThinking: 'AI dusunuyor...'
+TerminalOutputTruncated: '[çıktı kısaltıldı, yalnızca son çıktı gösteriliyor]'
+TerminalAIReadyToExecute: 'Dusunme tamamlandi, calistirmak icin Enter tusuna basin (sure: {{ .duration }}, token: {{ .tokens }})'
+TerminalAIRequestFailed: 'AI istegi basarisiz oldu: {{ .err }}'
+
+# AI ağ geçidi
+ErrAIProxyServiceNotInstalled: '{{ .name }} servisi kurulu değil'
+ErrAIProxyModelAccountNotFound: 'Model hesabı {{ .id }} bulunamadı'
+ErrAIProxyModelMapRequired: 'Bu alan zorunludur.'
+ErrAIProxyModelMapInvalid: 'Model eşlemesi geçerli bir JSON nesnesi olmalıdır: {{ .err }}'
+ErrAIProxyModelMapEmpty: 'Model eşlemesi boş olamaz'
+ErrAIProxyModelMapEmptyExternalModel: 'Model eşlemesi boş bir istek modeli içeriyor'
+ErrAIProxyModelMapEmptyUpstreamModel: '{{ .model }} için upstream model boş olamaz'
+AIProxyUserFallback: 'Silinen kullanıcı (ID: {{ .id }})'
+AIProviderBailian: 'Alibaba Cloud Model Studio'
+AIProviderBailianCodingPlan: 'Alibaba Cloud Model Studio Coding Plan'
+AIProviderArk: 'Volcengine Ark'
+AIProviderArkCodingPlan: 'Volcengine Ark Coding Plan'

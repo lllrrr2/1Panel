@@ -10,7 +10,8 @@
 </template>
 
 <script lang="ts" setup>
-import { getSettingInfo } from '@/api/modules/setting';
+import { getSettingBaseInfo } from '@/api/modules/setting';
+import { getXpackProxyDocker } from '@/extensions/xpack';
 
 const showOption = ref(false);
 const restart = ref(false);
@@ -25,7 +26,7 @@ const loadStatus = async () => {
         em('update:withDockerRestart', false);
         return;
     }
-    await getSettingInfo()
+    await getSettingBaseInfo()
         .then((res) => {
             if (res.data.proxyType === '' || res.data.proxyType === 'close') {
                 em('update:withDockerRestart', false);
@@ -36,21 +37,16 @@ const loadStatus = async () => {
             em('update:withDockerRestart', false);
             return;
         });
-    let searchXSetting;
-    const xpackModules = import.meta.glob('../../xpack/api/modules/setting.ts', { eager: true });
-    if (xpackModules['../../xpack/api/modules/setting.ts']) {
-        searchXSetting = xpackModules['../../xpack/api/modules/setting.ts']['searchXSetting'] || {};
-        const res = await searchXSetting();
-        if (!res) {
-            em('update:withDockerRestart', false);
-            return;
-        }
-        if (res.data.proxyDocker === '') {
-            em('update:withDockerRestart', false);
-            return;
-        }
-        showOption.value = true;
+    const res = await getXpackProxyDocker();
+    if (!res) {
+        em('update:withDockerRestart', false);
+        return;
     }
+    if (res.data.proxyDocker !== 'Enable') {
+        em('update:withDockerRestart', false);
+        return;
+    }
+    showOption.value = true;
 };
 
 const changeRestart = () => {

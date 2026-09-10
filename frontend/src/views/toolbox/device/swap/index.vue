@@ -67,7 +67,7 @@
             </el-table-column>
             <el-table-column min-width="70">
                 <template #default="scope">
-                    <el-button link type="primary" @click="onSave(scope.row)">
+                    <el-button v-permission v-node-admin link type="primary" @click="onSave(scope.row)">
                         {{ $t('commons.button.save') }}
                     </el-button>
                 </template>
@@ -87,7 +87,8 @@ import { reactive, ref } from 'vue';
 import i18n from '@/lang';
 import { MsgError, MsgSuccess } from '@/utils/message';
 import { updateDeviceSwap, getDeviceBase } from '@/api/modules/toolbox';
-import { computeSize, newUUID, splitSize } from '@/utils/util';
+import { computeSize, splitSize } from '@/utils/size';
+import { newUUID } from '@/utils/id';
 import TaskLog from '@/components/log/task/index.vue';
 import { loadBaseDir } from '@/api/modules/setting';
 

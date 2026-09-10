@@ -14,7 +14,7 @@
                         :end-placeholder="$t('commons.search.timeEnd')"
                         :shortcuts="shortcuts"
                         style="max-width: 360px; width: 100%"
-                        :size="mobile ? 'small' : 'default'"
+                        :size="isMobile ? 'small' : 'default'"
                     ></el-date-picker>
                     <el-select class="p-w-300 ml-2" v-model="searchInfo.productName" @change="search()">
                         <el-option v-for="item in options" :key="item" :label="item" :value="item" />
@@ -28,7 +28,7 @@
             <el-col :xs="24" :sm="24" :md="12" :lg="12" :xl="12">
                 <el-card class="card-interval" style="overflow: inherit">
                     <template #header>
-                        <div :class="mobile ? 'flx-wrap' : 'flex justify-between'">
+                        <div :class="isMobile ? 'flx-wrap' : 'flex justify-between'">
                             <span class="title">{{ $t('aiTools.gpu.memoryUsage') }}</span>
                         </div>
                     </template>
@@ -48,7 +48,7 @@
             <el-col :xs="24" :sm="24" :md="12" :lg="12" :xl="12">
                 <el-card class="card-interval" style="overflow: inherit">
                     <template #header>
-                        <div :class="mobile ? 'flx-wrap' : 'flex justify-between'">
+                        <div :class="isMobile ? 'flx-wrap' : 'flex justify-between'">
                             <span class="title">{{ $t('aiTools.gpu.gpuUtil') }}</span>
                         </div>
                     </template>
@@ -68,7 +68,7 @@
             <el-col :xs="24" :sm="24" :md="12" :lg="12" :xl="12">
                 <el-card class="card-interval" style="overflow: inherit">
                     <template #header>
-                        <div :class="mobile ? 'flx-wrap' : 'flex justify-between'">
+                        <div :class="isMobile ? 'flx-wrap' : 'flex justify-between'">
                             <span class="title">{{ $t('aiTools.gpu.process') }}</span>
                         </div>
                     </template>
@@ -88,7 +88,7 @@
             <el-col :xs="24" :sm="24" :md="12" :lg="12" :xl="12">
                 <el-card class="card-interval" style="overflow: inherit">
                     <template #header>
-                        <div :class="mobile ? 'flx-wrap' : 'flex justify-between'">
+                        <div :class="isMobile ? 'flx-wrap' : 'flex justify-between'">
                             <span class="title">{{ $t('aiTools.gpu.powerUsage') }}</span>
                         </div>
                     </template>
@@ -131,7 +131,7 @@
             <el-col :xs="24" :sm="24" :md="12" :lg="12" :xl="12">
                 <el-card class="card-interval" style="overflow: inherit">
                     <template #header>
-                        <div :class="mobile ? 'flx-wrap' : 'flex justify-between'">
+                        <div :class="isMobile ? 'flx-wrap' : 'flex justify-between'">
                             <span class="title">{{ $t('aiTools.gpu.fanSpeed') }}</span>
                         </div>
                     </template>
@@ -166,24 +166,20 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, computed } from 'vue';
-import { loadGPUMonitor, getGPUOptions } from '@/api/modules/host';
-import { dateFormatWithoutYear } from '@/utils/util';
+import { ref, reactive, onMounted } from 'vue';
+import { loadGPUMonitor, getGPUOptions } from '@/api/modules/ai';
+import { dateFormatWithoutYear } from '@/utils/date';
 import RouterMenu from '@/views/ai/gpu/index.vue';
-import { GlobalStore } from '@/store';
 import { shortcuts } from '@/utils/shortcuts';
-import { Host } from '@/api/interface/host';
 import i18n from '@/lang';
 import { routerToName } from '@/utils/router';
+import { AI } from '@/api/interface/ai';
+import { useGlobalStore } from '@/composables/useGlobalStore';
 
-const globalStore = GlobalStore();
-
-const mobile = computed(() => {
-    return globalStore.isMobile();
-});
+const { isMobile } = useGlobalStore();
 
 const loading = ref(false);
-const options = ref([]);
+const options = ref<string[]>([]);
 const gpuType = ref('gpu');
 const timeRangeGlobal = ref<[Date, Date]>([new Date(new Date().setHours(0, 0, 0, 0)), new Date()]);
 const chartsOption = ref({
@@ -193,10 +189,10 @@ const chartsOption = ref({
     loadTemperatureChart: null,
     loadSpeedChart: null,
 });
-const chartHide = ref([]);
-const currentHide = ref();
+const chartHide = ref<AI.ChartHide[]>([]);
+const currentHide = ref<AI.ChartHide>();
 
-const searchInfo = reactive<Host.MonitorGPUSearch>({
+const searchInfo = reactive<AI.MonitorGPUSearch>({
     productName: '',
     startTime: new Date(new Date().setHours(0, 0, 0, 0)),
     endTime: new Date(),
@@ -219,6 +215,7 @@ const loadOptions = async () => {
 };
 
 const loadCurrentHide = () => {
+    currentHide.value = undefined;
     for (const item of chartHide.value) {
         if (item.productName === searchInfo.productName) {
             currentHide.value = item;
@@ -311,7 +308,7 @@ function initMemoryCharts(baseDate: any, data: any) {
                 alignTicks: true,
             },
         ],
-        grid: mobile.value ? { left: '15%', right: '15%', bottom: '20%' } : null,
+        grid: isMobile.value ? { left: '15%', right: '15%', bottom: '20%' } : null,
         tooltip: {
             trigger: 'axis',
             formatter: function (list: any) {
@@ -323,13 +320,15 @@ function initMemoryCharts(baseDate: any, data: any) {
 }
 
 function initPowerCharts(baseDate: any, data: any) {
-    chartsOption.value['loadPowerChart'] = {
-        xData: baseDate,
-        yData: [
-            {
-                name: i18n.global.t('aiTools.gpu.powerCurrent'),
-                data: data.powerUsed,
-            },
+    const yData: any[] = [
+        {
+            name: i18n.global.t('aiTools.gpu.powerCurrent'),
+            data: data.powerUsed,
+        },
+    ];
+    const yAxis: any[] = [{ type: 'value', name: i18n.global.t('aiTools.gpu.power') }];
+    if (!currentHide.value?.powerLimit) {
+        yData.push(
             {
                 name: i18n.global.t('aiTools.gpu.powerLimit'),
                 data: data.powerTotal,
@@ -339,35 +338,37 @@ function initPowerCharts(baseDate: any, data: any) {
                 data: data.powerPercent,
                 yAxisIndex: 1,
             },
-        ],
-        yAxis: [
-            { type: 'value', name: i18n.global.t('aiTools.gpu.power') },
-            {
-                type: 'value',
-                name: i18n.global.t('aiTools.gpu.percent') + ' ( % )',
-                position: 'right',
-                alignTicks: true,
-            },
-        ],
-        grid: mobile.value ? { left: '15%', right: '15%', bottom: '20%' } : null,
+        );
+        yAxis.push({
+            type: 'value',
+            name: i18n.global.t('aiTools.gpu.percent') + ' ( % )',
+            position: 'right',
+            alignTicks: true,
+        });
+    }
+    chartsOption.value['loadPowerChart'] = {
+        xData: baseDate,
+        yData,
+        yAxis,
+        grid: isMobile.value ? { left: '15%', right: '15%', bottom: '20%' } : null,
         tooltip: {
             trigger: 'axis',
             formatter: function (list: any) {
-                let res = loadDate(list[0].name);
+                const tooltip = createTooltip(list[0].name);
                 for (const item of list) {
                     if (
                         item.seriesName === i18n.global.t('aiTools.gpu.powerCurrent') ||
                         item.seriesName === i18n.global.t('aiTools.gpu.powerLimit')
                     ) {
-                        res += loadSeries(item, item.data, 'W');
+                        appendSeries(tooltip, item, item.data, 'W');
                     } else {
-                        res += loadSeries(item, Number(item.data.toFixed(2)), '%');
+                        appendSeries(tooltip, item, Number(item.data.toFixed(2)), '%');
                     }
                 }
-                return res;
+                return tooltip;
             },
         },
-        formatStr: '%',
+        formatStr: currentHide.value?.powerLimit ? 'W' : '%',
     };
 }
 
@@ -446,71 +447,89 @@ function loadEmptyData() {
 }
 
 function withMemoryProcess(list: any) {
-    let res = loadDate(list[0].name);
+    const tooltip = createTooltip(list[0].name);
     for (const item of list) {
         if (
             item.seriesName === i18n.global.t('aiTools.gpu.memoryUsed') ||
             item.seriesName === i18n.global.t('aiTools.gpu.memoryTotal')
         ) {
-            res += loadSeries(item, item.data, 'MiB');
+            appendSeries(tooltip, item, item.data, 'MiB');
         } else {
-            res += loadSeries(item, Number(item.data.toFixed(2)), '%');
+            appendSeries(tooltip, item, Number(item.data.toFixed(2)), '%');
         }
     }
-    return res;
+    return tooltip;
 }
 
 function withProcess(list: any, process: any) {
-    let res = loadDate(list[0].name);
+    const tooltip = createTooltip(list[0].name);
     for (const item of list) {
-        res += loadSeries(item, item.data, '');
+        appendSeries(tooltip, item, item.data, '');
     }
-    let title = gpuType.value === 'gpu' ? i18n.global.t('aiTools.gpu.type') : i18n.global.t('aiTools.gpu.shr');
-    res += `
-        <div style="margin-top: 10px; border-bottom: 1px dashed black;"></div>
-        <table style="border-collapse: collapse; margin-top: 20px; font-size: 12px;">
-        <thead>
-            <tr>
-            <th style="padding: 6px 8px;">PID</th>
-            <th style="padding: 6px 8px;">${i18n.global.t('aiTools.gpu.processName')}</th>
-            <th style="padding: 6px 8px;">${title}</th>
-            <th style="padding: 6px 8px;">${i18n.global.t('aiTools.gpu.memoryUsed')}</th>
-            </tr>
-        </thead>
-        <tbody>
-    `;
-    if (!process) {
-        return res;
+    const type = currentHide.value?.type || gpuType.value;
+    const title = type === 'xpu' ? i18n.global.t('aiTools.gpu.shr') : i18n.global.t('aiTools.gpu.type');
+    appendProcessTable(tooltip, process || [], title);
+    return tooltip;
+}
+
+function createTooltip(name: unknown): HTMLDivElement {
+    const tooltip = document.createElement('div');
+    const date = document.createElement('div');
+    date.style.display = 'inline-block';
+    date.style.width = '100%';
+    date.style.paddingBottom = '10px';
+    date.textContent = `${i18n.global.t('commons.search.date')}: ${String(name ?? '').replaceAll('\n', ' ')}`;
+    tooltip.appendChild(date);
+    return tooltip;
+}
+
+function appendSeries(tooltip: HTMLElement, item: any, data: unknown, unit: string) {
+    const line = document.createElement('div');
+    line.style.width = '100%';
+    const marker = document.createElement('span');
+    marker.textContent = '●';
+    if (typeof item.color === 'string') {
+        marker.style.color = item.color;
     }
+    line.appendChild(marker);
+    line.appendChild(document.createTextNode(` ${String(item.seriesName ?? '')}: ${String(data ?? '')} ${unit}`));
+    tooltip.appendChild(line);
+}
+
+function appendProcessTable(tooltip: HTMLElement, process: AI.GPUProcess[], typeTitle: string) {
+    const separator = document.createElement('div');
+    separator.style.marginTop = '10px';
+    separator.style.borderBottom = '1px dashed black';
+    tooltip.appendChild(separator);
+
+    const table = document.createElement('table');
+    table.style.borderCollapse = 'collapse';
+    table.style.marginTop = '20px';
+    table.style.fontSize = '12px';
+    const header = table.createTHead().insertRow();
+    for (const title of [
+        'PID',
+        i18n.global.t('aiTools.gpu.processName'),
+        typeTitle,
+        i18n.global.t('aiTools.gpu.memoryUsed'),
+    ]) {
+        const cell = document.createElement('th');
+        cell.style.padding = '6px 8px';
+        cell.textContent = title;
+        header.appendChild(cell);
+    }
+
+    const body = table.createTBody();
     for (const row of process) {
-        res += `
-            <tr>
-                <td style="padding: 6px 8px; text-align: center;">
-                    ${row.pid}
-                </td>
-                <td style="padding: 6px 8px; text-align: center;">
-                    ${row.processName}
-                </td>
-                <td style="padding: 6px 8px; text-align: center;">
-                    ${loadProcessType(row.type)}
-                </td>
-                <td style="padding: 6px 8px; text-align: center;">
-                    ${row.usedMemory.replaceAll('MB', 'MiB')}
-                </td>
-            </tr>
-        `;
+        const tableRow = body.insertRow();
+        for (const value of [row.pid, row.processName, loadProcessType(row.type), row.usedMemory]) {
+            const cell = tableRow.insertCell();
+            cell.style.padding = '6px 8px';
+            cell.style.textAlign = 'center';
+            cell.textContent = value || '';
+        }
     }
-    return res;
-}
-function loadDate(name: any) {
-    return ` <div style="display: inline-block; width: 100%; padding-bottom: 10px;">
-                ${i18n.global.t('commons.search.date')}: ${name.replaceAll('\n', ' ')}
-            </div>`;
-}
-function loadSeries(item: any, data: any, unit: any) {
-    return `<div style="width: 100%;">
-                ${item.marker} ${item.seriesName}: ${data} ${unit}
-            </div>`;
+    tooltip.appendChild(table);
 }
 const loadProcessType = (val: string) => {
     if (val === 'C' || val === 'G') {

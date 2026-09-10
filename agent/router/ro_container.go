@@ -11,7 +11,6 @@ func (s *ContainerRouter) InitRouter(Router *gin.RouterGroup) {
 	baRouter := Router.Group("containers")
 	baseApi := v2.ApiGroupApp.BaseApi
 	{
-		baRouter.GET("/exec", baseApi.ContainerWsSSH)
 		baRouter.GET("/stats/:id", baseApi.ContainerStats)
 
 		baRouter.POST("", baseApi.ContainerCreate)
@@ -35,6 +34,12 @@ func (s *ContainerRouter) InitRouter(Router *gin.RouterGroup) {
 		baRouter.POST("/prune", baseApi.ContainerPrune)
 
 		baRouter.POST("/users", baseApi.LoadContainerUsers)
+		baRouter.POST("/files/search", baseApi.ListContainerFiles)
+		baRouter.POST("/files/upload", baseApi.UploadContainerFile)
+		baRouter.POST("/files/content", baseApi.GetContainerFileContent)
+		baRouter.POST("/files/size", baseApi.GetContainerFileSize)
+		baRouter.POST("/files/del", baseApi.DeleteContainerFile)
+		baRouter.POST("/files/download", baseApi.DownloadContainerFile)
 
 		baRouter.GET("/repo", baseApi.ListRepo)
 		baRouter.POST("/repo/status", baseApi.CheckRepoStatus)
@@ -50,6 +55,7 @@ func (s *ContainerRouter) InitRouter(Router *gin.RouterGroup) {
 		baRouter.POST("/compose/operate", baseApi.OperatorCompose)
 		baRouter.POST("/compose/clean/log", baseApi.CleanComposeLog)
 		baRouter.POST("/compose/update", baseApi.ComposeUpdate)
+		baRouter.POST("/compose/pin", baseApi.ComposePin)
 
 		baRouter.GET("/template", baseApi.ListComposeTemplate)
 		baRouter.POST("/template/search", baseApi.SearchComposeTemplate)

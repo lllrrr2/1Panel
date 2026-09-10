@@ -15,7 +15,7 @@
                 :rules="rules"
             >
                 <el-form-item prop="enable" :label="$t('website.enableHTTPS')">
-                    <el-switch v-model="form.enable" @change="changeEnable"></el-switch>
+                    <el-switch v-permission v-model="form.enable" @change="changeEnable"></el-switch>
                 </el-form-item>
 
                 <el-collapse-transition>
@@ -29,7 +29,7 @@
                         <el-divider content-position="left">{{ $t('website.SSLConfig') }}</el-divider>
                         <HttpsConfig v-model="form" :website-ssl="websiteSSL" @ssl-change="handleSSLChange" />
                         <el-form-item>
-                            <el-button type="primary" @click="submit(httpsForm)">
+                            <el-button v-permission type="primary" @click="submit(httpsForm)">
                                 {{ $t('commons.button.save') }}
                             </el-button>
                         </el-form-item>
@@ -60,7 +60,7 @@ const id = computed(() => {
     return props.id;
 });
 const httpsForm = ref<FormInstance>();
-const form = reactive({
+let form = reactive({
     acmeAccountID: 0,
     enable: false,
     websiteId: id.value,
@@ -182,12 +182,12 @@ onMounted(() => {
     get();
 });
 </script>
-<style lang="scss">
-.el-collapse,
-.el-collapse-item__wrap {
+<style lang="scss" scoped>
+:deep(.el-collapse),
+:deep(.el-collapse-item__wrap) {
     border: none;
 }
-.el-collapse-item__header {
+:deep(.el-collapse-item__header) {
     border: none;
 }
 </style>

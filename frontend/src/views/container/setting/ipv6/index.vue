@@ -1,7 +1,7 @@
 <template>
     <div>
         <DrawerPro v-model="drawerVisible" header="IPv6" @close="handleClose" size="small">
-            <el-alert class="common-prompt" :closable="false" type="warning" v-if="!globalStore.isFxplay">
+            <el-alert class="common-prompt" :closable="false" type="warning" v-if="!isFxplay">
                 <template #default>
                     <span class="input-help">
                         {{ $t('container.ipv6Helper') }}
@@ -53,9 +53,9 @@ import i18n from '@/lang';
 import { MsgSuccess } from '@/utils/message';
 import { FormInstance } from 'element-plus';
 import { updateIpv6Option } from '@/api/modules/container';
-import { checkIpV6 } from '@/utils/util';
-import { GlobalStore } from '@/store';
-const globalStore = GlobalStore();
+import { checkIpV6 } from '@/utils/validate';
+import { useGlobalStore } from '@/composables/useGlobalStore';
+const { docsUrl, isFxplay } = useGlobalStore();
 
 const loading = ref();
 const drawerVisible = ref();
@@ -93,7 +93,7 @@ function checkFixedCidrV6(rule: any, value: any, callback: any) {
 }
 
 const toDoc = () => {
-    window.open(globalStore.docsUrl + '/user_manual/containers/setting/', '_blank', 'noopener,noreferrer');
+    window.open(docsUrl.value + '/user_manual/containers/setting/', '_blank', 'noopener,noreferrer');
 };
 
 const emit = defineEmits<{ (e: 'search'): void }>();
@@ -111,7 +111,7 @@ const onSave = async (formEl: FormInstance | undefined) => {
         if (!valid) return;
         let params = {
             header: i18n.global.t('database.confChange'),
-            operationInfo: i18n.global.t('database.restartNowHelper'),
+            operationInfo: i18n.global.t('container.restartHelper'),
             submitInputInfo: i18n.global.t('database.restartNow'),
         };
         confirmDialogRef.value!.acceptParams(params);

@@ -1,6 +1,7 @@
 package files
 
 import (
+	"context"
 	"fmt"
 	"path"
 	"time"
@@ -18,14 +19,14 @@ func NewX7zArchiver() ShellArchiver {
 	return &X7zArchiver{}
 }
 
-func (z X7zArchiver) Extract(filePath, dstDir string, _ string) error {
+func (z X7zArchiver) Extract(ctx context.Context, filePath, dstDir string, _ string) error {
 	if err := checkCmdAvailability("7z"); err != nil {
 		return err
 	}
-	return cmd.RunDefaultBashCf("7z x -y -o%q %q", dstDir, filePath)
+	return cmd.NewCommandMgr(cmd.WithContext(ctx)).Run("7z", "x", "-y", "-o"+dstDir, filePath)
 }
 
-func (z X7zArchiver) Compress(sourcePaths []string, dstFile string, _ string) (err error) {
+func (z X7zArchiver) Compress(ctx context.Context, sourcePaths []string, dstFile string, _ string) (err error) {
 	if err = checkCmdAvailability("7z"); err != nil {
 		return err
 	}
@@ -44,8 +45,8 @@ func (z X7zArchiver) Compress(sourcePaths []string, dstFile string, _ string) (e
 		relativePaths[i] = path.Base(sp)
 	}
 
-	cmdArgs := append([]string{"a", "-r", tmpFile}, relativePaths...)
-	cmdMgr := cmd.NewCommandMgr(cmd.WithWorkDir(baseDir))
+	cmdArgs := append([]string{"a", "-snh", "-snl", tmpFile}, relativePaths...)
+	cmdMgr := cmd.NewCommandMgr(cmd.WithWorkDir(baseDir), cmd.WithContext(ctx))
 	if err = cmdMgr.Run("7z", cmdArgs...); err != nil {
 		return err
 	}

@@ -1,12 +1,5 @@
 <template>
     <DrawerPro v-model="drawerVisible" :header="$t('setting.panelSSL')" @close="handleClose" size="large">
-        <el-alert class="common-prompt" :closable="false" type="error">
-            <template #default>
-                <span>
-                    <span>{{ $t('setting.panelSSLHelper') }}</span>
-                </span>
-            </template>
-        </el-alert>
         <el-form ref="formRef" label-position="top" :model="form" :rules="rules" v-loading="loading">
             <el-form-item :label="$t('setting.mode')" prop="ssl">
                 <el-radio-group v-model="form.ssl">
@@ -125,7 +118,8 @@
 </template>
 <script lang="ts" setup>
 import { Website } from '@/api/interface/website';
-import { dateFormatSimple, getProvider } from '@/utils/util';
+import { dateFormatSimple } from '@/utils/date';
+import { getProvider } from '@/utils/ssl';
 import { listLocalNodeSSL } from '@/api/modules/website';
 import { reactive, ref } from 'vue';
 import i18n from '@/lang';
@@ -134,8 +128,8 @@ import { downloadSSL, updateSSL } from '@/api/modules/setting';
 import { Rules } from '@/global/form-rules';
 import { ElMessageBox, FormInstance } from 'element-plus';
 import { Setting } from '@/api/interface/setting';
-import { GlobalStore } from '@/store';
-const globalStore = GlobalStore();
+import { useGlobalStore } from '@/composables/useGlobalStore';
+const { entrance, isLogin } = useGlobalStore();
 
 const loading = ref();
 const drawerVisible = ref();
@@ -249,15 +243,18 @@ const onSaveSSL = async (formEl: FormInstance | undefined) => {
                 cert: form.cert,
                 key: form.key,
             };
-            let href = window.location.href;
-            param.domain = href.split('//')[1].split(':')[0];
+            // window.location.hostname yields the bare host name and strips
+            // surrounding brackets from IPv6 addresses (e.g. '[::1]' -> '::1'),
+            // unlike `href.split('//')[1].split(':')[0]` which incorrectly
+            // returns '[' for IPv6 URLs. See 1Panel-dev/1Panel#12646.
+            param.domain = window.location.hostname;
             await updateSSL(param).then(() => {
                 MsgSuccess(i18n.global.t('commons.msg.operationSuccess'));
                 let href = window.location.href;
-                globalStore.isLogin = false;
+                isLogin.value = false;
                 let address = href.split('://')[1];
-                if (globalStore.entrance) {
-                    address = address.replaceAll('settings/safe', globalStore.entrance);
+                if (entrance.value) {
+                    address = address.replaceAll('settings/safe', entrance.value);
                 } else {
                     address = address.replaceAll('settings/safe', '');
                 }

@@ -1,6 +1,7 @@
 package ssl
 
 import (
+	"context"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/rsa"
@@ -10,9 +11,6 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"github.com/1Panel-dev/1Panel/agent/app/dto"
-	"github.com/1Panel-dev/1Panel/agent/buserr"
-	"golang.org/x/crypto/acme"
 	"io"
 	"net"
 	"net/http"
@@ -22,17 +20,41 @@ import (
 	"strings"
 	"time"
 
+	"github.com/1Panel-dev/1Panel/agent/app/dto"
 	"github.com/1Panel-dev/1Panel/agent/app/model"
-	"github.com/go-acme/lego/v4/certcrypto"
-	"github.com/go-acme/lego/v4/lego"
-	"github.com/go-acme/lego/v4/registration"
+	"github.com/1Panel-dev/1Panel/agent/buserr"
+	legoacme "github.com/go-acme/lego/v5/acme"
+	"github.com/go-acme/lego/v5/certcrypto"
+	"github.com/go-acme/lego/v5/certcrypto/compat"
+	"github.com/go-acme/lego/v5/lego"
+	"github.com/go-acme/lego/v5/registration"
+	"golang.org/x/crypto/acme"
 )
 
-var Orders = make(map[uint]*acme.Order)
-
-type domainError struct {
-	Domain string
-	Error  error
+// parsePrivateKeyPEM decodes a PEM-encoded private key produced by either
+// lego v4 (SEC1 for EC, PKCS#1 for RSA) or lego v5 (PKCS#8 for both). It tries
+// PKCS#8 first because that is what v5 and any modern tooling emits, then
+// falls back to the legacy formats so account keys persisted under v4 keep
+// working without manual conversion.
+func parsePrivateKeyPEM(pemBytes []byte) (crypto.Signer, error) {
+	block, _ := pem.Decode(pemBytes)
+	if block == nil {
+		return nil, buserr.New("invalid PEM block")
+	}
+	if key, err := x509.ParsePKCS8PrivateKey(block.Bytes); err == nil {
+		signer, ok := key.(crypto.Signer)
+		if !ok {
+			return nil, fmt.Errorf("PKCS#8 key does not implement crypto.Signer")
+		}
+		return signer, nil
+	}
+	if key, err := x509.ParseECPrivateKey(block.Bytes); err == nil {
+		return key, nil
+	}
+	if key, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
+		return key, nil
+	}
+	return nil, fmt.Errorf("unsupported private key format")
 }
 
 type zeroSSLRes struct {
@@ -51,20 +73,35 @@ const (
 	KeyRSA4096 = certcrypto.RSA4096
 )
 
+// normalizeKeyType maps legacy v4 KeyType strings (P256/P384/2048/...) to the
+// v5 form (EC256/EC384/RSA2048/...) using lego v5's official compat helper, so
+// any account/SSL row written under v4 keeps loading without manual conversion.
+// Unknown values are returned as-is and let the downstream caller error out.
+func normalizeKeyType(stored string) KeyType {
+	var k compat.KeyTypeCompat
+	if err := k.UnmarshalText([]byte(stored)); err != nil {
+		return KeyType(stored)
+	}
+	return KeyType(k)
+}
+
+// AcmeUser implements registration.User. Key is crypto.Signer
+// (lego v5 changed the field type from crypto.PrivateKey to crypto.Signer).
 type AcmeUser struct {
 	Email        string
-	Registration *registration.Resource
-	Key          crypto.PrivateKey
+	Registration *legoacme.ExtendedAccount
+	Key          crypto.Signer
 }
 
 func (u *AcmeUser) GetEmail() string {
 	return u.Email
 }
 
-func (u *AcmeUser) GetRegistration() *registration.Resource {
+func (u *AcmeUser) GetRegistration() *legoacme.ExtendedAccount {
 	return u.Registration
 }
-func (u *AcmeUser) GetPrivateKey() crypto.PrivateKey {
+
+func (u *AcmeUser) GetPrivateKey() crypto.Signer {
 	return u.Key
 }
 
@@ -99,48 +136,20 @@ func GetPrivateKey(priKey crypto.PrivateKey, keyType KeyType) ([]byte, error) {
 }
 
 func NewRegisterClient(acmeAccount *model.WebsiteAcmeAccount, proxy *dto.SystemProxy) (*AcmeClient, error) {
-	var (
-		priKey crypto.PrivateKey
-		err    error
-	)
+	return NewRegisterClientWithContext(context.Background(), acmeAccount, proxy)
+}
 
-	if acmeAccount.PrivateKey != "" {
-		switch KeyType(acmeAccount.KeyType) {
-		case KeyEC256, KeyEC384:
-			block, _ := pem.Decode([]byte(acmeAccount.PrivateKey))
-			priKey, err = x509.ParseECPrivateKey(block.Bytes)
-			if err != nil {
-				return nil, err
-			}
-		case KeyRSA2048, KeyRSA3072, KeyRSA4096:
-			block, _ := pem.Decode([]byte(acmeAccount.PrivateKey))
-			priKey, err = x509.ParsePKCS1PrivateKey(block.Bytes)
-			if err != nil {
-				return nil, err
-			}
-		}
-
-	} else {
-		priKey, err = certcrypto.GeneratePrivateKey(KeyType(acmeAccount.KeyType))
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	myUser := &AcmeUser{
-		Email: acmeAccount.Email,
-		Key:   priKey,
-	}
-	config := NewConfigWithProxy(myUser, acmeAccount.Type, acmeAccount.CaDirURL, proxy)
-	client, err := lego.NewClient(config)
+func NewRegisterClientWithContext(ctx context.Context, acmeAccount *model.WebsiteAcmeAccount, proxy *dto.SystemProxy) (*AcmeClient, error) {
+	client, err := newAcmeClient(acmeAccount, proxy, nil)
 	if err != nil {
 		return nil, err
 	}
-	var reg *registration.Resource
+
+	var reg *legoacme.ExtendedAccount
 	if acmeAccount.Type == "zerossl" || acmeAccount.Type == "google" || acmeAccount.Type == "freessl" || (acmeAccount.Type == "custom" && acmeAccount.UseEAB) {
 		if acmeAccount.Type == "zerossl" {
 			var res *zeroSSLRes
-			res, err = getZeroSSLEabCredentials(acmeAccount.Email)
+			res, err = getZeroSSLEabCredentials(ctx, acmeAccount.Email)
 			if err != nil {
 				return nil, err
 			}
@@ -157,17 +166,67 @@ func NewRegisterClient(acmeAccount *model.WebsiteAcmeAccount, proxy *dto.SystemP
 			Kid:                  acmeAccount.EabKid,
 			HmacEncoded:          acmeAccount.EabHmacKey,
 		}
-		reg, err = client.Registration.RegisterWithExternalAccountBinding(eabOptions)
+		reg, err = client.Client.Registration.RegisterWithExternalAccountBinding(ctx, eabOptions)
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		reg, err = client.Registration.Register(registration.RegisterOptions{TermsOfServiceAgreed: true})
+		reg, err = client.Client.Registration.Register(ctx, registration.RegisterOptions{TermsOfServiceAgreed: true})
 		if err != nil {
 			return nil, err
 		}
 	}
-	myUser.Registration = reg
+	client.User.Registration = reg
+	if reg != nil {
+		acmeAccount.URL = reg.Location
+	}
+	if acmeAccount.PrivateKey == "" {
+		privateKey, err := GetPrivateKey(client.User.GetPrivateKey(), normalizeKeyType(acmeAccount.KeyType))
+		if err != nil {
+			return nil, err
+		}
+		acmeAccount.PrivateKey = string(privateKey)
+	}
+
+	return client, nil
+}
+
+func newAcmeClient(acmeAccount *model.WebsiteAcmeAccount, proxy *dto.SystemProxy, registration *legoacme.ExtendedAccount) (*AcmeClient, error) {
+	var (
+		priKey crypto.Signer
+		err    error
+	)
+
+	keyType := normalizeKeyType(acmeAccount.KeyType)
+
+	if acmeAccount.PrivateKey != "" {
+		signer, parseErr := parsePrivateKeyPEM([]byte(acmeAccount.PrivateKey))
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		priKey = signer
+	} else {
+		generated, genErr := certcrypto.GeneratePrivateKey(keyType)
+		if genErr != nil {
+			return nil, genErr
+		}
+		signer, ok := generated.(crypto.Signer)
+		if !ok {
+			return nil, fmt.Errorf("generated key does not implement crypto.Signer")
+		}
+		priKey = signer
+	}
+
+	myUser := &AcmeUser{
+		Email:        acmeAccount.Email,
+		Registration: registration,
+		Key:          priKey,
+	}
+	config := NewConfigWithProxy(myUser, acmeAccount.Type, acmeAccount.CaDirURL, proxy)
+	client, err := lego.NewClient(config)
+	if err != nil {
+		return nil, err
+	}
 
 	acmeClient := &AcmeClient{
 		User:   myUser,
@@ -210,16 +269,14 @@ func NewConfigWithProxy(user registration.User, accountType, customCaURL string,
 		proxyUser = systemProxy.User
 		proxyPassword = systemProxy.Password
 	}
-	return &lego.Config{
-		CADirURL:   caDirURL,
-		UserAgent:  "1Panel",
-		User:       user,
-		HTTPClient: createHTTPClientWithProxy(proxyURL, proxyUser, proxyPassword),
-		Certificate: lego.CertificateConfig{
-			KeyType: certcrypto.RSA2048,
-			Timeout: 60 * time.Second,
-		},
-	}
+	// lego v5 removed lego.CertificateConfig.KeyType; the key type is now
+	// taken from the user's account for each ObtainRequest call.
+	config := lego.NewConfig(user)
+	config.CADirURL = caDirURL
+	config.UserAgent = "1Panel"
+	config.HTTPClient = createHTTPClientWithProxy(proxyURL, proxyUser, proxyPassword)
+	config.Certificate.Timeout = 60 * time.Second
+	return config
 }
 
 func initCertPool() *x509.CertPool {
@@ -278,20 +335,20 @@ func createHTTPClientWithProxy(proxyURL, username, password string) *http.Client
 	}
 }
 
-func getZeroSSLEabCredentials(email string) (*zeroSSLRes, error) {
+func getZeroSSLEabCredentials(ctx context.Context, email string) (*zeroSSLRes, error) {
 	baseURL := "https://api.zerossl.com/acme/eab-credentials-email"
 	params := url.Values{}
 	params.Add("email", email)
 	requestURL := fmt.Sprintf("%s?%s", baseURL, params.Encode())
 
-	req, err := http.NewRequest("POST", requestURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "POST", requestURL, nil)
 	if err != nil {
 		return nil, err
 	}
 
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{}
+	client := &http.Client{Timeout: 2 * time.Minute}
 	defer client.CloseIdleConnections()
 	resp, err := client.Do(req)
 	if err != nil {
@@ -317,38 +374,21 @@ func getZeroSSLEabCredentials(email string) (*zeroSSLRes, error) {
 	return &result, nil
 }
 
-func GetPrivateKeyByType(keyType, sslPrivateKey string) (crypto.PrivateKey, error) {
-	var (
-		privateKey crypto.PrivateKey
-		err        error
-	)
-	kType := KeyType(keyType)
+// GetPrivateKeyByType returns a crypto.Signer (lego v5 changed from crypto.PrivateKey).
+func GetPrivateKeyByType(keyType, sslPrivateKey string) (crypto.Signer, error) {
+	kType := normalizeKeyType(keyType)
 	if sslPrivateKey == "" {
-		privateKey, err = certcrypto.GeneratePrivateKey(kType)
-		if err != nil {
-			return nil, err
+		generated, genErr := certcrypto.GeneratePrivateKey(kType)
+		if genErr != nil {
+			return nil, genErr
 		}
-		return privateKey, nil
-	}
-	block, _ := pem.Decode([]byte(sslPrivateKey))
-	if block == nil {
-		return nil, buserr.New("invalid PEM block")
-	}
-	var privKey crypto.PrivateKey
-	switch kType {
-	case certcrypto.EC256, certcrypto.EC384:
-		privKey, err = x509.ParseECPrivateKey(block.Bytes)
-		if err != nil {
-			return nil, err
+		signer, ok := generated.(crypto.Signer)
+		if !ok {
+			return nil, fmt.Errorf("generated key does not implement crypto.Signer")
 		}
-	case certcrypto.RSA2048, certcrypto.RSA3072, certcrypto.RSA4096:
-		privKey, err = x509.ParsePKCS1PrivateKey(block.Bytes)
-		if err != nil {
-			return nil, err
-		}
+		return signer, nil
 	}
-	privateKey = privKey
-	return privateKey, nil
+	return parsePrivateKeyPEM([]byte(sslPrivateKey))
 }
 
 func getWebsiteSSLDomains(websiteSSL *model.WebsiteSSL) []string {
@@ -364,19 +404,19 @@ const (
 	retryDelayOn503  = 30 * time.Second
 )
 
-// isHTTP503Error checks if an error is an HTTP 503 Service Unavailable error
+// isHTTP503Error checks if an error is an HTTP 503 Service Unavailable error.
 func isHTTP503Error(err error) bool {
 	if err == nil {
 		return false
 	}
 
-	// Check for golang.org/x/crypto/acme.Error (used in manual_client.go)
+	// Check for golang.org/x/crypto/acme.Error (used in manual_client.go).
 	var acmeErr *acme.Error
 	if errors.As(err, &acmeErr) {
 		return acmeErr.StatusCode == http.StatusServiceUnavailable
 	}
 
-	// Check error message for 503 (fallback for lego library errors)
+	// Check error message for 503 (fallback for lego library errors).
 	errMsg := err.Error()
 	return strings.Contains(errMsg, "503") ||
 		strings.Contains(errMsg, "Service busy")

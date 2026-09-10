@@ -59,6 +59,7 @@ func (u *BackupService) RedisBackup(req dto.CommonBackup) error {
 	}
 
 	if err := handleRedisBackup(redisInfo, nil, record.ID, backupDir, fileName, req.Secret, req.TaskID); err != nil {
+		markBackupFailed(record.ID, err)
 		return err
 	}
 	return nil
@@ -97,7 +98,8 @@ func handleRedisBackup(redisInfo *repo.RootInfo, parentTask *task.Task, recordID
 			}
 		}
 
-		if err := cmd.RunDefaultBashCf("docker exec %s redis-cli -a %s --no-auth-warning save", redisInfo.ContainerName, redisInfo.Password); err != nil {
+		cmdMgr := cmd.NewCommandMgr(cmd.WithTimeout(30 * time.Minute))
+		if err := cmdMgr.Run("docker", "exec", redisInfo.ContainerName, "redis-cli", "-a", redisInfo.Password, "--no-auth-warning", "save"); err != nil {
 			return err
 		}
 
@@ -109,13 +111,13 @@ func handleRedisBackup(redisInfo *repo.RootInfo, parentTask *task.Task, recordID
 			return nil
 		}
 		if strings.HasSuffix(fileName, ".aof") {
-			if err := cmd.RunDefaultBashCf("docker cp %s:/data/appendonly.aof %s/%s", redisInfo.ContainerName, backupDir, fileName); err != nil {
+			if err := cmdMgr.Run("docker", "cp", redisInfo.ContainerName+":/data/appendonly.aof", path.Join(backupDir, fileName)); err != nil {
 				return err
 			}
 			return nil
 		}
 
-		if err := cmd.RunDefaultBashCf("docker cp %s:/data/dump.rdb %s/%s", redisInfo.ContainerName, backupDir, fileName); err != nil {
+		if err := cmdMgr.Run("docker", "cp", redisInfo.ContainerName+":/data/dump.rdb", path.Join(backupDir, fileName)); err != nil {
 			return err
 		}
 		return nil
@@ -128,7 +130,7 @@ func handleRedisBackup(redisInfo *repo.RootInfo, parentTask *task.Task, recordID
 	itemTask.AddSubTaskWithOps(i18n.GetMsgByKey("TaskBackup"), backupDatabase, nil, 3, time.Hour)
 	go func() {
 		if err := itemTask.Execute(); err != nil {
-			backupRepo.UpdateRecordByMap(recordID, map[string]interface{}{"status": constant.StatusFailed, "message": err.Error()})
+			markBackupFailed(recordID, err)
 			return
 		}
 		backupRepo.UpdateRecordByMap(recordID, map[string]interface{}{"status": constant.StatusSuccess})

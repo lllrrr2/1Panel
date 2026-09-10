@@ -17,7 +17,8 @@ func (a *WebsiteRouter) InitRouter(Router *gin.RouterGroup) {
 		websiteRouter.GET("/list", baseApi.GetWebsites)
 		websiteRouter.POST("", baseApi.CreateWebsite)
 		websiteRouter.POST("/operate", baseApi.OpWebsite)
-		websiteRouter.POST("/log", baseApi.OpWebsiteLog)
+		websiteRouter.POST("/log/search", baseApi.GetWebsiteLog)
+		websiteRouter.POST("/log/operate", baseApi.OpWebsiteLog)
 		websiteRouter.POST("/check", baseApi.CreateWebsiteCheck)
 		websiteRouter.POST("/options", baseApi.GetWebsiteOptions)
 		websiteRouter.POST("/update", baseApi.UpdateWebsite)
@@ -54,6 +55,8 @@ func (a *WebsiteRouter) InitRouter(Router *gin.RouterGroup) {
 
 		websiteRouter.POST("/proxies", baseApi.GetProxyConfig)
 		websiteRouter.POST("/proxies/update", baseApi.UpdateProxyConfig)
+		websiteRouter.POST("/proxies/delete", baseApi.DeleteProxyConfig)
+		websiteRouter.POST("/proxies/status", baseApi.UpdateProxyConfigStatus)
 		websiteRouter.POST("/proxies/file", baseApi.UpdateProxyConfigFile)
 		websiteRouter.POST("/proxy/config", baseApi.UpdateProxyCache)
 		websiteRouter.GET("/proxy/config/:id", baseApi.GetProxyCache)

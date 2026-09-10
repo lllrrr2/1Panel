@@ -1,36 +1,28 @@
 <template>
     <div :key="$route.fullPath" id="dashboard">
         <RouterButton
+            show-expires-at
             :buttons="[
                 {
                     label: i18n.global.t('menu.home'),
                     path: '/',
                 },
             ]"
-        >
-            <template #route-button>
-                <div class="router-button" v-if="!isOffLine">
-                    <template v-if="!isProductPro">
-                        <el-button link type="primary" @click="toUpload">
-                            {{ $t('license.levelUpPro') }}
-                        </el-button>
-                    </template>
-                </div>
-            </template>
-        </RouterButton>
+        />
 
         <el-alert
-            v-if="!isSafety && globalStore.showEntranceWarn"
-            class="card-interval"
+            v-if="!isSafety && showEntranceWarn"
+            class="card-interval dashboard-entrance-alert"
             type="warning"
             @close="hideEntrance"
         >
             <template #title>
-                <span class="flx-align-center">
+                <span class="flx-align-center dashboard-entrance-alert-title">
                     <span>{{ $t('home.entranceHelper') }}</span>
                     <el-link
-                        style="font-size: 12px; margin-left: 5px"
+                        class="dashboard-entrance-alert-link"
                         icon="Position"
+                        v-if="isAdmin"
                         @click="jumpToPath(router, '/settings/safe')"
                         type="primary"
                     >
@@ -44,7 +36,13 @@
             <el-col :xs="24" :sm="24" :md="16" :lg="16" :xl="16">
                 <CardWithHeader :header="$t('menu.home')" height="166px">
                     <template #header-r>
-                        <el-button class="h-button-setting" @click="quickJumpRef.acceptParams()" link icon="Setting" />
+                        <el-button
+                            class="h-button-setting"
+                            :disabled="!isAdminOrNodeAdmin"
+                            @click="quickJumpRef.acceptParams()"
+                            link
+                            icon="Setting"
+                        />
                     </template>
                     <template #body>
                         <div class="h-overview">
@@ -57,11 +55,24 @@
                                             :content="item.detail"
                                             placement="bottom"
                                         >
-                                            <span @click="quickJump(item)">
+                                            <el-button
+                                                link
+                                                :disabled="!checkPermission('File')"
+                                                type="primary"
+                                                @click="quickJump(item)"
+                                            >
                                                 {{ item.alias || item.detail.substring(0, 18) + '...' }}
-                                            </span>
+                                            </el-button>
                                         </el-tooltip>
-                                        <span @click="quickJump(item)" v-else>{{ item.detail }}</span>
+                                        <el-button
+                                            link
+                                            :disabled="!checkPermission(item.name)"
+                                            type="primary"
+                                            @click="quickJump(item)"
+                                            v-else
+                                        >
+                                            {{ item.detail }}
+                                        </el-button>
                                     </div>
                                 </el-col>
                             </el-row>
@@ -76,7 +87,6 @@
                 <CardWithHeader
                     :header="$t('menu.monitor')"
                     class="card-interval chart-card"
-                    v-loading="!chartsOption['networkChart']"
                     @mouseenter="refreshOptionsOnHover"
                 >
                     <template #header-r>
@@ -118,8 +128,8 @@
                         </el-select>
                     </template>
                     <template #body>
-                        <div style="position: relative; margin-top: 60px">
-                            <div class="monitor-tags" v-if="chartOption === 'network'">
+                        <div class="monitor-chart-content">
+                            <div class="monitor-tags" :style="monitorTagsStyle" v-if="chartOption === 'network'">
                                 <el-tag>
                                     {{ $t('monitor.up') }}: {{ computeSizeFromKBs(currentChartInfo.netBytesSent) }}
                                 </el-tag>
@@ -129,7 +139,7 @@
                                 <el-tag>{{ $t('home.totalSend') }}: {{ computeSize(currentInfo.netBytesSent) }}</el-tag>
                                 <el-tag>{{ $t('home.totalRecv') }}: {{ computeSize(currentInfo.netBytesRecv) }}</el-tag>
                             </div>
-                            <div class="monitor-tags" v-if="chartOption === 'io'">
+                            <div class="monitor-tags" :style="monitorTagsStyle" v-if="chartOption === 'io'">
                                 <el-tag>{{ $t('monitor.read') }}: {{ currentChartInfo.ioReadBytes }} MB</el-tag>
                                 <el-tag>{{ $t('monitor.write') }}: {{ currentChartInfo.ioWriteBytes }} MB</el-tag>
                                 <el-tag>
@@ -139,23 +149,21 @@
                                 <el-tag>{{ $t('home.ioDelay') }}: {{ currentChartInfo.ioTime }} ms</el-tag>
                             </div>
 
-                            <div v-if="chartOption === 'io'" style="margin-top: 40px" class="mobile-monitor-chart">
+                            <div v-if="chartOption === 'io'" class="mobile-monitor-chart">
                                 <v-charts
                                     height="383px"
                                     id="ioChart"
                                     type="line"
                                     :option="chartsOption['ioChart']"
-                                    v-if="chartsOption['ioChart']"
                                     :dataZoom="true"
                                 />
                             </div>
-                            <div v-if="chartOption === 'network'" style="margin-top: 40px" class="mobile-monitor-chart">
+                            <div v-if="chartOption === 'network'" class="mobile-monitor-chart">
                                 <v-charts
                                     height="383px"
                                     id="networkChart"
                                     type="line"
                                     :option="chartsOption['networkChart']"
-                                    v-if="chartsOption['networkChart']"
                                     :dataZoom="true"
                                 />
                             </div>
@@ -163,7 +171,7 @@
                     </template>
                 </CardWithHeader>
             </el-col>
-            <el-col :xs="24" :sm="24" :md="8" :lg="8" :xl="8">
+            <el-col :xs="24" :sm="24" :md="8" :lg="8" :xl="8" class="dashboard-right">
                 <el-carousel
                     class="my-carousel"
                     :class="{ 'no-indicator': carouselItemCount <= 1 }"
@@ -171,6 +179,7 @@
                     height="368px"
                     indicator-position=""
                     arrow="never"
+                    :autoplay="!showMemoCarousel || !memoEditing"
                 >
                     <el-carousel-item key="systemInfo">
                         <CardWithHeader :header="$t('home.systemInfo')">
@@ -215,7 +224,12 @@
                                         </div>
                                     </div>
                                     <template #reference>
-                                        <el-button class="h-button-setting" link icon="Setting" />
+                                        <el-button
+                                            class="h-button-setting"
+                                            :disabled="!isAdminOrNodeAdmin"
+                                            link
+                                            icon="Setting"
+                                        />
                                     </template>
                                 </el-popover>
                                 <el-tooltip :content="$t('commons.button.refresh')" placement="top">
@@ -256,8 +270,8 @@
                                                 baseInfo.prettyDistro
                                                     ? baseInfo.prettyDistro
                                                     : baseInfo.platformVersion
-                                                    ? baseInfo.platform + '-' + baseInfo.platformVersion
-                                                    : baseInfo.platform
+                                                      ? baseInfo.platform + '-' + baseInfo.platformVersion
+                                                      : baseInfo.platform
                                             }}
                                         </el-descriptions-item>
                                         <el-descriptions-item
@@ -313,7 +327,7 @@
                                             <template #label>
                                                 <span class="system-label">{{ $t('home.runningTime') }}</span>
                                             </template>
-                                            {{ loadUpTime(currentInfo.timeSinceUptime) }}
+                                            {{ formatUptime(currentInfo.runningTime) }}
                                         </el-descriptions-item>
                                     </el-descriptions>
                                 </el-scrollbar>
@@ -324,7 +338,13 @@
                         <CardWithHeader :header="$t('home.memo')" class="memo-card">
                             <template #header-r>
                                 <el-tooltip v-if="!memoEditing" :content="$t('commons.button.edit')" placement="top">
-                                    <el-button class="h-button-setting" @click="startMemoEdit" link icon="Edit" />
+                                    <el-button
+                                        class="h-button-setting"
+                                        :disabled="!isAdminOrNodeAdmin"
+                                        @click="startMemoEdit"
+                                        link
+                                        icon="Edit"
+                                    />
                                 </el-tooltip>
                                 <el-tooltip v-if="memoEditing" :content="$t('commons.button.save')" placement="top">
                                     <el-button
@@ -353,9 +373,11 @@
                                         />
                                         <div v-else class="memo-content">
                                             <MarkDownEditor v-if="memoContent" :content="memoContent" />
-                                            <span v-else class="memo-placeholder">
-                                                {{ $t('home.memoPlaceholder') }}
-                                            </span>
+                                            <div v-else class="memo-empty">
+                                                <span class="memo-placeholder">
+                                                    {{ $t('home.memoPlaceholder') }}
+                                                </span>
+                                            </div>
                                         </div>
                                     </div>
                                 </el-scrollbar>
@@ -410,11 +432,10 @@
                     </el-carousel-item>
                 </el-carousel>
 
-                <AppLauncher ref="appRef" class="card-interval" />
+                <AppLauncher ref="appRef" class="card-interval dashboard-app" />
             </el-col>
         </el-row>
 
-        <LicenseImport ref="licenseRef" />
         <QuickJump @search="onLoadBaseInfo(false, 'all')" ref="quickJumpRef" />
 
         <DialogPro v-model="welcomeOpen" size="w-70" id="welcomeDialog">
@@ -428,18 +449,20 @@ import { onMounted, onBeforeUnmount, ref, reactive, computed, nextTick } from 'v
 import SystemStatus from '@/views/home/status/index.vue';
 import AppLauncher from '@/views/home/app/index.vue';
 import VCharts from '@/components/v-charts/index.vue';
-import LicenseImport from '@/components/license-import/index.vue';
 import QuickJump from '@/views/home/quick/index.vue';
 import CardWithHeader from '@/components/card-with-header/index.vue';
 import MarkDownEditor from '@/components/mkdown-editor/index.vue';
 import i18n from '@/lang';
 import { Dashboard } from '@/api/interface/dashboard';
-import { dateFormatForSecond, computeSize, computeSizeFromKBs, loadUpTime, jumpToPath, copyText } from '@/utils/util';
+import { dateFormatForSecond, formatUptime } from '@/utils/date';
+import { computeSize, computeSizeFromKBs } from '@/utils/size';
+import { jumpToPath } from '@/utils/router';
+import { copyText } from '@/utils/clipboard';
 import { useRouter } from 'vue-router';
 import { loadBaseInfo, loadCurrentInfo } from '@/api/modules/dashboard';
 import { getIOOptions, getNetworkOptions } from '@/api/modules/host';
 import {
-    getSettingInfo,
+    getSettingBaseInfo,
     getAgentSettingInfo,
     listAllSimpleNodes,
     loadUpgradeInfo,
@@ -447,8 +470,6 @@ import {
     updateMemo,
     updateSetting,
 } from '@/api/modules/setting';
-import { GlobalStore } from '@/store';
-import { storeToRefs } from 'pinia';
 import { routerToFileWithPath, routerToNameWithQuery, routerToPath } from '@/utils/router';
 import { getWelcomePage } from '@/api/modules/auth';
 import {
@@ -458,14 +479,68 @@ import {
     setDashboardCache,
 } from '@/utils/dashboardCache';
 import { MsgSuccess } from '@/utils/message';
+import { useCan } from '@/composables/useMenuManagePermission';
 const router = useRouter();
-const globalStore = GlobalStore();
+import { useGlobalStore } from '@/composables/useGlobalStore';
+const {
+    showEntranceWarn,
+    defaultNetwork,
+    defaultIO,
+    isAdmin,
+    isOnRestart,
+    hasNewVersion,
+    isAdminOrNodeAdmin,
+    isXpackOrEE,
+} = useGlobalStore();
 
 const DASHBOARD_CACHE_TTL = {
     safeStatus: 10 * 60 * 1000,
     netOptions: 60 * 60 * 1000,
     ioOptions: 60 * 60 * 1000,
 };
+const monitorChartGrid = { left: 65, right: 65, bottom: '20%' };
+const monitorChartLegend = { top: 0, bottom: 'auto' };
+const monitorTagsStyle = {
+    left: `${monitorChartGrid.left}px`,
+    right: `${monitorChartGrid.right}px`,
+};
+const monitorChartEmptyLength = 20;
+const loadMonitorEmptyData = () => Array.from({ length: monitorChartEmptyLength }, () => null);
+const loadMonitorEmptyTime = () => Array.from({ length: monitorChartEmptyLength }, () => '');
+const loadMonitorChartData = (data: Array<number>) => (data.length === 0 ? loadMonitorEmptyData() : data);
+const loadMonitorChartTime = (data: Array<string>) => (data.length === 0 ? loadMonitorEmptyTime() : data);
+const loadIOChartOption = () => ({
+    xData: loadMonitorChartTime(timeIODatas.value),
+    yData: [
+        {
+            name: i18n.global.t('monitor.read'),
+            data: loadMonitorChartData(ioReadBytes.value),
+        },
+        {
+            name: i18n.global.t('monitor.write'),
+            data: loadMonitorChartData(ioWriteBytes.value),
+        },
+    ],
+    grid: monitorChartGrid,
+    legend: monitorChartLegend,
+    formatStr: 'MB',
+});
+const loadNetworkChartOption = () => ({
+    xData: loadMonitorChartTime(timeNetDatas.value),
+    yData: [
+        {
+            name: i18n.global.t('monitor.up'),
+            data: loadMonitorChartData(netBytesSents.value),
+        },
+        {
+            name: i18n.global.t('monitor.down'),
+            data: loadMonitorChartData(netBytesRecvs.value),
+        },
+    ],
+    grid: monitorChartGrid,
+    legend: monitorChartLegend,
+    formatStr: 'KB/s',
+});
 
 const statusRef = ref();
 const appRef = ref();
@@ -498,9 +573,21 @@ const netOptionsFromCache = ref(false);
 const ioOptionsFromCache = ref(false);
 const hasRefreshedOptionsOnHover = ref(false);
 
-const licenseRef = ref();
 const quickJumpRef = ref();
-const { isProductPro, isOffLine } = storeToRefs(globalStore);
+const quickJumpPermissionMap = Object.fromEntries(
+    [
+        ['Agent', 'ai_agent_view'],
+        ['Website', 'website_view'],
+        ['Database', 'database_view'],
+        ['Cronjob', 'cronjob_view'],
+        ['AppInstalled', 'app_view'],
+        ['File', 'host_file_view'],
+    ].map(([name, permission]) => [name, useCan(permission)]),
+) as Record<string, ReturnType<typeof useCan>>;
+
+const checkPermission = (item: string) => {
+    return quickJumpPermissionMap[item]?.value ?? true;
+};
 
 const searchInfo = reactive({
     ioOption: 'all',
@@ -547,6 +634,12 @@ const baseInfo = ref<Dashboard.BaseInfo>({
 const currentInfo = ref<Dashboard.CurrentInfo>({
     uptime: 0,
     timeSinceUptime: '',
+    runningTime: {
+        days: 0,
+        hours: 0,
+        minutes: 0,
+        seconds: 0,
+    },
     procs: 0,
 
     load1: 0,
@@ -580,6 +673,7 @@ const currentInfo = ref<Dashboard.CurrentInfo>({
 
     diskData: [],
     gpuData: [],
+    npuData: [],
     xpuData: [],
 
     netBytesSent: 0,
@@ -599,8 +693,12 @@ const currentChartInfo = reactive({
     netBytesSent: 0,
     netBytesRecv: 0,
 });
+const skipNextCurrentInfoDelta = ref(false);
 
-const chartsOption = ref({ ioChart1: null, networkChart: null });
+const chartsOption = ref({
+    ioChart: loadIOChartOption(),
+    networkChart: loadNetworkChartOption(),
+});
 
 const updateCurrentInfo = (data: Dashboard.CurrentInfo) => {
     currentInfo.value = {
@@ -617,7 +715,7 @@ const changeOption = async () => {
 
 const applyDefaultNetOption = () => {
     if (!netOptions.value || netOptions.value.length === 0) return;
-    const defaultNet = globalStore.defaultNetwork || netOptions.value[0];
+    const defaultNet = defaultNetwork.value || netOptions.value[0];
     if (defaultNet && searchInfo.netOption !== defaultNet) {
         searchInfo.netOption = defaultNet;
     }
@@ -625,8 +723,8 @@ const applyDefaultNetOption = () => {
 
 const onLoadAgentSettingInfo = async () => {
     await getAgentSettingInfo().then((res) => {
-        globalStore.defaultIO = res.data.defaultIO;
-        globalStore.defaultNetwork = res.data.defaultNetwork;
+        defaultIO.value = res.data.defaultIO;
+        defaultNetwork.value = res.data.defaultNetwork;
     });
 };
 
@@ -646,15 +744,19 @@ const onLoadNetworkOptions = async (force?: boolean) => {
 };
 
 const onLoadSimpleNode = async () => {
+    if (!isAdmin.value) {
+        simpleNodes.value = [];
+        return;
+    }
     const res = await listAllSimpleNodes();
     simpleNodes.value = res.data || [];
 };
 
 const applyDefaultIOOption = async () => {
     if (!ioOptions.value || ioOptions.value.length === 0) return;
-    const defaultIO = globalStore.defaultIO || ioOptions.value[0];
-    if (defaultIO && searchInfo.ioOption !== defaultIO) {
-        searchInfo.ioOption = defaultIO;
+    const defaultIOOption = defaultIO.value || ioOptions.value[0];
+    if (defaultIOOption && searchInfo.ioOption !== defaultIOOption) {
+        searchInfo.ioOption = defaultIOOption;
     }
 };
 
@@ -674,18 +776,26 @@ const onLoadIOOptions = async (force?: boolean) => {
 };
 
 const onLoadBaseInfo = async (isInit: boolean, range: string) => {
+    let resetChartData = false;
     if (range === 'all' || range === 'io') {
         ioReadBytes.value = [];
         ioWriteBytes.value = [];
         timeIODatas.value = [];
-    } else if (range === 'all' || range === 'network') {
+        resetChartData = true;
+    }
+    if (range === 'all' || range === 'network') {
         netBytesSents.value = [];
         netBytesRecvs.value = [];
         timeNetDatas.value = [];
+        resetChartData = true;
+    }
+    if (resetChartData) {
+        loadData();
     }
     const res = await loadBaseInfo(searchInfo.ioOption, searchInfo.netOption);
     baseInfo.value = res.data;
     updateCurrentInfo(baseInfo.value.currentInfo);
+    skipNextCurrentInfoDelta.value = true;
     onLoadCurrentInfo();
     isStatusInit.value = false;
     statusRef.value?.acceptParams(currentInfo.value, baseInfo.value);
@@ -697,7 +807,7 @@ const onLoadBaseInfo = async (isInit: boolean, range: string) => {
                 if (!isCurrentActive.value) {
                     throw new Error('jump out');
                 }
-                if (isActive.value && !globalStore.isOnRestart) {
+                if (isActive.value && !isOnRestart.value) {
                     await onLoadCurrentInfo();
                     await onLoadSimpleNode();
                 }
@@ -716,11 +826,7 @@ const quickJump = (item: any) => {
 };
 
 const showSimpleNode = () => {
-    return (
-        simpleNodeCarouselSetting.value === 'Enable' &&
-        globalStore.isMasterProductPro &&
-        simpleNodes.value?.length !== 0
-    );
+    return simpleNodeCarouselSetting.value === 'Enable' && isXpackOrEE.value && simpleNodes.value?.length !== 0;
 };
 
 const toggleSensitiveInfo = () => {
@@ -744,7 +850,21 @@ const jumpPanel = (row: any) => {
 
 const onLoadCurrentInfo = async () => {
     const res = await loadCurrentInfo(searchInfo.ioOption, searchInfo.netOption);
+    if (skipNextCurrentInfoDelta.value) {
+        skipNextCurrentInfoDelta.value = false;
+        currentChartInfo.netBytesSent = 0;
+        currentChartInfo.netBytesRecv = 0;
+        currentChartInfo.ioReadBytes = 0;
+        currentChartInfo.ioWriteBytes = 0;
+        currentChartInfo.ioCount = 0;
+        currentChartInfo.ioTime = 0;
+        updateCurrentInfo(res.data);
+        statusRef.value?.acceptParams(currentInfo.value, baseInfo.value);
+        return;
+    }
+
     currentInfo.value.timeSinceUptime = res.data.timeSinceUptime;
+    currentInfo.value.runningTime = res.data.runningTime;
 
     let timeInterval = Number(res.data.uptime - currentInfo.value.uptime) || 3;
     currentChartInfo.netBytesSent =
@@ -812,8 +932,8 @@ const handleCopy = () => {
         (baseInfo.value.prettyDistro
             ? baseInfo.value.prettyDistro
             : baseInfo.value.platformVersion
-            ? baseInfo.value.platform + '-' + baseInfo.value.platformVersion
-            : baseInfo.value.platform) +
+              ? baseInfo.value.platform + '-' + baseInfo.value.platformVersion
+              : baseInfo.value.platform) +
         '\n' +
         i18n.global.t('home.kernelVersion') +
         ': ' +
@@ -833,7 +953,7 @@ const handleCopy = () => {
         '\n' +
         i18n.global.t('home.runningTime') +
         ': ' +
-        loadUpTime(currentInfo.value.timeSinceUptime) +
+        formatUptime(currentInfo.value.runningTime) +
         '\n';
     copyText(content);
 };
@@ -892,48 +1012,25 @@ const saveMemo = async () => {
 
 const loadData = async () => {
     if (chartOption.value === 'io') {
-        chartsOption.value['ioChart'] = {
-            xData: timeIODatas.value,
-            yData: [
-                {
-                    name: i18n.global.t('monitor.read'),
-                    data: ioReadBytes.value,
-                },
-                {
-                    name: i18n.global.t('monitor.write'),
-                    data: ioWriteBytes.value,
-                },
-            ],
-            formatStr: 'MB',
-        };
+        chartsOption.value['ioChart'] = loadIOChartOption();
     } else {
-        chartsOption.value['networkChart'] = {
-            xData: timeNetDatas.value,
-            yData: [
-                {
-                    name: i18n.global.t('monitor.up'),
-                    data: netBytesSents.value,
-                },
-                {
-                    name: i18n.global.t('monitor.down'),
-                    data: netBytesRecvs.value,
-                },
-            ],
-            formatStr: 'KB/s',
-        };
+        chartsOption.value['networkChart'] = loadNetworkChartOption();
     }
 };
 
 const hideEntrance = () => {
-    globalStore.setShowEntranceWarn(false);
+    showEntranceWarn.value = false;
 };
 
 const loadUpgradeStatus = async () => {
+    if (!isAdmin.value) {
+        return;
+    }
     const res = await loadUpgradeInfo();
     if (res && (res.data.testVersion || res.data.newVersion || res.data.latestVersion)) {
-        globalStore.hasNewVersion = true;
+        hasNewVersion.value = true;
     } else {
-        globalStore.hasNewVersion = false;
+        hasNewVersion.value = false;
     }
 };
 
@@ -942,7 +1039,7 @@ const loadSettingInfo = async () => {
     const memoCache = getDashboardCache('memoCarouselSetting');
     const simpleNodeCache = getDashboardCache('simpleNodeCarouselSetting');
     if (safeCache === null || memoCache === null || simpleNodeCache === null) {
-        const res = await getSettingInfo();
+        const res = await getSettingBaseInfo();
         isSafety.value = res.data.securityEntrance;
         memoCarouselSetting.value = res.data.dashboardMemoVisible;
         simpleNodeCarouselSetting.value = res.data.dashboardSimpleNodeVisible;
@@ -984,13 +1081,10 @@ const loadSource = (row: any) => {
 
 const onFocus = () => {
     isActive.value = true;
+    skipNextCurrentInfoDelta.value = true;
 };
 const onBlur = () => {
     isActive.value = false;
-};
-
-const toUpload = () => {
-    licenseRef.value.acceptParams();
 };
 
 const refreshOptionsOnHover = async () => {
@@ -1070,7 +1164,70 @@ onBeforeUnmount(() => {
 });
 </script>
 
-<style lang="scss">
+<style lang="scss" scoped>
+.dashboard-entrance-alert-title {
+    min-width: 0;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+
+    > span {
+        min-width: 0;
+        overflow-wrap: anywhere;
+    }
+}
+
+.dashboard-entrance-alert-link {
+    flex: 0 0 auto;
+    font-size: 12px;
+}
+
+.monitor-chart-content {
+    position: relative;
+    margin-top: 60px;
+}
+
+.mobile-monitor-chart {
+    margin-top: 40px;
+}
+
+@media only screen and (max-width: 767px) {
+    .dashboard-entrance-alert {
+        padding-right: 40px;
+
+        :deep(.el-alert__content),
+        :deep(.el-alert__title) {
+            width: 100%;
+            min-width: 0;
+        }
+    }
+
+    .dashboard-entrance-alert-title {
+        width: 100%;
+        align-items: flex-start;
+
+        > span {
+            flex: 0 0 100%;
+            width: 100%;
+            overflow-wrap: break-word;
+            text-wrap: balance;
+        }
+    }
+}
+
+@media only screen and (min-width: 992px) {
+    .dashboard-right {
+        contain: size;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+    }
+
+    .dashboard-app {
+        flex: 1;
+        min-height: 0;
+    }
+}
+
 .h-overview {
     text-align: center;
 
@@ -1089,11 +1246,9 @@ onBeforeUnmount(() => {
     .count {
         margin-top: 10px;
 
-        span {
+        :deep(.el-button) {
             font-size: 18px;
-            color: $primary-color;
             line-height: 32px;
-            cursor: pointer;
         }
     }
 }
@@ -1109,40 +1264,40 @@ onBeforeUnmount(() => {
     }
 }
 
-.system-label {
-    font-weight: 400 !important;
-    font-size: 14px !important;
-    color: var(--panel-text-color);
-    border: none !important;
-    background: none !important;
-    width: fit-content !important;
-    white-space: nowrap !important;
-}
-
-.system-content {
-    font-size: 13px !important;
-    border: none !important;
-    width: 100% !important;
-}
-
 .my-carousel {
     &.no-indicator {
-        .el-carousel__indicators {
+        :deep(.el-carousel__indicators) {
             display: none;
         }
     }
 
-    .el-carousel__button {
+    :deep(.el-carousel__button) {
         margin-bottom: -4px;
         background-color: var(--el-text-color-regular);
     }
 
-    .el-carousel__indicator.is-active .el-carousel__button {
+    :deep(.el-carousel__indicator.is-active .el-carousel__button) {
         background-color: var(--panel-color-primary);
     }
 
-    .el-descriptions .el-descriptions__body .el-descriptions__table {
+    :deep(.el-descriptions .el-descriptions__body .el-descriptions__table) {
         border-spacing: 0 5px !important;
+    }
+
+    :deep(.h-systemInfo .system-label) {
+        font-weight: 400 !important;
+        font-size: 14px !important;
+        color: var(--panel-text-color);
+        border: none !important;
+        background: none !important;
+        width: fit-content !important;
+        white-space: nowrap !important;
+    }
+
+    :deep(.h-systemInfo .system-content) {
+        font-size: 13px !important;
+        border: none !important;
+        width: 100% !important;
     }
 }
 
@@ -1179,11 +1334,46 @@ onBeforeUnmount(() => {
 .monitor-tags {
     position: absolute;
     top: -10px;
-    left: 20px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
 
-    .el-tag {
-        margin-right: 10px;
-        margin-bottom: 10px;
+@media only screen and (max-width: 1024px) {
+    .monitor-chart-content {
+        margin-top: 20px;
+    }
+
+    .monitor-chart-content .monitor-tags {
+        position: static;
+        display: grid;
+        width: 100%;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        margin-bottom: 12px;
+
+        :deep(.el-tag) {
+            width: 100%;
+            max-width: 100%;
+            height: auto;
+            min-height: 24px;
+            justify-content: center;
+            padding-block: 3px;
+            line-height: 1.3;
+            text-align: center;
+            white-space: normal;
+            overflow-wrap: anywhere;
+        }
+    }
+
+    .mobile-monitor-chart {
+        margin-top: 0;
+    }
+}
+
+@media only screen and (min-width: 768px) and (max-width: 1024px) {
+    .monitor-chart-content .monitor-tags {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
     }
 }
 
@@ -1221,20 +1411,50 @@ onBeforeUnmount(() => {
 .memo-content {
     min-height: 218px;
     border-radius: 4px;
-    border: 1px solid var(--el-border-color);
-    background-color: var(--el-fill-color-light);
-    word-wrap: break-word;
-    white-space: pre-wrap;
+    overflow-wrap: anywhere;
 
-    .md-editor {
+    :deep(.md-editor) {
         background-color: transparent;
     }
+
+    :deep(.md-editor-content .md-editor-preview) {
+        padding: 0;
+        font-size: 14px;
+        line-height: 1.6;
+        word-break: break-word;
+        white-space: pre-wrap;
+    }
+
+    :deep(.md-editor-preview p),
+    :deep(.md-editor-preview li),
+    :deep(.md-editor-preview table),
+    :deep(.md-editor-preview blockquote),
+    :deep(.md-editor-preview code) {
+        font-size: 14px;
+        line-height: 1.6;
+    }
+
+    :deep(.md-editor-preview h1),
+    :deep(.md-editor-preview h2),
+    :deep(.md-editor-preview h3),
+    :deep(.md-editor-preview h4),
+    :deep(.md-editor-preview h5),
+    :deep(.md-editor-preview h6) {
+        margin: 0.5em 0;
+        font-size: 12px;
+        line-height: 1.4;
+    }
+}
+
+.memo-empty {
+    min-height: 275px;
+    padding-top: 15px;
 }
 
 .memo-placeholder {
     color: var(--el-text-color-placeholder);
     display: inline-block;
-    font-size: 14px;
+    font-size: 13px;
 }
 
 .dashboard-carousel-setting {

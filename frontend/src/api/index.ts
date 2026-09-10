@@ -3,18 +3,28 @@ import { ResultData } from '@/api/interface';
 import { ResultEnum } from '@/enums/http-enum';
 import { checkStatus } from './helper/check-status';
 import router from '@/routers';
-import { GlobalStore } from '@/store';
 import { MsgError } from '@/utils/message';
-import { Base64 } from 'js-base64';
+import { encodeBase64 } from '@/utils/base64';
 import i18n from '@/lang';
 import { changeToLocal } from '@/utils/node';
-
-const globalStore = GlobalStore();
+import { getCookie } from '@/utils/auth';
+import { handleAuthResponseCode } from '@/utils/auth-response';
+import { GlobalStore } from '@/store';
+import { getOperateNodeOverride } from '@/utils/operate-node';
 
 const config = {
     baseURL: import.meta.env.VITE_API_URL as string,
     timeout: ResultEnum.TIMEOUT as number,
     withCredentials: true,
+};
+
+const isCsrfForbidden = (response?: AxiosResponse<any>) => {
+    const message = response?.data?.message;
+    return typeof message === 'string' && message.toLowerCase().includes('csrf token invalid');
+};
+
+type RequestConfig = AxiosRequestConfig & {
+    skipErrorMessage?: boolean;
 };
 
 class RequestHttp {
@@ -23,13 +33,15 @@ class RequestHttp {
         this.service = axios.create(config);
         this.service.interceptors.request.use(
             (config: AxiosRequestConfig) => {
-                let language = globalStore.language;
+                const globalStore = GlobalStore();
                 config.headers = {
-                    'Accept-Language': language,
+                    'Accept-Language': globalStore.language,
                     ...config.headers,
                 };
                 if (config.headers.CurrentNode == undefined) {
-                    config.headers.CurrentNode = encodeURIComponent(globalStore.currentNode);
+                    config.headers.CurrentNode = encodeURIComponent(
+                        getOperateNodeOverride() || globalStore.currentNode,
+                    );
                 } else {
                     config.headers.CurrentNode = encodeURIComponent(String(config.headers.CurrentNode));
                 }
@@ -37,10 +49,22 @@ class RequestHttp {
                     config.url === '/core/auth/login' ||
                     config.url === '/core/auth/mfalogin' ||
                     config.url === '/core/auth/passkey/begin' ||
-                    config.url === '/core/auth/passkey/finish'
+                    config.url === '/core/auth/passkey/finish' ||
+                    config.url === '/core/auth/oidc/begin' ||
+                    config.url === '/core/auth/oidc/finish' ||
+                    config.url === '/core/auth/saml2/begin' ||
+                    config.url === '/core/auth/saml2/finish'
                 ) {
-                    let entrance = Base64.encode(globalStore.entrance);
-                    config.headers.EntranceCode = entrance;
+                    config.headers.EntranceCode = encodeBase64(globalStore.entrance);
+                }
+                const method = (config.method || 'get').toUpperCase();
+                const requiresToken = !['GET', 'HEAD', 'OPTIONS', 'TRACE'].includes(method);
+                if (requiresToken) {
+                    const csrfToken = getCookie('pcsrftoken');
+                    if (csrfToken) {
+                        config.headers['X-CSRF-Token'] = csrfToken;
+                        globalStore.csrfToken = csrfToken;
+                    }
                 }
                 return {
                     ...config,
@@ -53,39 +77,43 @@ class RequestHttp {
 
         this.service.interceptors.response.use(
             (response: AxiosResponse) => {
+                const globalStore = GlobalStore();
                 const { data } = response;
-                if (data.code == ResultEnum.OVERDUE || data.code == ResultEnum.FORBIDDEN) {
-                    globalStore.setLogStatus(false);
-                    router.push({
-                        name: 'entrance',
-                        params: { code: globalStore.entrance },
-                    });
+                const authResult = handleAuthResponseCode(data, { showRBACMessage: true });
+                if (authResult.handled) {
+                    if (authResult.action === 'return') {
+                        return;
+                    }
                     return Promise.reject(data);
                 }
-                if (data.code == ResultEnum.EXPIRED) {
-                    router.push({ name: 'Expired' });
-                    return;
-                }
-                if (data.code == ResultEnum.ERRXPACK) {
+                if (data.code == ResultEnum.ERR_XPACK) {
                     globalStore.isProductPro = false;
                     window.location.reload();
                     return Promise.reject(data);
                 }
-                if (data.code == ResultEnum.NodeUnBind) {
+                if (data.code == ResultEnum.ERR_ENTERPRISE) {
+                    globalStore.isEnterpriseLicensed = false;
+                    const routeName = router.currentRoute.value.name;
+                    if (globalStore.isLogin && routeName !== 'EnterpriseLicenseRequired') {
+                        router.push({ name: 'EnterpriseLicenseRequired' });
+                    }
+                    return Promise.reject(data);
+                }
+                if (data.code == ResultEnum.NODE_UNBIND) {
                     changeToLocal();
                     window.location.reload();
                     return;
                 }
-                if (data.code == ResultEnum.ERRGLOBALLOADDING) {
-                    globalStore.setGlobalLoading(true);
-                    globalStore.setLoadingText(data.message);
+                if (data.code == ResultEnum.ERR_GLOBAL_LOADING) {
+                    globalStore.isLoading = true;
+                    globalStore.loadingText = data.message;
                     return;
                 } else {
                     if (globalStore.isLoading) {
-                        globalStore.setGlobalLoading(false);
+                        globalStore.isLoading = false;
                     }
                 }
-                if (data.code == ResultEnum.ERRAUTH) {
+                if (data.code == ResultEnum.ERR_AUTH) {
                     return data;
                 }
                 if (data.code && data.code !== ResultEnum.SUCCESS) {
@@ -93,7 +121,9 @@ class RequestHttp {
                         MsgError(i18n.global.t('license.tamperHelper'));
                         return Promise.reject(data);
                     }
-                    MsgError(data.message);
+                    if (!(response.config as RequestConfig).skipErrorMessage) {
+                        MsgError(data.message);
+                    }
                     return Promise.reject(data);
                 }
                 return data;
@@ -107,6 +137,16 @@ class RequestHttp {
                         case 313:
                             router.push({ name: 'Expired' });
                             return;
+                        case 403:
+                            if (isCsrfForbidden(response)) {
+                                return Promise.reject(error);
+                            }
+                            if (response.data && response.data['message']) {
+                                MsgError(response.data['message']);
+                            } else {
+                                MsgError(i18n.global.t('commons.res.forbidden'));
+                            }
+                            return Promise.reject(error);
                         case 500:
                         case 502:
                         case 524:
@@ -117,7 +157,7 @@ class RequestHttp {
                             );
                             return Promise.reject(error);
                         default:
-                            return;
+                            return Promise.reject(error);
                     }
                 }
                 if (!window.navigator.onLine) router.replace({ path: '/500' });
@@ -141,6 +181,14 @@ class RequestHttp {
         }
         return this.service.post(url, params, config);
     }
+    postWithConfig<T>(url: string, params?: object, config?: RequestConfig): Promise<ResultData<T>> {
+        return this.service.post(url, params, {
+            baseURL: import.meta.env.VITE_API_URL as string,
+            timeout: ResultEnum.TIMEOUT as number,
+            withCredentials: true,
+            ...config,
+        });
+    }
     postLocalNode<T>(url: string, params?: object, timeout?: number): Promise<ResultData<T>> {
         return this.service.post(url, params, {
             baseURL: import.meta.env.VITE_API_URL as string,
@@ -158,9 +206,9 @@ class RequestHttp {
         return this.service.delete(url, { params, ..._object });
     }
     download<BlobPart>(url: string, params?: object, _object = {}): Promise<BlobPart> {
-        return this.service.post(url, params, _object);
+        return this.service.post(url, params, _object) as unknown as Promise<BlobPart>;
     }
-    upload<T>(url: string, params: object = {}, config?: AxiosRequestConfig): Promise<ResultData<T>> {
+    upload<T>(url: string, params: object = {}, config?: RequestConfig): Promise<ResultData<T>> {
         return this.service.post(url, params, config);
     }
 }

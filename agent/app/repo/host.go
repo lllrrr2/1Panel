@@ -10,10 +10,17 @@ import (
 type HostRepo struct{}
 
 type IHostRepo interface {
-	GetFirewallRecord(opts ...DBOption) (model.Firewall, error)
-	ListFirewallRecord(opts ...DBOption) ([]model.Firewall, error)
-	SaveFirewallRecord(firewall *model.Firewall) error
-	DeleteFirewallRecordByID(id uint) error
+	Get(opts ...DBOption) (model.Host, error)
+	GetList(opts ...DBOption) ([]model.Host, error)
+	Page(limit, offset int, opts ...DBOption) (int64, []model.Host, error)
+	Create(host *model.Host) error
+	Update(id uint, vars map[string]interface{}) error
+	UpdateGroup(group, newGroup uint) error
+	Delete(opts ...DBOption) error
+
+	WithByInfo(info string) DBOption
+	WithByPort(port uint) DBOption
+	WithByUser(user string) DBOption
 
 	SyncCert(data []model.RootCert) error
 	GetCert(opts ...DBOption) (model.RootCert, error)
@@ -22,68 +29,84 @@ type IHostRepo interface {
 	SaveCert(cert *model.RootCert) error
 	UpdateCert(id uint, vars map[string]interface{}) error
 	DeleteCert(opts ...DBOption) error
-
-	WithByChain(chain string) DBOption
 }
 
 func NewIHostRepo() IHostRepo {
 	return &HostRepo{}
 }
 
-func (h *HostRepo) GetFirewallRecord(opts ...DBOption) (model.Firewall, error) {
-	var firewall model.Firewall
+func (h *HostRepo) Get(opts ...DBOption) (model.Host, error) {
+	var host model.Host
 	db := global.DB
 	for _, opt := range opts {
 		db = opt(db)
 	}
-	err := db.First(&firewall).Error
-	return firewall, err
+	err := db.First(&host).Error
+	return host, err
 }
 
-func (h *HostRepo) ListFirewallRecord(opts ...DBOption) ([]model.Firewall, error) {
-	var firewalls []model.Firewall
+func (h *HostRepo) GetList(opts ...DBOption) ([]model.Host, error) {
+	var hosts []model.Host
+	db := global.DB.Model(&model.Host{})
+	for _, opt := range opts {
+		db = opt(db)
+	}
+	err := db.Find(&hosts).Error
+	return hosts, err
+}
+
+func (h *HostRepo) Page(page, size int, opts ...DBOption) (int64, []model.Host, error) {
+	var hosts []model.Host
+	db := global.DB.Model(&model.Host{})
+	for _, opt := range opts {
+		db = opt(db)
+	}
+	count := int64(0)
+	db = db.Count(&count)
+	err := db.Limit(size).Offset(size * (page - 1)).Find(&hosts).Error
+	return count, hosts, err
+}
+
+func (h *HostRepo) WithByInfo(info string) DBOption {
+	return func(g *gorm.DB) *gorm.DB {
+		if len(info) == 0 {
+			return g
+		}
+		infoStr := "%" + info + "%"
+		return g.Where("name LIKE ? OR addr LIKE ?", infoStr, infoStr)
+	}
+}
+
+func (h *HostRepo) WithByPort(port uint) DBOption {
+	return func(g *gorm.DB) *gorm.DB {
+		return g.Where("port = ?", port)
+	}
+}
+
+func (h *HostRepo) WithByUser(user string) DBOption {
+	return func(g *gorm.DB) *gorm.DB {
+		return g.Where("user = ?", user)
+	}
+}
+
+func (h *HostRepo) Create(host *model.Host) error {
+	return global.DB.Create(host).Error
+}
+
+func (h *HostRepo) Update(id uint, vars map[string]interface{}) error {
+	return global.DB.Model(&model.Host{}).Where("id = ?", id).Updates(vars).Error
+}
+
+func (h *HostRepo) UpdateGroup(group, newGroup uint) error {
+	return global.DB.Model(&model.Host{}).Where("group_id = ?", group).Updates(map[string]interface{}{"group_id": newGroup}).Error
+}
+
+func (h *HostRepo) Delete(opts ...DBOption) error {
 	db := global.DB
 	for _, opt := range opts {
 		db = opt(db)
 	}
-	if err := global.DB.Find(&firewalls).Error; err != nil {
-		return firewalls, nil
-	}
-	return firewalls, nil
-}
-
-func (h *HostRepo) SaveFirewallRecord(firewall *model.Firewall) error {
-	if firewall.ID != 0 {
-		return global.DB.Save(firewall).Error
-	}
-	var data model.Firewall
-	switch firewall.Type {
-	case "port":
-		_ = global.DB.Where("type = ? AND dst_port = ? AND protocol = ? AND src_ip = ? AND strategy = ?", "port",
-			firewall.DstPort,
-			firewall.Protocol,
-			firewall.SrcIP,
-			firewall.Strategy,
-		).First(&data).Error
-	case "ip":
-		_ = global.DB.Where("type = ? AND src_ip = ? AND strategy = ?", "address", firewall.SrcIP, firewall.Strategy).First(&data)
-	default:
-		_ = global.DB.Where("type = ? AND chain = ? AND src_port = ? AND dst_port = ? AND protocol = ? AND src_ip = ? AND dst_ip = ? AND strategy = ?",
-			firewall.Type,
-			firewall.Chain,
-			firewall.SrcPort,
-			firewall.DstPort,
-			firewall.Protocol,
-			firewall.SrcIP,
-			firewall.DstIP,
-			firewall.Strategy,
-		).First(&data).Error
-	}
-	return global.DB.Save(firewall).Error
-}
-
-func (h *HostRepo) DeleteFirewallRecordByID(id uint) error {
-	return global.DB.Where("id = ?", id).Delete(&model.Firewall{}).Error
+	return db.Delete(&model.Host{}).Error
 }
 
 func (u *HostRepo) GetCert(opts ...DBOption) (model.RootCert, error) {
@@ -163,10 +186,4 @@ func (u *HostRepo) SyncCert(data []model.RootCert) error {
 	}
 	tx.Commit()
 	return nil
-}
-
-func (u *HostRepo) WithByChain(chain string) DBOption {
-	return func(g *gorm.DB) *gorm.DB {
-		return g.Where("chain = ?", chain)
-	}
 }

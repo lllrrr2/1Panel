@@ -62,13 +62,21 @@
                             {{ $t('ssl.shellHelper') }}
                         </span>
                     </el-form-item>
+                    <PushToNode
+                        v-if="isMaster && isXpackOrEE"
+                        :push-node="obtain.pushNode"
+                        :nodes="obtain.pushNodes"
+                        type="ssl"
+                        @update:push-node="obtain.pushNode = $event"
+                        @update:nodes="obtain.pushNodes = $event"
+                    />
                 </el-form>
             </el-col>
         </el-row>
         <template #footer>
             <span class="dialog-footer">
                 <el-button @click="handleClose" :disabled="loading">{{ $t('commons.button.cancel') }}</el-button>
-                <el-button type="primary" @click="submit(obtainForm)" :disabled="loading">
+                <el-button v-permission type="primary" @click="submit(obtainForm)" :disabled="loading">
                     {{ $t('commons.button.confirm') }}
                 </el-button>
             </span>
@@ -84,8 +92,20 @@ import i18n from '@/lang';
 import FileList from '@/components/file-list/index.vue';
 import { MsgSuccess } from '@/utils/message';
 import { FormInstance } from 'element-plus';
-import { ref } from 'vue';
+import { defineAsyncComponent, ref } from 'vue';
 import { KeyTypes } from '@/global/mimetype';
+import { useGlobalStore } from '@/composables/useGlobalStore';
+
+const { isMaster, isXpackOrEE } = useGlobalStore();
+
+const PushToNode = defineAsyncComponent(async () => {
+    const modules = import.meta.glob('@/xpack/views/ssl/index.vue');
+    const loader = modules['/src/xpack/views/ssl/index.vue'];
+    if (loader) {
+        return ((await loader()) as any).default;
+    }
+    return { template: '<div></div>' };
+});
 
 const open = ref(false);
 const fileRef = ref();
@@ -100,10 +120,11 @@ const rules = ref({
     time: [Rules.integerNumber, checkNumberRange(1, 10000)],
     shell: [Rules.requiredInput],
     description: [checkMaxLength(128)],
+    pushNodes: [Rules.requiredSelect],
 });
 
 const initData = () => ({
-    keyType: 'P256',
+    keyType: 'EC256',
     domains: '',
     id: 0,
     time: 10,
@@ -114,6 +135,9 @@ const initData = () => ({
     description: '',
     execShell: false,
     shell: '',
+    pushNode: false,
+    pushNodes: [] as string[],
+    nodes: '',
 });
 const obtain = ref(initData());
 
@@ -144,6 +168,7 @@ const submit = async (formEl: FormInstance | undefined) => {
             return;
         }
         loading.value = true;
+        obtain.value.nodes = obtain.value.pushNode ? obtain.value.pushNodes.join(',') : '';
 
         obtainSSLByCA(obtain.value)
             .then(() => {

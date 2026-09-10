@@ -1,31 +1,81 @@
 <template>
-    <div ref="terminalElement" class="terminal-container"></div>
+    <div class="terminal-shell">
+        <div ref="terminalElement" class="terminal-container"></div>
+        <transition name="ai-mask-fade">
+            <div v-if="aiNotice.loading" class="ai-notice-mask"></div>
+        </transition>
+        <transition name="ai-notice-fade">
+            <div
+                v-if="aiNotice.visible"
+                class="ai-notice"
+                :class="[`ai-notice--${aiNotice.level}`, { 'ai-notice--loading': aiNotice.loading }]"
+            >
+                {{ aiNotice.message }}
+            </div>
+        </transition>
+    </div>
 </template>
 
 <script lang="ts" setup>
-import { ref, watch, onBeforeUnmount, nextTick, computed, onMounted } from 'vue';
+import { ref, shallowRef, watch, onActivated, onBeforeUnmount, nextTick, computed, onMounted } from 'vue';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import { FitAddon } from '@xterm/addon-fit';
-import { Base64 } from 'js-base64';
-import { GlobalStore, TerminalStore } from '@/store';
-const globalStore = GlobalStore();
+import { decodeBase64, encodeBase64 } from '@/utils/base64';
+import { TerminalStore } from '@/store';
+import { MsgError } from '@/utils/message';
+import { checkStreamAuth } from '@/utils/stream-auth';
+import { useGlobalStore } from '@/composables/useGlobalStore';
+import i18n from '@/lang';
+const { currentNode } = useGlobalStore();
+
+// session: agent side session id known (fresh or reattached)
+// expired: the agent no longer has the session; a reconnect must open a new one
+const emit = defineEmits(['session', 'expired']);
+
+// Close codes of the agent's session protocol (agent/utils/terminal/session.go).
+const CLOSE_SESSION_NOT_FOUND = 4404;
+const CLOSE_ATTACHED_ELSEWHERE = 4409;
+const CLOSE_REVALIDATE = 4410;
 
 const terminalElement = ref<HTMLDivElement | null>(null);
 const fitAddon = new FitAddon();
 const termReady = ref(false);
 const webSocketReady = ref(false);
-const term = ref();
+const term = shallowRef<Terminal>();
 const terminalSocket = ref<WebSocket>();
 const heartbeatTimer = ref<NodeJS.Timer>();
+let initWebSocketToken = 0;
 const latency = ref(0);
+// Reconnect state. Only terminals that received a session hello reconnect;
+// the agent keeps a dirty-disconnected session alive for a short grace period.
+const sessionId = ref('');
+let wsEndpoint = '';
+let wsArgs = '';
+let closing = false;
+let reconnecting = false;
+let reconnectNoticeShown = false;
+let revalidating = false;
+let reconnectStartedAt = 0;
+let reconnectDelay = 1000;
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+// Must match graceTimeout in agent/utils/terminal/session.go: past it the agent has dropped the shell.
+const reconnectWindow = 30 * 60 * 1000;
 const initCmd = ref('');
-const currentLine = ref('');
-const suggestionText = ref('');
-const ghostText = ref('');
-let suggestTimer: ReturnType<typeof setTimeout> | null = null;
-const COMPLETION_DEBOUNCE_MS = 500;
-const COMPLETION_MIN_CHARS = 2;
+const hideInitCmdEcho = ref(false);
+const initCmdEchoBuffer = ref('');
+const waitForPrompt = ref('');
+const waitForPromptBuffer = ref('');
+const aiNotice = ref({
+    visible: false,
+    loading: false,
+    level: 'info',
+    message: '',
+});
+let aiNoticeTimer: ReturnType<typeof setTimeout> | null = null;
+let resizeFrame: number | undefined;
+let lastResizeColumns = 0;
+let lastResizeRows = 0;
 
 const readyWatcher = watch(
     () => webSocketReady.value && termReady.value,
@@ -65,9 +115,9 @@ watch([backgroundColor, foregroundColor], ([newBackgroundColor, newForegroundCol
     applyTerminalBackground(newBackgroundColor);
 });
 const cursorStyle = computed(() => terminalStore.cursorStyle);
-watch(cursorStyle, (newCursorStyle) => {
+watch(cursorStyle, () => {
     if (!term.value) return;
-    term.value.options.cursorStyle = newCursorStyle;
+    term.value.options.cursorStyle = getStyle();
 });
 const cursorBlink = computed(() => terminalStore.cursorBlink);
 watch(cursorBlink, (newCursorBlink) => {
@@ -90,6 +140,13 @@ interface WsProps {
     args: string;
     error: string;
     initCmd: string;
+    waitForPrompt?: string;
+    sessionId?: string;
+}
+
+interface TerminalBufferLine {
+    isWrapped?: boolean;
+    translateToString(trimRight?: boolean, startColumn?: number, endColumn?: number): string;
 }
 const acceptParams = (props: WsProps) => {
     nextTick(() => {
@@ -97,6 +154,9 @@ const acceptParams = (props: WsProps) => {
             initError(props.error);
         } else {
             initCmd.value = props.initCmd || '';
+            waitForPrompt.value = props.waitForPrompt || '';
+            waitForPromptBuffer.value = '';
+            sessionId.value = props.sessionId || '';
             init(props.endpoint, props.args);
         }
     });
@@ -116,7 +176,7 @@ const newTerm = () => {
         cursorBlink: terminalStore.cursorBlink ? String(terminalStore.cursorBlink).toLowerCase() === 'enable' : true,
         cursorStyle: terminalStore.cursorStyle ? getStyle() : 'underline',
         scrollback: terminalStore.scrollback || 1000,
-        scrollSensitivity: terminalStore.scrollSensitivity || 15,
+        scrollSensitivity: terminalStore.scrollSensitivity || 6,
     });
 };
 
@@ -154,10 +214,27 @@ const initError = (errorInfo: string) => {
 };
 
 function onClose(isKeepShow: boolean = false) {
+    initWebSocketToken++;
+    closing = true;
+    stopReconnect();
     window.removeEventListener('resize', changeTerminalSize);
+    if (resizeFrame !== undefined) {
+        cancelAnimationFrame(resizeFrame);
+        resizeFrame = undefined;
+    }
+    lastResizeColumns = 0;
+    lastResizeRows = 0;
+    clearAINotice();
+    webSocketReady.value = false;
     try {
-        terminalSocket.value?.close();
+        // 1000 tells the agent this is deliberate: close the shell now, no grace period
+        terminalSocket.value?.close(1000);
     } catch {}
+    if (heartbeatTimer.value) {
+        clearInterval(Number(heartbeatTimer.value));
+        heartbeatTimer.value = undefined;
+    }
+    terminalSocket.value = undefined;
     if (!isKeepShow) {
         try {
             term.value.dispose();
@@ -172,6 +249,8 @@ function onClose(isKeepShow: boolean = false) {
 
 const initTerminal = (online: boolean = false): boolean => {
     newTerm();
+    lastResizeColumns = 0;
+    lastResizeRows = 0;
     if (terminalElement.value) {
         term.value.open(terminalElement.value);
         applyTerminalBackground(terminalStore.backgroundColor);
@@ -186,9 +265,29 @@ const initTerminal = (online: boolean = false): boolean => {
 };
 
 function changeTerminalSize() {
+    if (resizeFrame !== undefined) {
+        return;
+    }
+    resizeFrame = requestAnimationFrame(() => {
+        resizeFrame = undefined;
+        resizeTerminal();
+    });
+}
+
+function resizeTerminal() {
+    if (!terminalElement.value || !term.value) return;
+    if (terminalElement.value.clientWidth <= 0 || terminalElement.value.clientHeight <= 0) {
+        return;
+    }
+
     fitAddon.fit();
     if (isWsOpen()) {
         const { cols, rows } = term.value;
+        if (cols === lastResizeColumns && rows === lastResizeRows) {
+            return;
+        }
+        lastResizeColumns = cols;
+        lastResizeRows = rows;
         terminalSocket.value!.send(
             JSON.stringify({
                 type: 'resize',
@@ -203,14 +302,40 @@ function changeTerminalSize() {
 
 // websocket 相关代码 start
 
-const initWebSocket = (endpoint_: string, args: string = '') => {
+const initWebSocket = async (endpoint_: string, args: string = '') => {
+    const token = ++initWebSocketToken;
+    closing = false;
+    wsEndpoint = endpoint_;
+    wsArgs = args;
     const href = window.location.href;
     const protocol = href.split('//')[0] === 'http:' ? 'ws' : 'wss';
     const host = href.split('//')[1].split('/')[0];
     const endpoint = endpoint_.replace(/^\/+/, '');
-    let conn = `${protocol}://${host}/${endpoint}?cols=${term.value.cols}&rows=${term.value.rows}&${args}&operateNode=${globalStore.currentNode}`;
-    if (args.indexOf('&operateNode=') !== -1) {
+    let node = args.indexOf('id=') !== -1 ? 'local' : currentNode.value;
+    let conn = `${protocol}://${host}/${endpoint}?cols=${term.value.cols}&rows=${term.value.rows}&${args}&operateNode=${node}`;
+    if (args.indexOf('operateNode=') !== -1) {
         conn = `${protocol}://${host}/${endpoint}?cols=${term.value.cols}&rows=${term.value.rows}&${args}`;
+    }
+    if (sessionId.value) {
+        conn += `&session=${encodeURIComponent(sessionId.value)}`;
+    }
+    if (revalidating) {
+        conn += '&terminalRevalidate=1';
+    }
+    const authError = await checkStreamAuth(conn);
+    if (token !== initWebSocketToken || !termReady.value) {
+        return;
+    }
+    if (authError) {
+        reconnecting = false;
+        revalidating = false;
+        sessionId.value = '';
+        showWebSocketAuthError(authError);
+        emit('expired');
+        return;
+    }
+    if (heartbeatTimer.value) {
+        clearInterval(Number(heartbeatTimer.value));
     }
     terminalSocket.value = new WebSocket(conn);
     terminalSocket.value.onopen = runRealTerminal;
@@ -229,47 +354,74 @@ const initWebSocket = (endpoint_: string, args: string = '') => {
     }, 1000 * 10);
 };
 
+const showWebSocketAuthError = (message: string) => {
+    clearAINotice();
+    MsgError(message);
+    term.value?.write(`\x1b[31m${message}\x1b[m\r\n`);
+};
+
 const runRealTerminal = () => {
     webSocketReady.value = true;
-    if (initCmd.value !== '') {
+    changeTerminalSize();
+    term.value?.focus();
+    // a reattached shell already ran its init command
+    if (initCmd.value !== '' && !sessionId.value) {
+        hideInitCmdEcho.value = true;
+        initCmdEchoBuffer.value = '';
         sendMsg(initCmd.value);
     }
+};
+
+const stripInitCmdEchoLine = (message: string) => {
+    if (!hideInitCmdEcho.value) {
+        return message;
+    }
+    initCmdEchoBuffer.value += message;
+    const lineBreakIndex = initCmdEchoBuffer.value.search(/\r?\n/);
+    if (lineBreakIndex === -1) {
+        return '';
+    }
+
+    const lineBreakLength = initCmdEchoBuffer.value[lineBreakIndex] === '\r' ? 2 : 1;
+    const remaining = initCmdEchoBuffer.value.slice(lineBreakIndex + lineBreakLength);
+    hideInitCmdEcho.value = false;
+    initCmdEchoBuffer.value = '';
+    initCmd.value = '';
+    return remaining;
+};
+
+const flushPromptBuffer = (message: string) => {
+    if (!waitForPrompt.value) {
+        return message;
+    }
+    waitForPromptBuffer.value += message;
+    const promptIndex = waitForPromptBuffer.value.indexOf(waitForPrompt.value);
+    if (promptIndex === -1) {
+        return '';
+    }
+
+    const visible = waitForPromptBuffer.value.slice(promptIndex);
+    waitForPrompt.value = '';
+    waitForPromptBuffer.value = '';
+    return visible;
 };
 
 const onWSReceive = (message: MessageEvent) => {
     const wsMsg = JSON.parse(message.data);
     switch (wsMsg.type) {
         case 'cmd': {
-            clearGhost();
-            term.value.element && term.value.focus();
             if (wsMsg.data) {
-                let receiveMsg = Base64.decode(wsMsg.data);
-                if (initCmd.value != '') {
-                    receiveMsg = receiveMsg?.replace(initCmd.value.trim(), '').trim();
-                    initCmd.value = '';
+                let receiveMsg = decodeBase64(wsMsg.data);
+                if (hideInitCmdEcho.value) {
+                    receiveMsg = stripInitCmdEchoLine(receiveMsg);
+                }
+                if (receiveMsg && waitForPrompt.value) {
+                    receiveMsg = flushPromptBuffer(receiveMsg);
+                }
+                if (!receiveMsg) {
+                    break;
                 }
                 term.value.write(receiveMsg);
-            }
-            break;
-        }
-        case 'complete': {
-            if (!currentLine.value || currentLine.value.trim().length === 0) {
-                clearGhost();
-                break;
-            }
-            if (wsMsg.data) {
-                const raw = Base64.decode(wsMsg.data);
-                const items = raw
-                    .split('\n')
-                    .map((item) => item.trim())
-                    .filter((item) => item.length > 0);
-                if (items.length >= 1) {
-                    applySuggestion(items[0]);
-                } else {
-                    clearGhost();
-                }
-            } else {
-                clearGhost();
             }
             break;
         }
@@ -277,21 +429,119 @@ const onWSReceive = (message: MessageEvent) => {
             latency.value = new Date().getTime() - wsMsg.timestamp;
             break;
         }
+        case 'session': {
+            const wasReconnect = reconnecting;
+            const wasRevalidate = revalidating;
+            reconnecting = false;
+            revalidating = false;
+            reconnectDelay = 1000;
+            sessionId.value = wsMsg.id || '';
+            if (wasReconnect && !wasRevalidate) {
+                // replay is a tail of recent output, start from a clean screen
+                term.value?.reset();
+            }
+            emit('session', sessionId.value);
+            break;
+        }
+        case 'ai_notice': {
+            const message = wsMsg.message?.trim();
+            if (!message) {
+                break;
+            }
+            showAINotice(wsMsg.level || 'info', message);
+            break;
+        }
     }
 };
 
 const errorRealTerminal = (ex: any) => {
+    clearAINotice();
+    if (reconnecting) return;
     let message = ex.message;
     if (!message) message = 'disconnected';
     term.value.write(`\x1b[31m${message}\x1b[m\r\n`);
 };
 
 const closeRealTerminal = (ev: CloseEvent) => {
+    clearAINotice();
+    webSocketReady.value = false;
     if (heartbeatTimer.value) {
         clearInterval(Number(heartbeatTimer.value));
+        heartbeatTimer.value = undefined;
     }
-    term.value?.write('The connection has been disconnected.');
-    term.value?.write(ev.reason);
+    terminalSocket.value = undefined;
+    if (closing || !sessionId.value) {
+        term.value?.write('The connection has been disconnected.');
+        term.value?.write(ev.reason);
+        return;
+    }
+    switch (ev.code) {
+        case 1000: // the shell exited or the agent closed it
+        case CLOSE_SESSION_NOT_FOUND:
+            sessionId.value = '';
+            reconnecting = false;
+            writeNotice(
+                '31',
+                ev.code === 1000 ? 'The connection has been disconnected.' : i18n.global.t('terminal.sessionExpired'),
+            );
+            emit('expired');
+            return;
+        case CLOSE_ATTACHED_ELSEWHERE:
+            reconnecting = false;
+            writeNotice('31', i18n.global.t('terminal.sessionKicked'));
+            return;
+        case CLOSE_REVALIDATE:
+            revalidating = true;
+            scheduleReconnect(true);
+            return;
+        default:
+            scheduleReconnect();
+    }
+};
+
+const writeNotice = (color: string, message: string) => {
+    term.value?.write(`\r\n\x1b[${color}m${message}\x1b[m\r\n`);
+};
+
+// scheduleReconnect retries with backoff for as long as the agent keeps a detached session.
+const scheduleReconnect = (forRevalidation = false) => {
+    const now = Date.now();
+    if (!reconnecting) {
+        reconnecting = true;
+        reconnectStartedAt = now;
+        reconnectDelay = 1000;
+        reconnectNoticeShown = false;
+    } else if (now - reconnectStartedAt > reconnectWindow) {
+        reconnecting = false;
+        sessionId.value = '';
+        writeNotice('31', i18n.global.t('terminal.sessionExpired'));
+        emit('expired');
+        return;
+    }
+    if (!forRevalidation && !reconnectNoticeShown) {
+        writeNotice('33', i18n.global.t('terminal.sessionReconnecting'));
+        reconnectNoticeShown = true;
+    }
+    reconnectTimer = setTimeout(
+        () => {
+            reconnectTimer = null;
+            if (closing || !sessionId.value) return;
+            initWebSocket(wsEndpoint, wsArgs);
+        },
+        forRevalidation ? 0 : reconnectDelay,
+    );
+    if (!forRevalidation) {
+        reconnectDelay = Math.min(reconnectDelay * 2, 8000);
+    }
+};
+
+const stopReconnect = () => {
+    reconnecting = false;
+    revalidating = false;
+    if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+    }
 };
 
 const isWsOpen = () => {
@@ -299,136 +549,97 @@ const isWsOpen = () => {
     return readyState === 1;
 };
 
-function sendMsg(data: string) {
+function isEnterInputData(data: string): boolean {
+    return data === '\r' || data === '\n' || data === '\r\n';
+}
+
+function getCurrentTerminalLine(): string {
+    const xterm = term.value;
+    if (!xterm?.buffer?.active) return '';
+    const buffer = xterm.buffer.active;
+    const cursorRow = buffer.baseY + buffer.cursorY;
+    let startRow = cursorRow;
+    let endRow = cursorRow;
+
+    for (let row = cursorRow; row > 0; row--) {
+        const line = buffer.getLine(row) as TerminalBufferLine | undefined;
+        if (!line?.isWrapped) {
+            startRow = row;
+            break;
+        }
+        startRow = row - 1;
+    }
+
+    for (let row = cursorRow + 1; row < buffer.length; row++) {
+        const line = buffer.getLine(row) as TerminalBufferLine | undefined;
+        if (!line?.isWrapped) {
+            break;
+        }
+        endRow = row;
+    }
+
+    let content = '';
+    for (let row = startRow; row <= endRow; row++) {
+        const line = buffer.getLine(row) as TerminalBufferLine | undefined;
+        if (!line) continue;
+        content += line.translateToString(false);
+    }
+    return content.trimEnd();
+}
+
+function sendMsg(data: string, line: string = '') {
     if (isWsOpen()) {
         terminalSocket.value!.send(
             JSON.stringify({
                 type: 'cmd',
-                data: Base64.encode(data),
+                data: encodeBase64(data),
+                line,
             }),
         );
     }
-}
-
-function sendSuggestRequest(line: string) {
-    if (!line || line.trim().length === 0) {
-        return;
-    }
-    if (isWsOpen()) {
-        terminalSocket.value!.send(
-            JSON.stringify({
-                type: 'complete',
-                data: Base64.encode(line),
-            }),
-        );
-    }
-}
-
-function scheduleSuggest() {
-    if (suggestTimer) {
-        clearTimeout(suggestTimer);
-    }
-    if (!currentLine.value || currentLine.value.trim().length === 0) {
-        clearGhost();
-        return;
-    }
-    const token = currentLine.value.trim().split(/\s+/).pop() || '';
-    if (token.length < COMPLETION_MIN_CHARS) {
-        clearGhost();
-        return;
-    }
-    suggestTimer = setTimeout(() => {
-        sendSuggestRequest(currentLine.value);
-    }, COMPLETION_DEBOUNCE_MS);
-}
-
-function applySuggestion(raw: string) {
-    if (!raw) {
-        clearGhost();
-        return;
-    }
-    const lastTokenMatch = currentLine.value.match(/(\S+)$/);
-    const lastToken = lastTokenMatch ? lastTokenMatch[1] : '';
-    let suffix = raw;
-    if (lastToken && raw.startsWith(lastToken)) {
-        suffix = raw.slice(lastToken.length);
-    }
-    if (!suffix) {
-        clearGhost();
-        return;
-    }
-    suggestionText.value = suffix;
-    renderGhost(suffix);
-}
-
-function renderGhost(suffix: string) {
-    if (!term.value) return;
-    term.value.write('\x1b7');
-    term.value.write('\x1b[0K');
-    term.value.write(`\x1b[90m${suffix}\x1b[0m`);
-    term.value.write('\x1b8');
-    ghostText.value = suffix;
-}
-
-function clearGhost() {
-    if (!ghostText.value || !term.value) return;
-    term.value.write('\x1b7');
-    term.value.write('\x1b[0K');
-    term.value.write('\x1b8');
-    ghostText.value = '';
-    suggestionText.value = '';
 }
 
 function onTermData(data: string) {
     if (!data) return;
-    if (data === '\t') {
-        if (ghostText.value) {
-            sendMsg(ghostText.value);
-            currentLine.value += ghostText.value;
-            clearGhost();
-            scheduleSuggest();
-            return;
-        }
-        sendMsg(data);
+    if (aiNotice.value.loading) return;
+    sendMsg(data, isEnterInputData(data) ? getCurrentTerminalLine() : '');
+}
+
+function clearAINotice() {
+    if (aiNoticeTimer) {
+        clearTimeout(aiNoticeTimer);
+        aiNoticeTimer = null;
+    }
+    aiNotice.value = {
+        ...aiNotice.value,
+        visible: false,
+        loading: false,
+    };
+}
+
+function showAINotice(level: string, message: string) {
+    if (aiNoticeTimer) {
+        clearTimeout(aiNoticeTimer);
+        aiNoticeTimer = null;
+    }
+    const resolvedLevel = ['success', 'error', 'info'].includes(level) ? level : 'info';
+    aiNotice.value = {
+        visible: true,
+        loading: resolvedLevel === 'info',
+        level: resolvedLevel,
+        message,
+    };
+    if (resolvedLevel === 'info') {
         return;
     }
-    if (data === '\r' || data === '\n') {
-        currentLine.value = '';
-        clearGhost();
-        sendMsg(data);
-        return;
-    }
-    if (data === '\x7f') {
-        if (currentLine.value.length > 0) {
-            currentLine.value = currentLine.value.slice(0, -1);
-        }
-        clearGhost();
-        sendMsg(data);
-        scheduleSuggest();
-        return;
-    }
-    if (data === '\x15') {
-        currentLine.value = '';
-        clearGhost();
-        sendMsg(data);
-        return;
-    }
-    if (data === '\x17') {
-        currentLine.value = currentLine.value.replace(/\s+\S*$/, '');
-        clearGhost();
-        sendMsg(data);
-        scheduleSuggest();
-        return;
-    }
-    if (data.startsWith('\x1b')) {
-        clearGhost();
-        sendMsg(data);
-        return;
-    }
-    currentLine.value += data;
-    clearGhost();
-    sendMsg(data);
-    scheduleSuggest();
+    aiNoticeTimer = setTimeout(() => {
+        aiNotice.value = {
+            ...aiNotice.value,
+            visible: false,
+            loading: false,
+        };
+        aiNoticeTimer = null;
+    }, 2600);
 }
 
 // websocket 相关代码 end
@@ -454,11 +665,17 @@ defineExpose({
     isWsOpen,
     sendMsg,
     getLatency: () => latency.value,
+    // re-fit after the element was moved back into a visible container
+    refit: () => changeTerminalSize(),
 });
 
 onBeforeUnmount(() => {
     onClose();
     resizeObserver.value?.disconnect();
+});
+
+onActivated(() => {
+    nextTick(changeTerminalSize);
 });
 </script>
 
@@ -467,6 +684,97 @@ onBeforeUnmount(() => {
     width: 100%;
     height: 100%;
 }
+
+.terminal-shell {
+    position: relative;
+    width: 100%;
+    height: 100%;
+}
+
+.ai-notice-mask {
+    position: absolute;
+    inset: 0;
+    z-index: 10;
+    background: rgba(8, 10, 14, 0.12);
+    backdrop-filter: blur(1.5px);
+    pointer-events: auto;
+    cursor: progress;
+}
+
+.ai-notice {
+    position: absolute;
+    left: 50%;
+    top: 24px;
+    transform: translateX(-50%);
+    z-index: 12;
+    width: fit-content;
+    min-width: 240px;
+    max-width: min(72%, 560px);
+    padding: 9px 14px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    background: rgba(16, 18, 24, 0.78);
+    color: #f3f4f6;
+    font-size: 12px;
+    line-height: 1.4;
+    text-align: center;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.2);
+    backdrop-filter: blur(8px);
+    pointer-events: none;
+    white-space: pre-wrap;
+}
+
+.ai-notice--loading {
+    top: 50%;
+    width: min(72%, 560px);
+    padding: 12px 16px;
+    border-radius: 12px;
+    font-size: 13px;
+    line-height: 1.5;
+    transform: translate(-50%, -50%);
+    background: rgba(16, 18, 24, 0.92);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.3);
+    backdrop-filter: blur(10px);
+}
+
+.ai-notice--success {
+    border-color: rgba(34, 197, 94, 0.45);
+    background: rgba(10, 28, 18, 0.78);
+}
+
+.ai-notice--error {
+    border-color: rgba(248, 113, 113, 0.45);
+    background: rgba(40, 16, 16, 0.8);
+}
+
+.ai-notice-fade-enter-active,
+.ai-notice-fade-leave-active {
+    transition:
+        opacity 180ms ease,
+        transform 180ms ease;
+}
+
+.ai-mask-fade-enter-active,
+.ai-mask-fade-leave-active {
+    transition: opacity 180ms ease;
+}
+
+.ai-notice-fade-enter-from,
+.ai-notice-fade-leave-to {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-6px);
+}
+
+.ai-notice--loading.ai-notice-fade-enter-from,
+.ai-notice--loading.ai-notice-fade-leave-to {
+    transform: translate(-50%, calc(-50% + 8px));
+}
+
+.ai-mask-fade-enter-from,
+.ai-mask-fade-leave-to {
+    opacity: 0;
+}
+
 :deep(.xterm) {
     padding: 5px !important;
     background-color: transparent !important;

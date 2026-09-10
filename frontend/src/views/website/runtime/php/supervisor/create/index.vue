@@ -42,7 +42,7 @@
         <template #footer>
             <span class="dialog-footer">
                 <el-button @click="handleClose">{{ $t('commons.button.cancel') }}</el-button>
-                <el-button type="primary" @click="submit(processForm)" :disabled="loading">
+                <el-button v-permission type="primary" @click="submit(processForm)" :disabled="loading">
                     {{ $t('commons.button.confirm') }}
                 </el-button>
             </span>
@@ -87,7 +87,7 @@ const em = defineEmits(['close']);
 const handleClose = () => {
     open.value = false;
     resetForm();
-    em('close', open);
+    em('close', open.value);
 };
 
 const resetForm = () => {
@@ -95,7 +95,7 @@ const resetForm = () => {
     processForm.value?.resetFields();
 };
 
-const acceptParams = (operate: string, config: HostTool.SupersivorProcess, id: number) => {
+const acceptParams = (operate: string, config: HostTool.SupervisorProcess, id: number) => {
     process.value = initData(id);
     if (operate == 'update') {
         process.value = {
@@ -127,7 +127,7 @@ const submit = async (formEl: FormInstance | undefined) => {
         createSupervisorProcess(process.value)
             .then(() => {
                 open.value = false;
-                em('close', open);
+                em('close', open.value);
                 MsgSuccess(i18n.global.t('commons.msg.' + process.value.operate + 'Success'));
             })
             .finally(() => {

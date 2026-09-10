@@ -11,7 +11,7 @@ type DBConfUpdateByFile struct {
 type ChangeDBInfo struct {
 	ID       uint   `json:"id"`
 	From     string `json:"from" validate:"required,oneof=local remote"`
-	Type     string `json:"type" validate:"required,oneof=mysql mariadb postgresql redis mysql-cluster postgresql-cluster redis-cluster"`
+	Type     string `json:"type" validate:"required,oneof=mysql mariadb postgresql redis mongodb mysql-cluster postgresql-cluster redis-cluster"`
 	Database string `json:"database" validate:"required"`
 	Value    string `json:"value" validate:"required"`
 }
@@ -60,23 +60,82 @@ type MysqlDBCreate struct {
 	Database    string `json:"database" validate:"required"`
 	Format      string `json:"format" validate:"required"`
 	Collation   string `json:"collation"`
-	Username    string `json:"username" validate:"required"`
-	Password    string `json:"password" validate:"required"`
+	Username    string `json:"username"`
+	Password    string `json:"password"`
 	Permission  string `json:"permission" validate:"required"`
 	Description string `json:"description"`
+}
+
+type MysqlUser struct {
+	Username    string `json:"username"`
+	Host        string `json:"host"`
+	Password    string `json:"password"`
+	Description string `json:"description"`
+	IsDelete    bool   `json:"isDelete"`
+}
+
+type MysqlGrant struct {
+	Database string `json:"database"`
+	Username string `json:"username"`
+	Host     string `json:"host"`
+}
+
+type MysqlGrantSummarySearch struct {
+	Database string   `json:"database" validate:"required"`
+	DBs      []string `json:"dbs" validate:"required"`
+}
+
+type MysqlUserSearch struct {
+	Database string `json:"database" validate:"required"`
+}
+
+type MysqlUserCreate struct {
+	Database    string   `json:"database" validate:"required"`
+	Username    string   `json:"username" validate:"required"`
+	Password    string   `json:"password" validate:"required"`
+	Host        string   `json:"host" validate:"required"`
+	Description string   `json:"description"`
+	DBs         []string `json:"dbs"`
+}
+
+type MysqlUserDelete struct {
+	Database string `json:"database" validate:"required"`
+	Username string `json:"username" validate:"required"`
+	Host     string `json:"host" validate:"required"`
+}
+
+type MysqlUserUpdate struct {
+	Database    string `json:"database" validate:"required"`
+	Username    string `json:"username" validate:"required"`
+	Host        string `json:"host" validate:"required"`
+	NewHost     string `json:"newHost" validate:"required"`
+	Description string `json:"description"`
+}
+
+type MysqlUserPassword struct {
+	Database string `json:"database" validate:"required"`
+	Username string `json:"username" validate:"required"`
+	Host     string `json:"host" validate:"required"`
+	Password string `json:"password" validate:"required"`
+}
+
+type MysqlGrantCreate struct {
+	Database string `json:"database" validate:"required"`
+	DB       string `json:"db" validate:"required"`
+	Username string `json:"username" validate:"required"`
+	Host     string `json:"host" validate:"required"`
+}
+
+type MysqlGrantDelete struct {
+	Database string `json:"database" validate:"required"`
+	DB       string `json:"db" validate:"required"`
+	Username string `json:"username" validate:"required"`
+	Host     string `json:"host" validate:"required"`
 }
 
 type MysqlFormatCollationOption struct {
 	Format     string   `json:"format"`
 	Collations []string `json:"collations"`
-}
-
-type BindUser struct {
-	Database   string `json:"database" validate:"required"`
-	DB         string `json:"db" validate:"required"`
-	Username   string `json:"username" validate:"required"`
-	Password   string `json:"password" validate:"required"`
-	Permission string `json:"permission" validate:"required"`
 }
 
 type MysqlLoadDB struct {
@@ -135,6 +194,83 @@ type MysqlStatus struct {
 	Run                          string `json:"Run"`
 	File                         string `json:"File"`
 	Position                     string `json:"Position"`
+}
+
+// mongodb
+type MongodbDBSearch struct {
+	PageInfo
+	Info     string `json:"info"`
+	Database string `json:"database" validate:"required"`
+	OrderBy  string `json:"orderBy" validate:"required,oneof=name createdAt"`
+	Order    string `json:"order" validate:"required,oneof=null ascending descending"`
+}
+
+type MongodbDBInfo struct {
+	ID          uint      `json:"id"`
+	CreatedAt   time.Time `json:"createdAt"`
+	Name        string    `json:"name"`
+	From        string    `json:"from"`
+	MongodbName string    `json:"mongodbName"`
+	Username    string    `json:"username"`
+	Password    string    `json:"password"`
+	IsDelete    bool      `json:"isDelete"`
+	Description string    `json:"description"`
+}
+
+type MongodbDBCreate struct {
+	Name        string `json:"name" validate:"required"`
+	From        string `json:"from" validate:"required,oneof=local remote"`
+	Database    string `json:"database" validate:"required"`
+	Username    string `json:"username" validate:"required"`
+	Password    string `json:"password" validate:"required"`
+	Permission  string `json:"permission" validate:"required,oneof=dbOwner read readWrite userAdmin"`
+	Description string `json:"description"`
+}
+
+type MongodbLoadDB struct {
+	From     string `json:"from" validate:"required,oneof=local remote"`
+	Type     string `json:"type" validate:"required,oneof=mongodb"`
+	Database string `json:"database" validate:"required"`
+}
+
+type MongodbDBDeleteCheck struct {
+	ID       uint   `json:"id" validate:"required"`
+	Type     string `json:"type" validate:"required,oneof=mongodb"`
+	Database string `json:"database" validate:"required"`
+}
+
+type MongodbDBDelete struct {
+	ID           uint   `json:"id" validate:"required"`
+	Type         string `json:"type" validate:"required,oneof=mongodb"`
+	Database     string `json:"database" validate:"required"`
+	ForceDelete  bool   `json:"forceDelete"`
+	DeleteBackup bool   `json:"deleteBackup"`
+}
+
+type MongodbBind struct {
+	Database string `json:"database" validate:"required"`
+	Name     string `json:"name" validate:"required"`
+	Username string `json:"username" validate:"required"`
+	Password string `json:"password" validate:"required"`
+}
+
+type MongodbPassword struct {
+	Database string `json:"database" validate:"required"`
+	Name     string `json:"name" validate:"required"`
+	Password string `json:"password" validate:"required"`
+}
+
+type MongodbPrivileges struct {
+	Database   string `json:"database" validate:"required"`
+	Name       string `json:"name" validate:"required"`
+	Username   string `json:"username" validate:"required"`
+	Permission string `json:"permission" validate:"required,oneof=dbOwner read readWrite userAdmin"`
+}
+
+type MongodbPrivilegesLoad struct {
+	Database string `json:"database" validate:"required"`
+	Name     string `json:"name" validate:"required"`
+	Username string `json:"username" validate:"required"`
 }
 
 type MysqlVariables struct {

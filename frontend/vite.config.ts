@@ -1,12 +1,9 @@
 import { resolve } from 'path';
 import { wrapperEnv } from './src/utils/get-env';
-import { visualizer } from 'rollup-plugin-visualizer';
 import viteCompression from 'vite-plugin-compression';
-import VueSetupExtend from 'vite-plugin-vue-setup-extend';
-import eslintPlugin from 'vite-plugin-eslint';
+import eslintPlugin from 'vite-plugin-eslint2';
 import vueJsx from '@vitejs/plugin-vue-jsx';
-import DefineOptions from 'unplugin-vue-define-options/vite';
-import { defineConfig, loadEnv, ConfigEnv, UserConfig } from 'vite';
+import { defineConfig, loadEnv, ConfigEnv, UserConfig, Plugin } from 'vite';
 import vue from '@vitejs/plugin-vue';
 import pkg from './package.json';
 import dayjs from 'dayjs';
@@ -16,7 +13,37 @@ import Components from 'unplugin-vue-components/vite';
 import { ElementPlusResolver } from 'unplugin-vue-components/resolvers';
 import svgLoader from 'vite-svg-loader';
 
+function patchCodeFilterOverflow(): Plugin {
+    return {
+        name: 'patch-code-filter-overflow',
+        configResolved(config) {
+            const target = config.plugins.find((p) => p.name === 'vite:asset-import-meta-url');
+            if (target?.transform && typeof target.transform === 'object' && target.transform.filter) {
+                (target.transform.filter as Record<string, any>).code = 'import.meta.url';
+            }
+        },
+    };
+}
+
 const prefix = `monaco-editor/esm/vs`;
+
+function getManualChunkName(id: string): string | undefined {
+    if (id.includes(`${prefix}/language/json/json.worker`)) return 'jsonWorker';
+    if (id.includes(`${prefix}/language/css/css.worker`)) return 'cssWorker';
+    if (id.includes(`${prefix}/language/html/html.worker`)) return 'htmlWorker';
+    if (id.includes(`${prefix}/language/typescript/ts.worker`)) return 'tsWorker';
+    if (id.includes(`${prefix}/editor/editor.worker`)) return 'editorWorker';
+
+    if (id.includes('node_modules/echarts/')) return 'vendor-echarts';
+    if (id.includes('node_modules/element-plus/') || id.includes('node_modules/@element-plus/')) {
+        return 'vendor-element-plus';
+    }
+    if (id.includes('node_modules/codemirror/') || id.includes('node_modules/@codemirror/')) {
+        return 'vendor-codemirror';
+    }
+
+    return undefined;
+}
 
 const { dependencies, devDependencies, name, version } = pkg;
 const __APP_INFO__ = {
@@ -24,16 +51,18 @@ const __APP_INFO__ = {
     lastBuildTime: dayjs().format('YYYY-MM-DD HH:mm:ss'),
 };
 
-export default defineConfig(({ mode }: ConfigEnv): UserConfig => {
+export default defineConfig(async ({ mode }: ConfigEnv): Promise<UserConfig> => {
     const env = loadEnv(mode, process.cwd());
     const viteEnv = wrapperEnv(env);
+    const isProduction = mode === 'production';
+    const reportPlugin = viteEnv.VITE_REPORT ? (await import('rollup-plugin-visualizer')).visualizer() : false;
 
     return {
         resolve: {
+            preserveSymlinks: true,
             alias: {
                 '@': resolve(__dirname, './src'),
                 'vue-i18n': 'vue-i18n/dist/vue-i18n.cjs.js',
-                xpack: resolve(__dirname, './src/xpack'),
             },
         },
         define: {
@@ -63,14 +92,14 @@ export default defineConfig(({ mode }: ConfigEnv): UserConfig => {
             },
         },
         plugins: [
+            patchCodeFilterOverflow(),
             vue(),
-            DefineOptions(),
             eslintPlugin({
+                cache: false,
                 exclude: ['**/*.js'],
             }),
             vueJsx(),
-            VueSetupExtend(),
-            viteEnv.VITE_REPORT && visualizer(),
+            reportPlugin,
             viteEnv.VITE_BUILD_GZIP &&
                 viteCompression({
                     verbose: true,
@@ -98,14 +127,10 @@ export default defineConfig(({ mode }: ConfigEnv): UserConfig => {
                 defaultImport: 'url',
             }),
         ],
-        esbuild: {
-            pure: viteEnv.VITE_DROP_CONSOLE ? ['console.log'] : [],
-            drop: viteEnv.VITE_DROP_CONSOLE && process.env.NODE_ENV === 'production' ? ['debugger'] : [],
-        },
         build: {
             sourcemap: false,
             outDir: '../core/cmd/server/web',
-            minify: 'esbuild',
+            minify: 'oxc',
             target: 'esnext',
             cssCodeSplit: false,
             rollupOptions: {
@@ -113,13 +138,16 @@ export default defineConfig(({ mode }: ConfigEnv): UserConfig => {
                     chunkFileNames: 'assets/js/[name]-[hash].js',
                     entryFileNames: 'assets/js/[name]-[hash].js',
                     assetFileNames: 'assets/[ext]/[name]-[hash].[ext]',
-                    manualChunks: {
-                        jsonWorker: [`${prefix}/language/json/json.worker`],
-                        cssWorker: [`${prefix}/language/css/css.worker`],
-                        htmlWorker: [`${prefix}/language/html/html.worker`],
-                        tsWorker: [`${prefix}/language/typescript/ts.worker`],
-                        editorWorker: [`${prefix}/editor/editor.worker`],
+                    minify: {
+                        compress: {
+                            dropDebugger: viteEnv.VITE_DROP_CONSOLE && isProduction,
+                            treeshake: {
+                                manualPureFunctions: viteEnv.VITE_DROP_CONSOLE ? ['console.log'] : [],
+                            },
+                        },
+                        mangle: true,
                     },
+                    manualChunks: getManualChunkName,
                 },
             },
         },

@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/1Panel-dev/1Panel/agent/global"
 	"github.com/1Panel-dev/1Panel/agent/utils/common"
 	"github.com/1Panel-dev/1Panel/agent/utils/files"
+	agentPsutil "github.com/1Panel-dev/1Panel/agent/utils/psutil"
 	"github.com/shirou/gopsutil/v4/host"
 	"github.com/shirou/gopsutil/v4/net"
 	"github.com/shirou/gopsutil/v4/process"
@@ -144,12 +147,15 @@ func getDownloadProcess(progress DownloadProgress) (res []byte, err error) {
 	for _, k := range progress.Keys {
 		value := global.CACHE.Get(k)
 		if value == "" {
-			return nil, fmt.Errorf("get cache error,err value is nil")
+			continue
 		}
 		downloadProcess := &files.Process{}
-		_ = json.Unmarshal([]byte(value), downloadProcess)
+		if err := json.Unmarshal([]byte(value), downloadProcess); err != nil {
+			continue
+		}
+		downloadProcess.Key = k
 		result = append(result, *downloadProcess)
-		if downloadProcess.Percent == 100 {
+		if downloadProcess.Status == "" && downloadProcess.Percent == 100 {
 			global.CACHE.Del(k)
 		}
 	}
@@ -157,7 +163,7 @@ func getDownloadProcess(progress DownloadProgress) (res []byte, err error) {
 	return
 }
 
-func handleProcessData(proc *process.Process, processConfig *PsProcessConfig, pidConnections map[int32][]net.ConnectionStat) *PsProcessData {
+func handleProcessData(proc *process.Process, processConfig *PsProcessConfig, pidConnections map[int32][]net.ConnectionStat, createTimeResolver *agentPsutil.ProcessCreateTimeResolver) *PsProcessData {
 	if processConfig.Pid > 0 && processConfig.Pid != proc.Pid {
 		return nil
 	}
@@ -183,10 +189,10 @@ func handleProcessData(proc *process.Process, processConfig *PsProcessConfig, pi
 	if len(statusArray) > 0 {
 		procData.Status = strings.Join(statusArray, ",")
 	}
-	createTime, procErr := proc.CreateTime()
+	createTime, procErr := createTimeResolver.CreateTime(proc)
 	if procErr == nil {
 		t := time.Unix(createTime/1000, 0)
-		procData.StartTime = t.Format("2006-1-2 15:04:05")
+		procData.StartTime = t.Format("2006-01-02 15:04:05")
 	}
 	procData.NumThreads, _ = proc.NumThreads()
 	procData.CpuValue, _ = proc.CPUPercent()
@@ -229,9 +235,10 @@ func getProcessData(processConfig PsProcessConfig) (res []byte, err error) {
 	}
 
 	result := make([]PsProcessData, 0, len(processes))
+	createTimeResolver := agentPsutil.NewProcessCreateTimeResolver()
 
 	for _, proc := range processes {
-		procData := handleProcessData(proc, &processConfig, pidConnections)
+		procData := handleProcessData(proc, &processConfig, pidConnections, createTimeResolver)
 		if procData != nil {
 			result = append(result, *procData)
 		}
@@ -250,8 +257,13 @@ func getSSHSessions(config SSHSessionConfig) (res []byte, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
+	if sessions, ok := loadLoginctlSSHSessions(ctx); ok && len(sessions) > 0 {
+		res, err = json.Marshal(filterSSHSessions(sessions, config))
+		return
+	}
+
 	users, err = host.UsersWithContext(ctx)
-	if err != nil {
+	if err != nil || len(users) == 0 {
 		res, err = json.Marshal(result)
 		return
 	}
@@ -275,6 +287,22 @@ func getSSHSessions(config SSHSessionConfig) (res []byte, err error) {
 		return
 	}
 
+	connections, err := net.ConnectionsMaxWithContext(ctx, "all", 32768)
+	if err != nil {
+		res, err = json.Marshal(result)
+		return
+	}
+	pidConnections := make(map[int32][]net.ConnectionStat, 256)
+	for _, conn := range connections {
+		if conn.Pid == 0 || conn.Raddr.IP == "" {
+			continue
+		}
+		if _, ok := usersByHost[conn.Raddr.IP]; !ok {
+			continue
+		}
+		pidConnections[conn.Pid] = append(pidConnections[conn.Pid], conn)
+	}
+
 	processes, err = process.ProcessesWithContext(ctx)
 	if err != nil {
 		res, err = json.Marshal(result)
@@ -286,12 +314,12 @@ func getSSHSessions(config SSHSessionConfig) (res []byte, err error) {
 		if name != "sshd" || proc.Pid == 0 {
 			continue
 		}
-		connections, _ := proc.Connections()
+		connections := pidConnections[proc.Pid]
 		if len(connections) == 0 {
 			continue
 		}
 
-		cmdline, cmdErr := proc.Cmdline()
+		cmdline, cmdErr := proc.CmdlineWithContext(ctx)
 		if cmdErr != nil {
 			continue
 		}
@@ -318,6 +346,86 @@ func getSSHSessions(config SSHSessionConfig) (res []byte, err error) {
 	}
 	res, err = json.Marshal(result)
 	return
+}
+
+func loadLoginctlSSHSessions(ctx context.Context) ([]sshSession, bool) {
+	if _, err := exec.LookPath("loginctl"); err != nil {
+		return nil, false
+	}
+	output, err := exec.CommandContext(ctx, "loginctl", "list-sessions", "--no-legend", "--no-pager").Output()
+	if err != nil {
+		return nil, false
+	}
+	var result []sshSession
+	for _, line := range strings.Split(string(output), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		sessionOutput, err := exec.CommandContext(ctx, "loginctl", "show-session", fields[0], "--no-pager",
+			"-p", "Name", "-p", "Remote", "-p", "RemoteHost", "-p", "TTY", "-p", "Timestamp", "-p", "Leader", "-p", "Service", "-p", "State").Output()
+		if err != nil {
+			continue
+		}
+		session, ok := parseLoginctlSSHSession(string(sessionOutput))
+		if !ok {
+			continue
+		}
+		result = append(result, session)
+	}
+	return result, true
+}
+
+func filterSSHSessions(sessions []sshSession, config SSHSessionConfig) []sshSession {
+	result := make([]sshSession, 0, len(sessions))
+	for _, session := range sessions {
+		if config.LoginUser != "" && !strings.Contains(session.Username, config.LoginUser) {
+			continue
+		}
+		if config.LoginIP != "" && !strings.Contains(session.Host, config.LoginIP) {
+			continue
+		}
+		result = append(result, session)
+	}
+	return result
+}
+
+func parseLoginctlSSHSession(output string) (sshSession, bool) {
+	props := map[string]string{}
+	for _, line := range strings.Split(output, "\n") {
+		key, value, ok := strings.Cut(line, "=")
+		if ok {
+			props[key] = strings.TrimSpace(value)
+		}
+	}
+	service := props["Service"]
+	if props["Remote"] != "yes" || props["Name"] == "" || props["RemoteHost"] == "" || props["State"] != "active" || (service != "sshd" && service != "ssh") {
+		return sshSession{}, false
+	}
+	pid, _ := strconv.ParseInt(props["Leader"], 10, 32)
+	return sshSession{
+		Username:  props["Name"],
+		Host:      props["RemoteHost"],
+		Terminal:  props["TTY"],
+		PID:       int32(pid),
+		LoginTime: parseLoginctlTimestamp(props["Timestamp"]),
+	}, true
+}
+
+func parseLoginctlTimestamp(value string) string {
+	fields := strings.Fields(value)
+	for i := 0; i < len(fields)-1; i++ {
+		if strings.Count(fields[i], "-") != 2 || strings.Count(fields[i+1], ":") != 2 {
+			continue
+		}
+		candidate := fields[i] + " " + fields[i+1]
+		t, err := time.ParseInLocation("2006-01-02 15:04:05", candidate, time.Local)
+		if err != nil {
+			return candidate
+		}
+		return t.Format("2006-1-2 15:04:05")
+	}
+	return value
 }
 
 func getNetConnections(config NetConfig) (res []byte, err error) {

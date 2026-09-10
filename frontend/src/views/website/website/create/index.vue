@@ -1,5 +1,5 @@
 <template>
-    <DrawerPro v-model="open" :header="$t('website.create')" size="60%" @close="handleClose">
+    <DrawerPro v-model="open" :header="$t('commons.button.create')" size="60%" @close="handleClose">
         <div v-loading="loading" :class="{ mask: !versionExist }">
             <el-form
                 ref="websiteForm"
@@ -68,6 +68,7 @@
                                     :key="index"
                                     :label="app.name"
                                     :value="app.id"
+                                    :disabled="isRestrictedDeploymentApp(app.key)"
                                 ></el-option>
                             </el-select>
                         </el-form-item>
@@ -254,7 +255,15 @@
                                     :label="ssl.primaryDomain"
                                     :value="ssl.id"
                                     :disabled="ssl.pem == ''"
-                                ></el-option>
+                                >
+                                    <span>{{ ssl.primaryDomain }}</span>
+                                    <el-tag class="tagClass" v-if="ssl.expireDate">
+                                        {{ dateFormatSimple(ssl.expireDate) }}
+                                    </el-tag>
+                                    <el-tag class="tagClass" v-if="ssl.organization">
+                                        {{ ssl.organization }}
+                                    </el-tag>
+                                </el-option>
                             </el-select>
                         </el-form-item>
                         <el-form-item :label="' '" v-if="websiteSSL && websiteSSL.id > 0">
@@ -262,6 +271,20 @@
                         </el-form-item>
                     </div>
                 </div>
+                <el-form-item
+                    :label="$t('template.importButton')"
+                    prop="templateOutputID"
+                    v-if="website.type === 'static'"
+                >
+                    <el-select v-model="website.templateOutputID" clearable class="p-w-200">
+                        <el-option
+                            v-for="output in templateOutputs"
+                            :key="output.id"
+                            :label="output.name + ' (' + output.templateName + ')'"
+                            :value="output.id"
+                        />
+                    </el-select>
+                </el-form-item>
                 <el-form-item prop="enableFtp" v-if="website.type === 'static' || website.type === 'runtime'">
                     <el-checkbox
                         @change="random"
@@ -415,7 +438,7 @@
     </DrawerPro>
 </template>
 
-<script lang="ts" setup name="CreateWebSite">
+<script lang="ts" setup>
 import AppInstallForm from '@/views/app-store/detail/form/index.vue';
 import SSLAlert from '@/views/website/website/create/site-alert/index.vue';
 import DomainCreate from '@/views/website/website/domain-create/index.vue';
@@ -434,6 +457,7 @@ import {
     preCheck,
     searchAcmeAccount,
     getDirConfig,
+    searchTemplateOutputs,
 } from '@/api/modules/website';
 import { Rules, checkNumberRange } from '@/global/form-rules';
 import i18n from '@/lang';
@@ -442,14 +466,17 @@ import { reactive, ref, watch } from 'vue';
 import { MsgError, MsgSuccess } from '@/utils/message';
 import { SearchRuntimes } from '@/api/modules/runtime';
 import { Runtime } from '@/api/interface/runtime';
-import { getRandomStr, getRuntimeLabel } from '@/utils/util';
+import { getRandomStr } from '@/utils/id';
+import { getRuntimeLabel } from '@/utils/app-store';
+import { dateFormatSimple } from '@/utils/date';
 import { getAppService } from '@/api/modules/app';
 import { v4 as uuidv4 } from 'uuid';
-import { getAccountName } from '@/utils/util';
+import { getAccountName } from '@/utils/ssl';
 import { Website } from '@/api/interface/website';
-import { getPathByType } from '@/api/modules/files';
+import { loadWebsiteDir } from '@/api/modules/setting';
 import { getWebsiteTypes } from '@/global/mimetype';
 import { compareVersion } from '@/utils/version';
+defineOptions({ name: 'CreateWebSite' });
 
 type SSLItem = Website.SSLDTO & {
     organization?: string;
@@ -512,6 +539,7 @@ const initData = () => ({
     domains: [],
     parentWebsiteID: undefined,
     siteDir: '',
+    templateOutputID: undefined,
 
     streamPorts: '',
     udp: false,
@@ -563,6 +591,7 @@ const appReq = reactive({
 const apps = ref<App.AppItem[]>([]);
 const preCheckRef = ref();
 const staticPath = ref('');
+const templateOutputs = ref<Website.TemplateOutputDTO[]>([]);
 const runtimeResource = ref('appstore');
 const initRuntimeReq = () => ({
     page: 1,
@@ -663,11 +692,35 @@ const getAppByService = async (key: string) => {
     dbServices.value = res.data;
 };
 
+const getProxyTargetFromApp = (app: Pick<App.AppInstalled, 'httpPort' | 'httpsPort'>) => {
+    if ((app.httpPort ?? 0) > 0) {
+        return {
+            protocol: 'http://',
+            address: `127.0.0.1:${app.httpPort}`,
+        };
+    }
+    if ((app.httpsPort ?? 0) > 0) {
+        return {
+            protocol: 'https://',
+            address: `127.0.0.1:${app.httpsPort}`,
+        };
+    }
+    return {
+        protocol: 'http://',
+        address: '',
+    };
+};
+
+const isRestrictedDeploymentApp = (appKey?: string) => {
+    return appKey === 'openclaw' || appKey === 'copaw' || appKey === 'hermes-agent';
+};
+
 const changeInstall = () => {
     appInstalls.value.forEach((app) => {
         if (app.id === website.value.appInstallId) {
-            website.value.proxyProtocol = 'http://';
-            website.value.proxyAddress = '127.0.0.1:' + app.httpPort;
+            const target = getProxyTargetFromApp(app);
+            website.value.proxyProtocol = target.protocol;
+            website.value.proxyAddress = target.address;
         }
     });
 };
@@ -675,9 +728,11 @@ const changeInstall = () => {
 const searchAppList = () => {
     searchApp(appReq).then((res) => {
         apps.value = res.data.items;
-        if (res.data.items.length > 0) {
-            website.value.appinstall.appId = res.data.items[0].id;
-            website.value.appinstall.appkey = res.data.items[0].key;
+
+        const selectableApp = res.data.items.find((item) => !isRestrictedDeploymentApp(item.key));
+        if (selectableApp) {
+            website.value.appinstall.appId = selectableApp.id;
+            website.value.appinstall.appkey = selectableApp.key;
             changeApp();
         }
     });
@@ -746,13 +801,14 @@ const acceptParams = async (openrestyVersion: string) => {
     }
     const websiteType = localStorage.getItem('website-type') || 'deployment';
     website.value.type = websiteType;
-    const dirRes = await getPathByType('websiteDir');
+    const dirRes = await loadWebsiteDir();
     staticPath.value = dirRes.data + '/sites/';
     changeType(websiteType);
 
     runtimeResource.value = 'appstore';
     runtimeReq.value = initRuntimeReq();
     listAcmeAccount();
+    listTemplateOutputs();
 
     steamConfig.value = initLbForm();
 
@@ -774,6 +830,12 @@ const openTaskLog = (taskID: string) => {
 const listAcmeAccount = () => {
     searchAcmeAccount({ page: 1, pageSize: 100 }).then((res) => {
         acmeAccounts.value = res.data.items || [];
+    });
+};
+
+const listTemplateOutputs = () => {
+    searchTemplateOutputs({ page: 1, pageSize: 1000, templateID: 0 }).then((res) => {
+        templateOutputs.value = res.data.items || [];
     });
 };
 
@@ -991,6 +1053,9 @@ const submit = async (formEl: FormInstance | undefined) => {
                     website.value.algorithm = steamConfig.value.algorithm;
                     website.value.servers = steamConfig.value.servers;
                 }
+                if (website.value.type !== 'static' || !website.value.templateOutputID) {
+                    website.value.templateOutputID = undefined;
+                }
                 const taskID = uuidv4();
                 website.value.taskID = taskID;
                 await createWebsite(website.value);
@@ -1008,6 +1073,9 @@ const submit = async (formEl: FormInstance | undefined) => {
 watch(
     () => website.value.domains,
     () => {
+        if (website.value.domains.some((domain: any) => domain.ssl) && !website.value.enableSSL) {
+            website.value.enableSSL = true;
+        }
         tryAutoSelectSSL();
     },
     { deep: true },
@@ -1024,6 +1092,9 @@ watch(
     () => website.value.enableSSL,
     (enabled) => {
         if (!enabled) {
+            website.value.domains.forEach((domain: any) => {
+                domain.ssl = false;
+            });
             applySSLSelection(undefined);
             userSelectedSSL.value = false;
             return;
@@ -1094,5 +1165,11 @@ defineExpose({
     text-overflow: ellipsis;
     white-space: nowrap;
     display: inline-block;
+}
+.tagClass {
+    float: right;
+    margin-right: 10px;
+    font-size: 12px;
+    margin-top: 5px;
 }
 </style>

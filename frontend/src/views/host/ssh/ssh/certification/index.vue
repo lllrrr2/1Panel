@@ -4,13 +4,13 @@
             <div class="mb-4">
                 <el-alert :closable="false">{{ $t('ssh.pubKeyHelper', [currentUser]) }}</el-alert>
             </div>
-            <el-button type="primary" plain @click="onOpenDialog('create')">
+            <el-button v-permission v-node-admin type="primary" plain @click="onOpenDialog('create')">
                 {{ $t('commons.button.create') }}
             </el-button>
-            <el-button plain @click="onSync()">
+            <el-button v-permission v-node-admin plain @click="onSync()">
                 {{ $t('commons.button.sync') }}
             </el-button>
-            <el-button plain :disabled="selects.length === 0" @click="onDelete(null)">
+            <el-button v-permission v-node-admin plain :disabled="selects.length === 0" @click="onDelete(null)">
                 {{ $t('commons.button.delete') }}
             </el-button>
             <ComplexTable
@@ -18,7 +18,7 @@
                 v-model:selects="selects"
                 :data="data"
                 @search="search"
-                :heightDiff="370"
+                :heightDiff="320"
             >
                 <el-table-column type="selection" fix />
                 <el-table-column :label="$t('commons.table.name')" show-overflow-tooltip prop="name" />
@@ -98,7 +98,7 @@ import { deleteCert, searchCert, syncCert } from '@/api/modules/host';
 import i18n from '@/lang';
 import { MsgSuccess } from '@/utils/message';
 import Operate from '@/views/host/ssh/ssh/certification/operate/index.vue';
-import { copyText } from '@/utils/util';
+import { copyText } from '@/utils/clipboard';
 import { Base64 } from 'js-base64';
 import { reactive, ref } from 'vue';
 
@@ -261,6 +261,8 @@ const handleClose = () => {
 const buttons = [
     {
         label: i18n.global.t('commons.button.edit'),
+        permission: true,
+        nodeAdmin: true,
         click: (row: Host.RootCertInfo) => {
             onOpenDialog('edit', row);
         },
@@ -274,6 +276,8 @@ const buttons = [
     },
     {
         label: i18n.global.t('commons.button.delete'),
+        permission: true,
+        nodeAdmin: true,
         click: (row: Host.RootCertInfo) => {
             onDelete(row);
         },

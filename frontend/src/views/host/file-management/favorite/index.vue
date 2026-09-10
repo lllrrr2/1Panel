@@ -89,6 +89,8 @@ const buttons = [
     },
     {
         label: i18n.global.t('commons.button.delete'),
+        permission: true,
+        nodeAdmin: true,
         click: (row: any) => {
             singleDel(row.id);
         },

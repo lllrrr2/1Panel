@@ -1,7 +1,17 @@
 <template>
     <el-tabs v-model="activeTab" @tab-click="handleTabClick">
-        <el-tab-pane :label="t('aiTools.agents.browserTab')" name="browser">
-            <BrowserTab ref="browserRef" />
+        <el-tab-pane v-if="agentType === 'openclaw'" :label="t('aiTools.agents.securityTab')" name="security">
+            <SecurityTab ref="securityRef" />
+        </el-tab-pane>
+        <el-tab-pane :label="t('aiTools.agents.otherTab')" name="other">
+            <OtherTab ref="otherRef" />
+        </el-tab-pane>
+        <el-tab-pane
+            v-if="agentType === 'openclaw' || agentType === 'hermes-agent'"
+            :label="t('website.source')"
+            name="configFile"
+        >
+            <ConfigFileTab ref="configFileRef" />
         </el-tab-pane>
     </el-tabs>
 </template>
@@ -9,20 +19,41 @@
 <script setup lang="ts">
 import { nextTick, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import BrowserTab from './settings/browser.vue';
+import { AI } from '@/api/interface/ai';
+import SecurityTab from './settings/security.vue';
+import OtherTab from './settings/other.vue';
+import ConfigFileTab from './settings/config-file.vue';
 
 const { t } = useI18n();
-const activeTab = ref('browser');
+const activeTab = ref('security');
 const agentId = ref(0);
-const browserRef = ref();
+const appVersion = ref('');
+const agentType = ref<AI.AgentType>('openclaw');
+const securityRef = ref();
+const otherRef = ref();
+const configFileRef = ref();
 
 const loadCurrentTab = async () => {
     if (agentId.value <= 0) {
         return;
     }
     await nextTick();
-    if (activeTab.value === 'browser') {
-        await browserRef.value?.load(agentId.value);
+    if (activeTab.value === 'security') {
+        await securityRef.value?.load(agentId.value, appVersion.value);
+        return;
+    }
+    if (activeTab.value === 'other') {
+        await otherRef.value?.load({
+            agentId: agentId.value,
+            agentType: agentType.value,
+        });
+        return;
+    }
+    if (activeTab.value === 'configFile') {
+        await configFileRef.value?.load({
+            agentId: agentId.value,
+            agentType: agentType.value,
+        });
     }
 };
 
@@ -30,9 +61,11 @@ const handleTabClick = async () => {
     await loadCurrentTab();
 };
 
-const load = async (id: number) => {
-    agentId.value = id;
-    activeTab.value = 'browser';
+const load = async (params: { agentId: number; appVersion: string; agentType: AI.AgentType }) => {
+    agentId.value = params.agentId;
+    appVersion.value = params.appVersion;
+    agentType.value = params.agentType;
+    activeTab.value = agentType.value === 'openclaw' ? 'security' : 'other';
     await loadCurrentTab();
 };
 

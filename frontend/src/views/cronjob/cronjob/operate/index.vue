@@ -1,7 +1,7 @@
 <template>
     <LayoutContent
         back-name="CronjobItem"
-        :title="isCreate ? $t('cronjob.create') : $t('commons.button.edit') + ' - ' + form.name"
+        :title="isCreate ? $t('commons.button.create') : $t('commons.button.edit') + ' - ' + form.name"
     >
         <template #main>
             <el-form ref="formRef" label-position="top" :model="form" :rules="rules">
@@ -61,6 +61,12 @@
                                         @click="goRouter('/toolbox/device')"
                                         type="primary"
                                     >
+                                        {{ $t('firewall.quickJump') }}
+                                    </el-link>
+                                </span>
+                                <span class="input-help logText" v-if="form.type === 'syncIpGroup'">
+                                    {{ $t('cronjob.syncIpGroupHelper') }}
+                                    <el-link class="link" icon="Position" @click="goWafIpGroup" type="primary">
                                         {{ $t('firewall.quickJump') }}
                                     </el-link>
                                 </span>
@@ -308,6 +314,7 @@
                                             <el-option label="Mariadb" value="mariadb" />
                                             <el-option label="PostgreSQL" value="postgresql" />
                                             <el-option label="PostgreSQL-Cluster" value="postgresql-cluster" />
+                                            <el-option label="MongoDB" value="mongodb" />
                                         </el-select>
                                     </el-form-item>
                                 </LayoutCol>
@@ -345,17 +352,11 @@
                                         </el-select>
                                     </el-form-item>
                                 </LayoutCol>
-                                <LayoutCol
-                                    :span="20"
-                                    v-if="
-                                        form.type === 'database' &&
-                                        (form.dbType === 'mysql' || form.dbType === 'mysql-cluster')
-                                    "
-                                >
+                                <LayoutCol :span="20" v-if="form.type === 'database' && supportMysqlBackupArgs()">
                                     <el-form-item :label="$t('cronjob.backupArgs')">
                                         <el-select v-model="form.argItems" filterable allow-create multiple>
                                             <el-option
-                                                v-for="item in mysqlArgs"
+                                                v-for="item in loadMysqlArgs(form.dbType)"
                                                 :key="item.arg"
                                                 :value="item.arg"
                                                 :label="item.arg"
@@ -711,35 +712,44 @@
                                     >
                                         <el-select
                                             class="selectClass"
+                                            popper-class="alert-config-method-dropdown"
                                             v-model="form.alertMethodItems"
                                             multiple
                                             cleanable
+                                            collapse-tags
+                                            collapse-tags-tooltip
+                                            :max-collapse-tags="3"
                                         >
-                                            <el-option value="mail" :label="$t('xpack.alert.mail')" />
-                                            <el-option
-                                                value="weCom"
-                                                v-if="!globalStore.isIntl"
-                                                :disabled="!form.hasAlert || !isProductPro"
-                                                :label="$t('xpack.alert.weCom')"
-                                            />
-                                            <el-option
-                                                value="dingTalk"
-                                                v-if="!globalStore.isIntl"
-                                                :disabled="!form.hasAlert || !isProductPro"
-                                                :label="$t('xpack.alert.dingTalk')"
-                                            />
-                                            <el-option
-                                                value="feiShu"
-                                                v-if="!globalStore.isIntl"
-                                                :disabled="!form.hasAlert || !isProductPro"
-                                                :label="$t('xpack.alert.feiShu')"
-                                            />
-                                            <el-option
-                                                value="sms"
-                                                v-if="!globalStore.isIntl"
-                                                :disabled="!form.hasAlert || !isProductPro"
-                                                :label="$t('xpack.alert.sms')"
-                                            />
+                                            <el-option-group
+                                                v-for="group in groupedAlertConfigOptions"
+                                                :key="group.type"
+                                                :label="
+                                                    i18n.global.t(
+                                                        'xpack.alert.' + (group.type === 'email' ? 'mail' : group.type),
+                                                    )
+                                                "
+                                            >
+                                                <el-option
+                                                    v-for="opt in group.options"
+                                                    :key="opt.value"
+                                                    :value="opt.value"
+                                                    :label="opt.label"
+                                                >
+                                                    <div class="alert-config-option">
+                                                        <span class="alert-config-option__name" :title="opt.label">
+                                                            {{ opt.label }}
+                                                        </span>
+                                                        <el-tag
+                                                            class="alert-config-option__tag"
+                                                            effect="light"
+                                                            size="small"
+                                                            round
+                                                        >
+                                                            {{ opt.typeLabel }}
+                                                        </el-tag>
+                                                    </div>
+                                                </el-option>
+                                            </el-option-group>
                                         </el-select>
                                     </el-form-item>
                                 </LayoutCol>
@@ -826,7 +836,7 @@ import CodemirrorPro from '@/components/codemirror-pro/index.vue';
 import InputTag from '@/components/input-tag/index.vue';
 import LayoutCol from '@/components/layout-col/form.vue';
 import CleanLogConfig from '@/views/cronjob/cronjob/config/clean-log.vue';
-import { reactive, ref } from 'vue';
+import { reactive, ref, computed, onMounted } from 'vue';
 import { Rules } from '@/global/form-rules';
 import { listBackupOptions } from '@/api/modules/backup';
 import i18n from '@/lang';
@@ -840,6 +850,8 @@ import { useRouter } from 'vue-router';
 import { listContainer } from '@/api/modules/container';
 import { Database } from '@/api/interface/database';
 import { listAppInstalled } from '@/api/modules/app';
+import { Alert } from '@/api/interface/alert';
+import { ListAlertConfigs } from '@/api/modules/alert';
 import {
     loadDefaultSpec,
     loadDefaultSpecCustom,
@@ -848,25 +860,24 @@ import {
     transSpecToObj,
     weekOptions,
     cronjobTypes,
-    mysqlArgs,
+    loadMysqlArgs,
 } from '../helper';
 import { loadUsers } from '@/api/modules/toolbox';
 import { loadContainerUsers } from '@/api/modules/container';
-import { storeToRefs } from 'pinia';
-import { GlobalStore } from '@/store';
+import { useGlobalStore } from '@/composables/useGlobalStore';
 import LicenseImport from '@/components/license-import/index.vue';
-import { splitTimeFromSecond, transferTimeToSecond } from '@/utils/util';
+import { splitTimeFromSecond, transferTimeToSecond } from '@/utils/validate';
 import { getGroupList } from '@/api/modules/group';
 import { routerToName, routerToPath } from '@/utils/router';
 import { loadBaseDir } from '@/api/modules/setting';
+import { getAlertConfigDisplayName } from '@/views/setting/alert/setting/drawer/secret-field';
 const router = useRouter();
 
-const globalStore = GlobalStore();
+const { docsUrl, isFxplay, isProductPro } = useGlobalStore();
 const licenseRef = ref();
 const scriptFileRef = ref();
 const dirRef = ref();
 const fileRef = ref();
-const { isProductPro, isFxplay } = storeToRefs(globalStore);
 const loading = ref();
 const nextTimes = ref([]);
 
@@ -874,6 +885,99 @@ const baseDir = ref();
 
 const isCreate = ref();
 const defaultGroupID = ref();
+
+const alertConfigs = ref<Alert.AlertConfigInfo[]>([]);
+const loadAlertConfigs = async () => {
+    try {
+        const res = await ListAlertConfigs();
+        alertConfigs.value = res.data?.filter((item: Alert.AlertConfigInfo) => item.type !== 'common') || [];
+    } catch {}
+};
+onMounted(() => {
+    loadAlertConfigs();
+});
+
+const alertConfigOptions = computed(() => {
+    return alertConfigs.value
+        .filter((c) => c.status === 'Enable' && c.type !== 'common')
+        .map((c) => ({
+            value: String(c.id),
+            label: getAlertConfigOptionLabel(c),
+            type: c.type,
+        }));
+});
+
+const legacyAlertMethodTypeMap: Record<string, string> = {
+    mail: 'email',
+    email: 'email',
+    sms: 'sms',
+    bark: 'bark',
+    weCom: 'weCom',
+    dingTalk: 'dingTalk',
+    feiShu: 'feiShu',
+    webhook: 'custom',
+    custom: 'custom',
+};
+
+const normalizeAlertMethodItems = (methods: string[]) => {
+    return methods.map((method) => {
+        if (/^\d+$/.test(method)) return method;
+        const configType = legacyAlertMethodTypeMap[method];
+        const matched = alertConfigOptions.value.find((item) => item.type === configType);
+        return matched?.value || method;
+    });
+};
+
+const groupedAlertConfigOptions = computed(() => {
+    const typeMap = new Map<string, { value: string; label: string }[]>();
+    for (const opt of alertConfigOptions.value) {
+        if (!typeMap.has(opt.type)) typeMap.set(opt.type, []);
+        typeMap.get(opt.type)!.push({ value: opt.value, label: opt.label });
+    }
+    const groups: {
+        type: string;
+        options: { value: string; label: string; typeLabel: string }[];
+    }[] = [];
+    const typeOrder = ['email', 'sms', 'weCom', 'dingTalk', 'feiShu', 'bark', 'custom'];
+    for (const t of typeOrder) {
+        if (typeMap.has(t)) {
+            const typeLabel = getConfigTypeLabel(t);
+            groups.push({
+                type: t,
+                options: typeMap.get(t)!.map((item) => ({
+                    ...item,
+                    typeLabel,
+                })),
+            });
+        }
+    }
+    for (const [type, options] of typeMap) {
+        if (typeOrder.includes(type)) continue;
+        const typeLabel = getConfigTypeLabel(type);
+        groups.push({
+            type,
+            options: options.map((item) => ({ ...item, typeLabel })),
+        });
+    }
+    return groups;
+});
+
+const getConfigTypeLabel = (type: string): string => {
+    return i18n.global.t(`xpack.alert.${type === 'email' ? 'mail' : type}`);
+};
+
+const getAlertConfigOptionLabel = (c: Alert.AlertConfigInfo): string => {
+    try {
+        const cfg = JSON.parse(c.config || '{}') as Record<string, unknown>;
+        return (
+            getAlertConfigDisplayName(c.type, cfg) ||
+            i18n.global.t(`xpack.alert.${c.type === 'email' ? 'mail' : c.type}`)
+        );
+    } catch {
+        return i18n.global.t(`xpack.alert.${c.type === 'email' ? 'mail' : c.type}`);
+    }
+};
+
 const form = reactive<Cronjob.CronjobInfo>({
     id: 0,
     name: '',
@@ -1022,7 +1126,7 @@ const search = async () => {
                 form.retryTimes = res.data.retryTimes;
 
                 form.timeout = res.data.timeout || 3600;
-                let item = splitTimeFromSecond(form.timeout);
+                const item = splitTimeFromSecond(form.timeout);
                 form.timeoutItem = item.timeItem;
                 form.timeoutUnit = item.timeUnit;
 
@@ -1031,7 +1135,7 @@ const search = async () => {
                 form.alertCount = res.data.alertCount || 3;
                 form.alertTitle = res.data.alertTitle;
                 if (res.data.alertMethod) {
-                    form.alertMethodItems = res.data.alertMethod.split(',') || [];
+                    form.alertMethodItems = normalizeAlertMethodItems(res.data.alertMethod.split(',') || []);
                 } else {
                     form.alertMethodItems = [];
                 }
@@ -1057,6 +1161,11 @@ const search = async () => {
 
 const goRouter = async (path: string) => {
     routerToPath(path);
+};
+
+const goWafIpGroup = async () => {
+    localStorage.setItem('black-white-tab', '3');
+    routerToPath('/xpack/waf/blackwhite');
 };
 
 const containerOptions = ref([]);
@@ -1238,7 +1347,7 @@ const rules = reactive({
     downloadAccountID: [Rules.requiredSelect],
     retainCopies: [Rules.number],
     retryTimes: [Rules.number],
-    timeoutItem: [Rules.number],
+    timeoutItem: [Rules.integerNumber],
     timeoutUnit: [Rules.requiredSelect],
     alertCount: [Rules.integerNumber, { validator: checkSendCount, trigger: 'blur' }],
     alertMethodItems: [Rules.requiredSelect],
@@ -1249,7 +1358,7 @@ type FormInstance = InstanceType<typeof ElForm>;
 const formRef = ref<FormInstance>();
 
 const toDoc = () => {
-    window.open(globalStore.docsUrl + '/user_manual/cronjobs/', '_blank', 'noopener,noreferrer');
+    window.open(docsUrl.value + '/user_manual/cronjobs/', '_blank', 'noopener,noreferrer');
 };
 
 const loadDir = async (path: string) => {
@@ -1313,6 +1422,9 @@ const isDir = () => {
 };
 const isDatabase = () => {
     return form.type === 'database';
+};
+const supportMysqlBackupArgs = () => {
+    return ['mysql', 'mysql-cluster', 'mariadb'].includes(form.dbType);
 };
 
 const loadNext = async (spec: any) => {
@@ -1595,7 +1707,8 @@ onMounted(() => {
     width: 17% !important;
     margin-left: 20px;
     .append {
-        width: 20px;
+        margin-left: -10px;
+        width: 30px;
     }
 }
 @media only screen and (max-width: 1000px) {
@@ -1634,6 +1747,36 @@ onMounted(() => {
     font-size: 12px;
     margin-top: 5px;
 }
+
+.alert-config-option {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    width: 100%;
+    min-width: 0;
+}
+
+.alert-config-option__name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.alert-config-option__tag {
+    flex: 0 0 auto;
+}
+
+:global(.alert-config-method-dropdown .el-select-dropdown__item) {
+    padding-right: 52px;
+}
+
+:global(.alert-config-method-dropdown .el-select-dropdown__item.is-selected::after) {
+    right: 16px;
+}
+
 .logText {
     line-height: 22px;
     font-size: 12px;

@@ -2,8 +2,9 @@ package dto
 
 import (
 	"encoding/json"
-	"github.com/1Panel-dev/1Panel/agent/app/model"
 	"time"
+
+	"github.com/1Panel-dev/1Panel/agent/app/model"
 )
 
 type CreateOrUpdateAlert struct {
@@ -35,6 +36,15 @@ type AlertSearch struct {
 	Method  string `json:"method"`
 }
 
+type AlertConfigQuery struct {
+	ExcludeTypes []string `json:"excludeTypes"`
+}
+
+type AlertConfigPageReq struct {
+	PageInfo
+	ExcludeTypes []string `json:"excludeTypes"`
+}
+
 type AlertDTO struct {
 	ID             uint      `json:"id"`
 	Type           string    `json:"type"`
@@ -46,6 +56,8 @@ type AlertDTO struct {
 	Status         string    `json:"status"`
 	SendCount      uint      `json:"sendCount"`
 	AdvancedParams string    `json:"advancedParams"`
+	CreateUser     string    `json:"createUser"`
+	UpdateUser     string    `json:"updateUser"`
 	CreatedAt      time.Time `json:"createdAt"`
 	UpdatedAt      time.Time `json:"updatedAt"`
 }
@@ -101,8 +113,10 @@ type DiskDTO struct {
 
 type AlertLogSearch struct {
 	PageInfo
-	Count  uint   `json:"count"`
-	Status string `json:"status"`
+	Count     uint      `json:"count"`
+	Status    string    `json:"status"`
+	StartTime time.Time `json:"startTime"`
+	EndTime   time.Time `json:"endTime"`
 }
 
 type AlertLogDTO struct {
@@ -137,16 +151,25 @@ type AlertLog struct {
 }
 
 type AlertDetail struct {
-	LicenseId   string  `json:"licenseId"`
-	Type        string  `json:"type"`
-	SubType     string  `json:"subType"`
-	Title       string  `json:"title"`
-	Method      string  `json:"method"`
-	LicenseCode string  `json:"licenseCode"`
-	DeviceId    string  `json:"deviceId"`
-	Project     string  `json:"project"`
-	Params      []Param `json:"params"`
-	Phone       string  `json:"phone"`
+	LicenseId   string             `json:"licenseId"`
+	Type        string             `json:"type"`
+	SubType     string             `json:"subType"`
+	Title       string             `json:"title"`
+	Method      string             `json:"method"`
+	LicenseCode string             `json:"licenseCode"`
+	DeviceId    string             `json:"deviceId"`
+	Project     string             `json:"project"`
+	Params      []Param            `json:"params"`
+	Phone       string             `json:"phone"`
+	Task        *AlertTaskMetadata `json:"task,omitempty"`
+}
+
+type AlertTaskMetadata struct {
+	AlertID   uint   `json:"alertId"`
+	Type      string `json:"type"`
+	Quota     string `json:"quota"`
+	QuotaType string `json:"quotaType"`
+	Method    string `json:"method"`
 }
 
 type AlertRule struct {
@@ -281,14 +304,19 @@ type OfflineQueryRequest struct {
 }
 
 type AlertConfigUpdate struct {
-	ID     uint   `json:"id"`
-	Type   string `json:"type"`
-	Title  string `json:"title"`
-	Status string `json:"status"`
-	Config string `json:"config"`
+	ID          uint       `json:"id"`
+	Type        string     `json:"type"`
+	Title       string     `json:"title"`
+	Status      string     `json:"status"`
+	Config      string     `json:"config"`
+	DisplayName string     `json:"displayName"`
+	Revision    *time.Time `json:"revision"`
 }
 
 type AlertConfigTest struct {
+	ID          uint   `json:"id"`
+	Type        string `json:"type"`
+	Config      string `json:"config"`
 	Host        string `json:"host"`
 	Port        int    `json:"port"`
 	Sender      string `json:"sender"`

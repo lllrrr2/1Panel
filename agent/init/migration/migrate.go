@@ -5,16 +5,26 @@ import (
 	"github.com/1Panel-dev/1Panel/agent/init/migration/migrations"
 
 	"github.com/go-gormigrate/gormigrate/v2"
+	"gorm.io/gorm"
 )
 
 func Init() {
 	InitAgentDB()
 	InitTaskDB()
+	InitAlertDB()
 	global.LOG.Info("Migration run successfully")
 }
 
 func InitAgentDB() {
-	m := gormigrate.New(global.DB, gormigrate.DefaultOptions, []*gormigrate.Migration{
+	m := gormigrate.New(global.DB, gormigrate.DefaultOptions, agentDBMigrations())
+	if err := m.Migrate(); err != nil {
+		global.LOG.Error(err)
+		panic(err)
+	}
+}
+
+func agentDBMigrations() []*gormigrate.Migration {
+	return []*gormigrate.Migration{
 		migrations.AddTable,
 		migrations.AddMonitorTable,
 		migrations.InitSetting,
@@ -39,10 +49,12 @@ func InitAgentDB() {
 		migrations.UpdateWebsiteSSL,
 		migrations.AddQuickJump,
 		migrations.UpdateMcpServerAddType,
+		migrations.UpdateMcpServerGatewayConfig,
 		migrations.InitLocalSSHConn,
 		migrations.InitLocalSSHShow,
 		migrations.InitRecordStatus,
 		migrations.AddShowNameForQuickJump,
+		migrations.AddAgentQuickJump,
 		migrations.AddTimeoutForClam,
 		migrations.UpdateCronjobSpec,
 		migrations.UpdateWebsiteSSLAddColumn,
@@ -51,11 +63,11 @@ func InitAgentDB() {
 		migrations.AddMonitorProcess,
 		migrations.UpdateCronJob,
 		migrations.UpdateTensorrtLLM,
-		migrations.AddIptablesFilterRuleTable,
 		migrations.AddCommonDescription,
 		migrations.UpdateDatabase,
 		migrations.AddGPUMonitor,
 		migrations.UpdateDatabaseMysql,
+		migrations.AddDatabaseMongodb,
 		migrations.InitIptablesStatus,
 		migrations.UpdateWebsite,
 		migrations.AddisIPtoWebsiteSSL,
@@ -64,14 +76,40 @@ func InitAgentDB() {
 		migrations.AddCronjobArgs,
 		migrations.AddWebsiteAcmeAccountColumn,
 		migrations.AddAgentTables,
-		migrations.MigrateOpenclawAgents,
 		migrations.AddAgentCustomModelFields,
 		migrations.AddAppInstallSortOrder,
 		migrations.AddAgentAccountRememberAPIKey,
-	})
-	if err := m.Migrate(); err != nil {
-		global.LOG.Error(err)
-		panic(err)
+		migrations.AddEditionSetting,
+		migrations.AddAgentTypeForAgents,
+		migrations.NormalizeAgentAccountVerifiedStatus,
+		migrations.NormalizeOllamaAccountAPIType,
+		migrations.InitAgentAccountModelPool,
+		migrations.AddAgentAccountMasterID,
+		migrations.NormalizeAgentAccountModelIDs,
+		migrations.AddAgentAccountVerifyModel,
+		migrations.AddAgentAccountAuthMode,
+		migrations.AddHostTable,
+		migrations.AddAITerminalSettings,
+		migrations.UpdateAgentQuickJumpTitle,
+		migrations.FixOpenclaw20260323HTTPPort,
+		migrations.AddAgentRemarkColumn,
+		migrations.AddAgentWebsiteBinding,
+		migrations.AddFileManageAISettings,
+		migrations.AddFileShareTable,
+		migrations.AddFileHistoryTable,
+		migrations.MigrateLegoV5,
+		migrations.AddMcpServerGatewayArgs,
+		migrations.InitFirewallPortWhiteList,
+		migrations.AddDatabaseUserTable,
+		migrations.AddBackupRecordArgs,
+		migrations.AddFtpIdentity,
+		migrations.AddWebsiteTemplateTable,
+		migrations.AddComposePinned,
+		migrations.AddFirewallRuleTable,
+		migrations.InitDockerPortGuardStatus,
+		migrations.NormalizeFirewallBackendSelections,
+		migrations.SimplifyFirewallRulePolicy,
+		migrations.AddDockerPortGuardReadOnly,
 	}
 }
 
@@ -83,4 +121,24 @@ func InitTaskDB() {
 		global.LOG.Error(err)
 		panic(err)
 	}
+}
+
+func InitAlertDB() {
+	if err := migrateAlertDB(global.AlertDB); err != nil {
+		global.LOG.Error(err)
+		panic(err)
+	}
+}
+
+func migrateAlertDB(db *gorm.DB) error {
+	options := *gormigrate.DefaultOptions
+	options.UseTransaction = true
+	m := gormigrate.New(db, &options, []*gormigrate.Migration{
+		migrations.AddAlertConfigUIDAndSecret,
+		migrations.MigrateAlertMethodConfigIDs,
+		migrations.MigrateAlertLogTaskMethodConfigIDs,
+		migrations.AddAlertAuditUser,
+		migrations.AddAlertTaskDeliveryLogID,
+	})
+	return m.Migrate()
 }

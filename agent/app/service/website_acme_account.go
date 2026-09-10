@@ -59,8 +59,12 @@ func (w WebsiteAcmeAccountService) Create(create request.WebsiteAcmeAccountCreat
 		acmeAccount.CaDirURL = create.CaDirURL
 	}
 
-	client, err := ssl.NewAcmeClient(acmeAccount, getSystemProxy(acmeAccount.UseProxy))
-	if err != nil {
+	var client *ssl.AcmeClient
+	if err := withLegoLogger(nil, func() error {
+		var err error
+		client, err = ssl.NewRegisterClient(acmeAccount, getSystemProxy(acmeAccount.UseProxy))
+		return err
+	}); err != nil {
 		return nil, err
 	}
 	privateKey, err := ssl.GetPrivateKey(client.User.GetPrivateKey(), ssl.KeyType(create.KeyType))
@@ -68,7 +72,7 @@ func (w WebsiteAcmeAccountService) Create(create request.WebsiteAcmeAccountCreat
 		return nil, err
 	}
 	acmeAccount.PrivateKey = string(privateKey)
-	acmeAccount.URL = client.User.Registration.URI
+	acmeAccount.URL = client.User.Registration.Location
 
 	if err := websiteAcmeRepo.Create(*acmeAccount); err != nil {
 		return nil, err

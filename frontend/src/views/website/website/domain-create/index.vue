@@ -1,7 +1,7 @@
 <template>
     <div>
-        <el-row :gutter="22" v-for="(domain, index) of create.domains" :key="index">
-            <el-col :span="6">
+        <el-row class="domain-create-row" :gutter="22" v-for="(domain, index) of create.domains" :key="index">
+            <el-col class="domain-create-field domain-create-domain" :span="6" :xs="24">
                 <el-form-item
                     :label="index == 0 ? $t('website.domain') : ''"
                     :prop="`domains.${index}.domain`"
@@ -16,7 +16,7 @@
                     <span class="input-help" v-if="domainWarnings[index]">{{ $t('website.domainNotFQDN') }}</span>
                 </el-form-item>
             </el-col>
-            <el-col :span="6">
+            <el-col class="domain-create-field domain-create-host" :span="6" :xs="24">
                 <el-form-item :label="index == 0 ? $t('toolbox.device.hostname') : ''">
                     <el-input
                         type="string"
@@ -26,7 +26,7 @@
                     ></el-input>
                 </el-form-item>
             </el-col>
-            <el-col :span="4">
+            <el-col class="domain-create-field domain-create-port" :span="4" :xs="12">
                 <el-form-item
                     :label="index == 0 ? $t('commons.table.port') : ''"
                     :prop="`domains.${index}.port`"
@@ -35,34 +35,35 @@
                     <el-input type="number" v-model.number="create.domains[index].port"></el-input>
                 </el-form-item>
             </el-col>
-            <el-col :span="2">
+            <el-col class="domain-create-field domain-create-ssl" :span="2" :xs="6">
                 <el-form-item :label="index == 0 ? 'SSL' : ''" :prop="`domains.${index}.ssl`">
                     <el-checkbox
+                        class="domain-create-ssl-control"
                         v-model="create.domains[index].ssl"
                         :disabled="create.domains[index].port == 80"
                     ></el-checkbox>
                 </el-form-item>
             </el-col>
-            <el-col :span="4" v-if="index == 0">
-                <el-form-item :label="$t('commons.button.add') + $t('website.domain')">
-                    <el-button @click="addDomain">
+            <el-col class="domain-create-field domain-create-operation" :span="4" :xs="6" v-if="index == 0">
+                <el-form-item :label="$t('commons.table.operate')">
+                    <el-button v-permission :aria-label="$t('commons.button.add')" @click="addDomain">
                         <el-icon><Plus /></el-icon>
                     </el-button>
                 </el-form-item>
             </el-col>
-            <el-col :span="4" v-else>
+            <el-col class="domain-create-field domain-create-operation" :span="4" :xs="6" v-else>
                 <el-form-item>
-                    <el-button @click="removeDomain(index)">
+                    <el-button v-permission :aria-label="$t('commons.button.delete')" @click="removeDomain(index)">
                         <el-icon><Delete /></el-icon>
                     </el-button>
                 </el-form-item>
             </el-col>
         </el-row>
-        <el-button @click="openBatchDialog" type="primary" plain>
+        <el-button v-permission @click="openBatchDialog" type="primary" plain>
             {{ $t('website.batchInput') }}
         </el-button>
 
-        <el-dialog v-model="batchDialogVisible" :title="$t('website.batchAdd')" width="600px">
+        <DialogPro v-model="batchDialogVisible" :title="$t('website.batchAdd')" size="large">
             <el-input
                 type="textarea"
                 :rows="8"
@@ -71,11 +72,11 @@
             ></el-input>
             <template #footer>
                 <el-button @click="batchDialogVisible = false">{{ $t('commons.button.cancel') }}</el-button>
-                <el-button type="primary" @click="saveBatchInput" :disabled="create.domainStr == ''">
+                <el-button v-permission type="primary" @click="saveBatchInput" :disabled="create.domainStr == ''">
                     {{ $t('commons.button.confirm') }}
                 </el-button>
             </template>
-        </el-dialog>
+        </DialogPro>
     </div>
 </template>
 
@@ -381,3 +382,42 @@ onMounted(() => {
     handleParams();
 });
 </script>
+
+<style lang="scss" scoped>
+@media only screen and (max-width: 1024px) {
+    .domain-create-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(64px, 84px) minmax(64px, 84px);
+    }
+
+    .domain-create-field {
+        flex: none;
+        width: auto;
+        min-width: 0;
+        max-width: none;
+    }
+
+    .domain-create-domain,
+    .domain-create-host {
+        grid-column: 1 / -1;
+    }
+
+    .domain-create-port {
+        grid-column: 1;
+    }
+
+    .domain-create-ssl {
+        grid-column: 2;
+    }
+
+    .domain-create-operation {
+        grid-column: 3;
+    }
+
+    .domain-create-ssl-control {
+        min-width: 40px;
+        min-height: 32px;
+        margin-right: 0;
+    }
+}
+</style>

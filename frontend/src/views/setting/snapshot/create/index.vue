@@ -174,7 +174,9 @@
 <script lang="ts" setup>
 import { ref } from 'vue';
 import { loadBaseDir, loadSnapshotInfo, snapshotCreate } from '@/api/modules/setting';
-import { computeSize, newUUID, transferTimeToSecond } from '@/utils/util';
+import { computeSize } from '@/utils/size';
+import { newUUID } from '@/utils/id';
+import { transferTimeToSecond } from '@/utils/validate';
 import i18n from '@/lang';
 import TaskLog from '@/components/log/task/index.vue';
 import InputTag from '@/components/input-tag/index.vue';
@@ -400,6 +402,8 @@ const load18n = (node: any, label: string) => {
                 return i18n.global.t('setting.snapshotLabel');
             case 'master':
                 return i18n.global.t('xpack.node.masterBackup');
+            case 'file-history':
+                return i18n.global.t('file.file');
             default:
                 return label;
         }

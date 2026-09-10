@@ -4,7 +4,7 @@
 
         <div class="content-container__search">
             <el-card>
-                <div :class="mobile ? 'flx-wrap' : 'flex justify-between'">
+                <div class="monitor-toolbar monitor-toolbar--global">
                     <el-date-picker
                         @change="searchGlobal()"
                         v-model="timeRangeGlobal"
@@ -13,10 +13,10 @@
                         :start-placeholder="$t('commons.search.timeStart')"
                         :end-placeholder="$t('commons.search.timeEnd')"
                         :shortcuts="shortcuts"
-                        style="max-width: 360px; width: 100%"
-                        :size="mobile ? 'small' : 'default'"
+                        class="monitor-time-range"
+                        :size="isMobile ? 'small' : 'default'"
                     ></el-date-picker>
-                    <TableRefresh class="float-right" @search="searchGlobal()" />
+                    <TableRefresh class="monitor-refresh float-right" @search="searchGlobal()" />
                 </div>
             </el-card>
         </div>
@@ -24,7 +24,7 @@
             <el-col :span="24">
                 <el-card style="overflow: inherit">
                     <template #header>
-                        <div :class="mobile ? 'flx-wrap' : 'flex justify-between'">
+                        <div class="monitor-toolbar monitor-toolbar--card">
                             <span class="title">{{ $t('monitor.avgLoad') }}</span>
                             <el-date-picker
                                 @change="search('load')"
@@ -34,12 +34,12 @@
                                 :start-placeholder="$t('commons.search.timeStart')"
                                 :end-placeholder="$t('commons.search.timeEnd')"
                                 :shortcuts="shortcuts"
-                                style="max-width: 360px; width: 100%"
-                                :size="mobile ? 'small' : 'default'"
+                                class="monitor-time-range"
+                                :size="isMobile ? 'small' : 'default'"
                             ></el-date-picker>
                         </div>
                     </template>
-                    <div class="chart">
+                    <div class="chart" v-loading="loadingMap.load">
                         <v-charts
                             height="400px"
                             id="loadLoadChart"
@@ -56,7 +56,7 @@
             <el-col :xs="24" :sm="24" :md="12" :lg="12" :xl="12">
                 <el-card style="overflow: inherit">
                     <template #header>
-                        <div :class="mobile ? 'flx-wrap' : 'flex justify-between'">
+                        <div class="monitor-toolbar monitor-toolbar--card">
                             <span class="title">CPU</span>
                             <el-date-picker
                                 @change="search('cpu')"
@@ -66,12 +66,12 @@
                                 :start-placeholder="$t('commons.search.timeStart')"
                                 :end-placeholder="$t('commons.search.timeEnd')"
                                 :shortcuts="shortcuts"
-                                style="max-width: 360px; width: 100%"
-                                :size="mobile ? 'small' : 'default'"
+                                class="monitor-time-range"
+                                :size="isMobile ? 'small' : 'default'"
                             ></el-date-picker>
                         </div>
                     </template>
-                    <div class="chart">
+                    <div class="chart" v-loading="loadingMap.cpu">
                         <v-charts
                             height="400px"
                             id="loadCPUChart"
@@ -86,7 +86,7 @@
             <el-col :xs="24" :sm="24" :md="12" :lg="12" :xl="12">
                 <el-card style="overflow: inherit">
                     <template #header>
-                        <div :class="mobile ? 'flx-wrap' : 'flex justify-between'">
+                        <div class="monitor-toolbar monitor-toolbar--card">
                             <span class="title">{{ $t('monitor.memory') }}</span>
                             <el-date-picker
                                 @change="search('memory')"
@@ -96,12 +96,12 @@
                                 :start-placeholder="$t('commons.search.timeStart')"
                                 :end-placeholder="$t('commons.search.timeEnd')"
                                 :shortcuts="shortcuts"
-                                style="max-width: 360px; width: 100%"
-                                :size="mobile ? 'small' : 'default'"
+                                class="monitor-time-range"
+                                :size="isMobile ? 'small' : 'default'"
                             ></el-date-picker>
                         </div>
                     </template>
-                    <div class="chart">
+                    <div class="chart" v-loading="loadingMap.memory">
                         <v-charts
                             height="400px"
                             id="loadMemoryChart"
@@ -118,7 +118,7 @@
             <el-col :xs="24" :sm="24" :md="12" :lg="12" :xl="12">
                 <el-card style="overflow: inherit">
                     <template #header>
-                        <div :class="mobile ? 'flx-wrap' : 'flex justify-between'">
+                        <div class="monitor-toolbar monitor-toolbar--card">
                             <div>
                                 <span class="title">{{ $t('monitor.disk') }} I/O{{ $t('commons.colon') }}</span>
                                 <el-dropdown max-height="300px">
@@ -147,12 +147,12 @@
                                 :start-placeholder="$t('commons.search.timeStart')"
                                 :end-placeholder="$t('commons.search.timeEnd')"
                                 :shortcuts="shortcuts"
-                                style="max-width: 360px; width: 100%"
-                                :size="mobile ? 'small' : 'default'"
+                                class="monitor-time-range"
+                                :size="isMobile ? 'small' : 'default'"
                             ></el-date-picker>
                         </div>
                     </template>
-                    <div class="chart">
+                    <div class="chart" v-loading="loadingMap.io">
                         <v-charts
                             height="400px"
                             id="loadIOChart"
@@ -167,7 +167,7 @@
             <el-col :xs="24" :sm="24" :md="12" :lg="12" :xl="12">
                 <el-card style="overflow: inherit">
                     <template #header>
-                        <div :class="mobile ? 'flx-wrap' : 'flex justify-between'">
+                        <div class="monitor-toolbar monitor-toolbar--card">
                             <div>
                                 <span class="title">{{ $t('monitor.network') }}{{ $t('commons.colon') }}</span>
                                 <el-dropdown max-height="300px">
@@ -196,12 +196,12 @@
                                 :start-placeholder="$t('commons.search.timeStart')"
                                 :end-placeholder="$t('commons.search.timeEnd')"
                                 :shortcuts="shortcuts"
-                                style="max-width: 360px; width: 100%"
-                                :size="mobile ? 'small' : 'default'"
+                                class="monitor-time-range"
+                                :size="isMobile ? 'small' : 'default'"
                             ></el-date-picker>
                         </div>
                     </template>
-                    <div class="chart">
+                    <div class="chart" v-loading="loadingMap.network">
                         <v-charts
                             height="400px"
                             id="loadNetworkChart"
@@ -218,20 +218,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, computed } from 'vue';
+import { ref, reactive, onMounted, watch } from 'vue';
 import { loadMonitor, getNetworkOptions, getIOOptions } from '@/api/modules/host';
-import { computeSize, computeSizeFromKBs, dateFormatWithoutYear } from '@/utils/util';
+import { computeSize, computeSizeFromKBs } from '@/utils/size';
+import { dateFormatWithoutYear } from '@/utils/date';
 import i18n from '@/lang';
 import MonitorRouter from '@/views/host/monitor/index.vue';
-import { GlobalStore } from '@/store';
+import { useGlobalStore } from '@/composables/useGlobalStore';
 import { shortcuts } from '@/utils/shortcuts';
 import { Host } from '@/api/interface/host';
 
-const globalStore = GlobalStore();
-
-const mobile = computed(() => {
-    return globalStore.isMobile();
-});
+const { defaultIO, defaultNetwork, isMobile } = useGlobalStore();
 
 const monitorBase = ref();
 const timeRangeGlobal = ref<[Date, Date]>([new Date(new Date().setHours(0, 0, 0, 0)), new Date()]);
@@ -244,7 +241,76 @@ const networkChoose = ref();
 const netOptions = ref();
 const ioChoose = ref();
 const ioOptions = ref();
-const chartsOption = ref({ loadLoadChart: null, loadCPUChart: null, loadMemoryChart: null, loadNetworkChart: null });
+const chartsOption = ref<Record<string, any>>({
+    loadLoadChart: null,
+    loadCPUChart: null,
+    loadMemoryChart: null,
+    loadIOChart: null,
+    loadNetworkChart: null,
+});
+const loadingMap = reactive({
+    load: false,
+    cpu: false,
+    memory: false,
+    io: false,
+    network: false,
+});
+
+const getLoadChartGrid = () =>
+    isMobile.value ? { left: 8, right: 8, top: 64, bottom: '20%', containLabel: true } : undefined;
+const getMultiSeriesChartLegend = () =>
+    isMobile.value
+        ? { show: true, type: 'scroll', orient: 'horizontal', left: 8, right: 8, top: 0, bottom: null }
+        : { show: true, type: 'plain', orient: 'horizontal', left: 'center', top: null, bottom: 15 };
+const getTransferChartGrid = () =>
+    isMobile.value
+        ? { left: 8, right: 8, top: 64, bottom: 110, containLabel: true }
+        : { left: getSideWidth(true), right: getSideWidth(true), bottom: '20%' };
+const getSingleSeriesChartGrid = () =>
+    isMobile.value ? { left: 8, right: 8, top: 40, bottom: 110, containLabel: true } : undefined;
+const getSingleSeriesChartLegend = () =>
+    isMobile.value
+        ? { show: true, type: 'plain', top: 0, bottom: null, left: 'center', right: null }
+        : { show: true, type: 'plain', top: null, bottom: 15, left: 'center' };
+const getMobileChartXAxis = () =>
+    isMobile.value ? { axisLabel: { interval: 'auto', hideOverlap: true, fontSize: 10 } } : undefined;
+
+watch(isMobile, () => {
+    const loadOption = chartsOption.value.loadLoadChart;
+    if (loadOption) {
+        chartsOption.value.loadLoadChart = {
+            ...loadOption,
+            grid: getLoadChartGrid(),
+            legend: getMultiSeriesChartLegend(),
+        };
+    }
+
+    for (const chartKey of ['loadCPUChart', 'loadMemoryChart']) {
+        const chartOption = chartsOption.value[chartKey];
+        if (!chartOption) {
+            continue;
+        }
+        chartsOption.value[chartKey] = {
+            ...chartOption,
+            grid: getSingleSeriesChartGrid(),
+            legend: getSingleSeriesChartLegend(),
+            xAxis: getMobileChartXAxis(),
+        };
+    }
+
+    for (const chartKey of ['loadIOChart', 'loadNetworkChart']) {
+        const chartOption = chartsOption.value[chartKey];
+        if (!chartOption) {
+            continue;
+        }
+        chartsOption.value[chartKey] = {
+            ...chartOption,
+            grid: getTransferChartGrid(),
+            legend: getMultiSeriesChartLegend(),
+            xAxis: getMobileChartXAxis(),
+        };
+    }
+});
 
 const searchTime = ref();
 const searchInfo = reactive<Host.MonitorSearch>({
@@ -298,36 +364,41 @@ const search = async (param: string) => {
         searchInfo.startTime = searchTime.value[0];
         searchInfo.endTime = searchTime.value[1];
     }
-    const res = await loadMonitor(searchInfo);
-    monitorBase.value = res.data;
-    for (const item of monitorBase.value) {
-        if (!item.value) {
-            item.value = [];
-            item.date = [];
+    setChartLoading(param, true);
+    try {
+        const res = await loadMonitor(searchInfo);
+        monitorBase.value = res.data;
+        for (const item of monitorBase.value) {
+            if (!item.value) {
+                item.value = [];
+                item.date = [];
+            }
+            switch (item.param) {
+                case 'base':
+                    let baseDate = item.date.length === 0 ? loadEmptyDate(timeRangeCpu.value) : item.date;
+                    baseDate = baseDate.map(function (item: any) {
+                        return dateFormatWithoutYear(item);
+                    });
+                    if (param === 'cpu' || param === 'all') {
+                        initCPUCharts(baseDate, item);
+                    }
+                    if (param === 'memory' || param === 'all') {
+                        initMemCharts(baseDate, item);
+                    }
+                    if (param === 'load' || param === 'all') {
+                        initLoadCharts(item);
+                    }
+                    break;
+                case 'io':
+                    initIOCharts(item);
+                    break;
+                case 'network':
+                    initNetCharts(item);
+                    break;
+            }
         }
-        switch (item.param) {
-            case 'base':
-                let baseDate = item.date.length === 0 ? loadEmptyDate(timeRangeCpu.value) : item.date;
-                baseDate = baseDate.map(function (item: any) {
-                    return dateFormatWithoutYear(item);
-                });
-                if (param === 'cpu' || param === 'all') {
-                    initCPUCharts(baseDate, item);
-                }
-                if (param === 'memory' || param === 'all') {
-                    initMemCharts(baseDate, item);
-                }
-                if (param === 'load' || param === 'all') {
-                    initLoadCharts(item);
-                }
-                break;
-            case 'io':
-                initIOCharts(item);
-                break;
-            case 'network':
-                initNetCharts(item);
-                break;
-        }
+    } finally {
+        setChartLoading(param, false);
     }
 };
 
@@ -344,15 +415,43 @@ const changeIO = (item: string) => {
 const loadOptions = async () => {
     const res = await getNetworkOptions();
     netOptions.value = res.data;
-    searchInfo.network = globalStore.defaultNetwork || (netOptions.value && netOptions.value[0]);
+    searchInfo.network = defaultNetwork.value || (netOptions.value && netOptions.value[0]);
     networkChoose.value = searchInfo.network;
 
     const res1 = await getIOOptions();
     ioOptions.value = res1.data;
-    searchInfo.io = globalStore.defaultIO || (ioOptions.value && ioOptions.value[0]);
+    searchInfo.io = defaultIO.value || (ioOptions.value && ioOptions.value[0]);
     ioChoose.value = searchInfo.io;
 
     search('all');
+};
+
+const setChartLoading = (param: string, value: boolean) => {
+    if (param === 'all') {
+        loadingMap.load = value;
+        loadingMap.cpu = value;
+        loadingMap.memory = value;
+        loadingMap.io = value;
+        loadingMap.network = value;
+        return;
+    }
+    switch (param) {
+        case 'load':
+            loadingMap.load = value;
+            break;
+        case 'cpu':
+            loadingMap.cpu = value;
+            break;
+        case 'memory':
+            loadingMap.memory = value;
+            break;
+        case 'io':
+            loadingMap.io = value;
+            break;
+        case 'network':
+            loadingMap.network = value;
+            break;
+    }
 };
 
 function initLoadCharts(item: Host.MonitorData) {
@@ -406,7 +505,8 @@ function initLoadCharts(item: Host.MonitorData) {
                 alignTicks: true,
             },
         ],
-        grid: mobile.value ? { left: '15%', right: '15%', bottom: '20%' } : null,
+        grid: getLoadChartGrid(),
+        legend: getMultiSeriesChartLegend(),
         tooltip: {
             trigger: 'axis',
             formatter: function (datas: any) {
@@ -435,7 +535,9 @@ function initCPUCharts(baseDate: any, items: Host.MonitorData) {
                 return withCPUProcess(datas);
             },
         },
-
+        grid: getSingleSeriesChartGrid(),
+        legend: getSingleSeriesChartLegend(),
+        xAxis: getMobileChartXAxis(),
         formatStr: '%',
     };
 }
@@ -459,7 +561,9 @@ function initMemCharts(baseDate: any, items: Host.MonitorData) {
                 return withMemProcess(datas);
             },
         },
-
+        grid: getSingleSeriesChartGrid(),
+        legend: getSingleSeriesChartLegend(),
+        xAxis: getMobileChartXAxis(),
         formatStr: '%',
     };
 }
@@ -500,11 +604,9 @@ function initNetCharts(item: Host.MonitorData) {
                 return res;
             },
         },
-        grid: {
-            left: getSideWidth(true),
-            right: getSideWidth(true),
-            bottom: '20%',
-        },
+        grid: getTransferChartGrid(),
+        legend: getMultiSeriesChartLegend(),
+        xAxis: getMobileChartXAxis(),
         formatStr: 'KB/s',
     };
 }
@@ -573,7 +675,9 @@ function initIOCharts(item: Host.MonitorData) {
                 return res;
             },
         },
-        grid: { left: getSideWidth(true), right: getSideWidth(true), bottom: '20%' },
+        grid: getTransferChartGrid(),
+        legend: getMultiSeriesChartLegend(),
+        xAxis: getMobileChartXAxis(),
         yAxis: [
             { type: 'value', name: '( KB/s )', axisLabel: { fontSize: 10 } },
             {
@@ -740,8 +844,54 @@ onMounted(() => {
 .chart {
     width: 100%;
     height: 400px;
+    min-width: 0;
 }
 .el-dropdown {
     vertical-align: baseline;
+}
+
+.monitor-toolbar {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+
+    > :first-child {
+        min-width: 0;
+    }
+}
+
+.monitor-toolbar :deep(.monitor-time-range) {
+    width: 100%;
+    min-width: 0;
+    max-width: 360px;
+    flex: 0 1 360px;
+}
+
+@media only screen and (max-width: 1024px) {
+    .monitor-toolbar--card {
+        flex-wrap: wrap;
+
+        :deep(.monitor-time-range) {
+            max-width: none;
+            flex-basis: 100%;
+        }
+    }
+}
+
+@media only screen and (max-width: 767px) {
+    .monitor-toolbar--global {
+        flex-wrap: wrap;
+
+        :deep(.monitor-time-range) {
+            max-width: none;
+            flex-basis: 100%;
+        }
+
+        :deep(.monitor-refresh) {
+            margin-left: auto;
+        }
+    }
 }
 </style>

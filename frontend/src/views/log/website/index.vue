@@ -34,15 +34,15 @@
                         {{ $t('commons.button.watch') }}
                     </el-checkbox>
                 </el-button>
-                <el-button @click="onDownload" icon="Download" :disabled="!hasContent">
+                <el-button v-permission @click="onDownload" icon="Download" :disabled="!hasContent">
                     {{ $t('commons.button.download') }}
                 </el-button>
-                <el-button type="primary" plain @click="onClean()" :disabled="!hasContent">
+                <el-button v-permission type="primary" plain @click="onClean()" :disabled="!hasContent">
                     {{ $t('logs.deleteLogs') }}
                 </el-button>
             </template>
             <template #main>
-                <MainDiv :heightDiff="370">
+                <MainDiv :heightDiff="330">
                     <LogFile
                         ref="logRef"
                         :config="logConfig"

@@ -1,6 +1,7 @@
 <template>
     <div>
         <el-popover
+            v-model:visible="popoverVisible"
             placement="right-end"
             :show-arrow="false"
             :offset="0"
@@ -12,156 +13,172 @@
             <template #reference>
                 <div class="el-dropdown-link" v-if="!menuStore.isCollapse">
                     <el-badge is-dot :value="taskCount" :show-zero="false" :offset="[5, 5]">
-                        <el-button link @click="openChangeNode" @mouseenter="openChangeNode">
-                            <SvgIcon class="icon" iconName="p-gerenzhongxin1" />
+                        <el-button link>
+                            <SvgIcon class="icon" iconName="p-pcm" />
                             <span class="ellipsis-text">{{ loadCurrentName() }}</span>
                         </el-button>
                     </el-badge>
                 </div>
                 <div v-else class="el-dropdown-link">
                     <el-badge is-dot :value="taskCount" :show-zero="false" :offset="[-5, 5]">
-                        <SvgIcon class="icon" iconName="p-gerenzhongxin1" />
+                        <SvgIcon class="icon" iconName="p-pcm" />
                     </el-badge>
                 </div>
             </template>
-            <div class="dropdown-menu" v-loading="loading">
-                <div class="dropdown-item mb-2" @click="openTask">
+            <div class="dropdown-menu" v-loading="loading || switchingNode">
+                <div class="dropdown-item" v-if="currentUser" @click="changeUserInfo">
+                    <SvgIcon class="icon" iconName="p-gerenzhongxin1" />
+                    {{ currentUser.name }}
+                </div>
+                <el-divider class="divider" />
+
+                <div class="dropdown-item" @click="openTask">
+                    <SvgIcon class="icon" iconName="p-renwuzhongxin1" />
                     {{ $t('menu.msgCenter') }}
                     <el-tag class="msg-tag" v-if="taskCount !== 0" size="small" round>{{ taskCount }}</el-tag>
                 </div>
                 <el-divider v-if="showNodes()" class="divider" />
+                <div class="dropdown-item" @click="openNodeDashboard" v-if="isXpackOrEE">
+                    <SvgIcon class="icon" iconName="p-gailan1" />
+                    {{ $t('xpack.node.multiOverview') }}
+                </div>
+                <el-divider v-if="isXpackOrEE" class="divider" />
 
-                <div v-if="showNodes()" class="mb-2">
-                    <el-scrollbar max-height="168px" :noresize="true">
+                <div v-if="showNodes()">
+                    <el-scrollbar max-height="288px" :noresize="true">
                         <div
-                            class="dropdown-item mt-1"
+                            class="dropdown-item"
                             @click="changeNode(item.name)"
                             :disabled="item.status !== 'Healthy'"
-                            v-for="item in nodeOptions"
+                            v-for="item in visibleNodeOptions"
                             :key="item.name"
                         >
-                            <div class="node" v-if="item.name !== 'local'">
-                                {{ item.name }}
-                                <el-tooltip
-                                    v-if="item.status !== 'Healthy' || !item.isBound"
-                                    :content="
-                                        item.isBound ? $t('xpack.node.nodeUnhealthy') : $t('xpack.node.nodeUnbind')
-                                    "
-                                    placement="right"
-                                >
-                                    <el-icon class="icon-status" type="danger">
-                                        <Warning />
-                                    </el-icon>
-                                </el-tooltip>
-                            </div>
+                            <SvgIcon class="icon" iconName="p-zhuji" />
+                            <span class="node-name">{{ displayNodeName(item) }}</span>
+                            <el-tooltip
+                                v-if="item.status !== 'Healthy' || !item.isBound"
+                                :content="item.isBound ? $t('xpack.node.nodeUnhealthy') : $t('xpack.node.nodeUnbind')"
+                                placement="right"
+                            >
+                                <el-icon class="icon-status" type="danger">
+                                    <Warning />
+                                </el-icon>
+                            </el-tooltip>
                         </div>
                     </el-scrollbar>
-                    <div class="dropdown-item -mb-1" @click="changeNode('local')">
-                        <div class="node">{{ globalStore.getMasterAlias() }}</div>
+                    <div v-if="showMoreNodes" class="dropdown-item more-node-button" @click.stop="openNodeDrawer">
+                        <span class="more-node-label">{{ $t('tabs.more') }}</span>
+                        <span class="more-node-count">+{{ nodeOptions.length - defaultNodeLimit }}</span>
+                        <el-icon class="more-node-arrow">
+                            <ArrowRight />
+                        </el-icon>
                     </div>
                 </div>
-                <el-input
-                    v-if="showNodes() && nodes?.length > 5"
-                    suffix-icon="Search"
-                    v-model="filter"
-                    @input="changeFilter"
-                    class="w-full filter-input"
-                    size="small"
-                    clearable
-                />
                 <el-divider class="divider" />
-                <div class="dropdown-item mt-2" @click="logout">{{ $t('commons.login.logout') }}</div>
+                <div class="dropdown-item" @click="logout">
+                    <SvgIcon class="icon" iconName="p-tuichudenglu3" />
+                    {{ $t('commons.login.logout') }}
+                </div>
             </div>
         </el-popover>
+        <NodeDrawer
+            v-model="nodeDrawerVisible"
+            :nodes="nodeOptions"
+            :master-alias="globalStore.getMasterAlias()"
+            @change="changeNode"
+            @favorite-change="handleFavoriteChange"
+        />
+        <UserInfo ref="userInfoRef" :currentUser="currentUser" @search="loadCurrentUser()" />
     </div>
 </template>
 
 <script setup lang="ts">
-import { GlobalStore, MenuStore } from '@/store';
-import { DropdownInstance } from 'element-plus';
+import { MenuStore } from '@/store';
 import { countExecutingTask } from '@/api/modules/log';
 import { MsgError, MsgSuccess } from '@/utils/message';
 import i18n from '@/lang';
-import { getAgentSettingInfo, listNodeOptions } from '@/api/modules/setting';
-import { ref, watch } from 'vue';
+import { getAgentSettingInfo } from '@/api/modules/setting';
+import { computed, onMounted, ref } from 'vue';
 import bus from '@/global/bus';
 import { logOutApi } from '@/api/modules/auth';
+import { submitSAML2Navigation } from '@/utils/saml2';
 import router from '@/routers';
 import { loadProductProFromDB } from '@/utils/xpack';
 import { routerToNameWithQuery } from '@/utils/router';
-import { setDefaultNodeInfo } from '@/utils/node';
+import { changeToLocal, listNodes, setDefaultNodeInfo } from '@/utils/node';
+import { Login } from '@/api/interface/auth';
+import { syncAuthInfo } from '@/utils/rbac';
+import UserInfo from './user-info/index.vue';
+import NodeDrawer from './node-drawer/index.vue';
+import { useGlobalStore } from '@/composables/useGlobalStore';
 
-const filter = ref();
-const globalStore = GlobalStore();
+const currentUser = ref<Login.AuthInfo>();
+const { globalStore, currentNode, currentNodeAddr, defaultNetwork, entrance, isEnterprise, isXpackOrEE } =
+    useGlobalStore();
 const menuStore = MenuStore();
 const nodes = ref([]);
 const nodeOptions = ref([]);
 const loading = ref();
-const nodeChangeRef = ref<DropdownInstance>();
+const switchingNode = ref(false);
+const popoverVisible = ref(false);
+const nodeDrawerVisible = ref(false);
+const userInfoRef = ref();
 const props = defineProps({
     version: String,
 });
-const isMasterPro = computed(() => {
-    return globalStore.isMasterPro();
-});
-watch(
-    () => globalStore.isMasterPro(),
-    () => {
-        loadNodes();
-    },
-);
 
-const emit = defineEmits(['openTask']);
+const defaultNodeLimit = 8;
+
+const emit = defineEmits(['openTask', 'refresh']);
 bus.on('refreshTask', () => {
     checkTask();
 });
 
-const openChangeNode = () => {
-    nodeChangeRef.value?.handleOpen();
-};
-
 const loadCurrentName = () => {
-    if (globalStore.currentNode) {
-        if (globalStore.currentNode === 'local') {
+    if (currentNode.value) {
+        if (currentNode.value === 'local') {
             return globalStore.getMasterAlias();
         }
-        return globalStore.currentNode;
+        return currentNode.value;
     }
     return globalStore.getMasterAlias();
 };
 
-const showPopover = () => {
-    filter.value = '';
-    loadNodes();
-    changeFilter();
+const visibleNodeOptions = computed(() => {
+    return nodeOptions.value.slice(0, defaultNodeLimit);
+});
+const showMoreNodes = computed(() => {
+    return nodeOptions.value.length > defaultNodeLimit;
+});
+
+const showPopover = async () => {
+    await loadNodes();
 };
 
-const changeFilter = () => {
-    nodeOptions.value = [];
-    for (const item of nodes.value) {
-        if (item.name.indexOf(filter.value) !== -1) {
-            nodeOptions.value.push(item);
-        }
-    }
+const displayNodeName = (item) => {
+    return item.name === 'local' ? globalStore.getMasterAlias() : item.name;
+};
+
+const openNodeDrawer = () => {
+    nodeDrawerVisible.value = true;
+    popoverVisible.value = false;
+};
+
+const handleFavoriteChange = async () => {
+    await loadNodes();
 };
 
 const loadNodes = async () => {
     loading.value = true;
     nodes.value = [];
-    if (!isMasterPro.value) {
-        setDefaultNodeInfo();
+    if (!isXpackOrEE.value) {
+        changeToLocal();
         loading.value = false;
         return;
     }
-    await listNodeOptions('all')
+    await listNodes('all')
         .then((res) => {
-            if (!res) {
-                nodes.value = [];
-                setDefaultNodeInfo();
-                loading.value = false;
-                return;
-            }
-            nodes.value = res.data || [];
+            nodes.value = res || [];
             if (nodes.value.length === 0) {
                 setDefaultNodeInfo();
             }
@@ -169,57 +186,73 @@ const loadNodes = async () => {
             loading.value = false;
         })
         .catch(() => {
-            nodes.value = [];
+            setDefaultNodeInfo();
             loading.value = false;
         });
 };
-const changeNode = (command: string) => {
-    if (globalStore.currentNode === command) {
+const changeNode = async (command: string) => {
+    if (currentNode.value === command || switchingNode.value) {
         return;
     }
-    for (const item of nodes.value) {
-        if (item.name == command) {
-            if (command == 'local') {
-                globalStore.currentNode = 'local';
-                globalStore.currentNodeAddr = item.addr;
-                loadGlobalSetting();
+    switchingNode.value = true;
+    try {
+        for (const item of nodes.value) {
+            if (item.name == command) {
+                if (command == 'local') {
+                    if (isEnterprise.value) {
+                        await loadCurrentUser('local');
+                    }
+                    await loadGlobalSetting('local');
+                    currentNode.value = 'local';
+                    currentNodeAddr.value = item.addr;
+                    localStorage.removeItem('dashboardCache');
+                    localStorage.removeItem('upgradeChecked');
+                    menuStore.setMenuList([]);
+                    emit('refresh');
+                    loadProductProFromDB();
+                    routerToNameWithQuery('home', { t: Date.now() });
+                    return;
+                }
+                if (!item.isBound) {
+                    MsgError(i18n.global.t('xpack.node.nodeUnbindHelper'));
+                    return;
+                }
+                if (item.status !== 'Healthy') {
+                    MsgError(i18n.global.t('xpack.node.nodeUnhealthyHelper'));
+                    return;
+                }
+                if (props.version != item.version) {
+                    MsgError(i18n.global.t('setting.versionNotSame'));
+                    return;
+                }
+                await loadGlobalSetting(command);
                 localStorage.removeItem('dashboardCache');
                 localStorage.removeItem('upgradeChecked');
+                currentNode.value = command;
+                currentNodeAddr.value = item.addr;
+                if (isEnterprise.value) {
+                    await loadCurrentUser(command);
+                }
+                menuStore.setMenuList([]);
+                emit('refresh');
                 loadProductProFromDB();
                 routerToNameWithQuery('home', { t: Date.now() });
                 return;
             }
-            if (!item.isBound) {
-                MsgError(i18n.global.t('xpack.node.nodeUnbindHelper'));
-                return;
-            }
-            if (item.status !== 'Healthy') {
-                MsgError(i18n.global.t('xpack.node.nodeUnhealthyHelper'));
-                return;
-            }
-            if (props.version != item.version) {
-                MsgError(i18n.global.t('setting.versionNotSame'));
-                return;
-            }
-            loadGlobalSetting();
-            localStorage.removeItem('dashboardCache');
-            localStorage.removeItem('upgradeChecked');
-            globalStore.currentNode = command || 'local';
-            globalStore.currentNodeAddr = item.addr;
-            loadProductProFromDB();
-            routerToNameWithQuery('home', { t: Date.now() });
         }
+    } finally {
+        switchingNode.value = false;
     }
 };
 
-const loadGlobalSetting = async () => {
-    await getAgentSettingInfo().then((res) => {
-        globalStore.defaultNetwork = res.data.defaultNetwork;
+const loadGlobalSetting = async (currentNode?: string) => {
+    await getAgentSettingInfo(currentNode).then((res) => {
+        defaultNetwork.value = res.data.defaultNetwork;
     });
 };
 
 const showNodes = () => {
-    return nodes.value.length > 0 && isMasterPro;
+    return nodes.value.length > 0 && isXpackOrEE.value;
 };
 
 const taskCount = ref(0);
@@ -234,6 +267,10 @@ const openTask = () => {
     emit('openTask');
 };
 
+const openNodeDashboard = () => {
+    routerToNameWithQuery('NodeDashboard', { uncached: 'true' });
+};
+
 const logout = () => {
     ElMessageBox.confirm(i18n.global.t('commons.msg.sureLogOut'), i18n.global.t('commons.msg.infoTitle'), {
         confirmButtonText: i18n.global.t('commons.button.confirm'),
@@ -241,17 +278,36 @@ const logout = () => {
         type: 'warning',
     })
         .then(async () => {
-            await logOutApi();
-            router.push({ name: 'entrance', params: { code: globalStore.entrance } });
+            const res = await logOutApi();
             globalStore.setLogStatus(false);
+            globalStore.clearAuthInfo();
+            if (res.data?.saml2Navigation) {
+                try {
+                    submitSAML2Navigation(res.data.saml2Navigation);
+                    return;
+                } catch {}
+            }
+            router.push({ name: 'entrance', params: { code: entrance.value } });
             MsgSuccess(i18n.global.t('commons.msg.operationSuccess'));
         })
         .catch(() => {});
 };
 
+const loadCurrentUser = async (currentNode?: string) => {
+    const authInfo = await syncAuthInfo(currentNode);
+    if (authInfo) {
+        currentUser.value = authInfo;
+    }
+};
+const changeUserInfo = () => {
+    loadCurrentUser();
+    userInfoRef.value?.openDrawer();
+};
+
 onMounted(() => {
     loadNodes();
     checkTask();
+    loadCurrentUser();
 });
 </script>
 
@@ -298,20 +354,21 @@ onMounted(() => {
 }
 
 .dropdown-item {
-    padding: 2px 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 8px;
     cursor: pointer;
+    line-height: 26px;
     transition: background 0.3s;
     .icon {
-        font-size: 6px;
+        font-size: 8px;
     }
     .icon-status {
-        float: right;
-        font-size: 18px;
-    }
-    .node {
-        padding: 3px 0;
+        font-size: 16px;
     }
     .msg-tag {
+        margin-top: 3px;
         float: right;
         background-color: transparent;
         color: var(--panel-main-bg-color-1);
@@ -326,12 +383,41 @@ onMounted(() => {
         }
     }
 }
-.filter-input {
-    padding: 0 8px;
-    margin-bottom: 4px;
+.node-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
-.dropdown-item:hover {
-    background: var(--el-menu-item-bg-color-active);
+.more-node-button {
+    margin: 4px 8px 0;
+    padding: 5px 8px 5px 26px;
+    border-radius: 4px;
+    color: var(--el-color-primary);
+    font-size: 12px;
+    line-height: 24px;
+}
+.more-node-label {
+    flex: 1;
+    min-width: 0;
+}
+.more-node-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 24px;
+    height: 18px;
+    padding: 0 7px;
+    border-radius: 9px;
+    color: var(--el-color-primary);
+    line-height: 18px;
+    font-size: 12px;
+    font-weight: 500;
+}
+.more-node-arrow {
+    margin-left: 2px;
+    font-size: 12px;
 }
 .ellipsis-text {
     display: inline-block;

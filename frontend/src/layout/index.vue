@@ -19,49 +19,70 @@
                 ></el-button>
             </el-tooltip>
         </el-affix>
-        <div class="app-sidebar" v-if="!globalStore.isFullScreen">
+        <div class="app-sidebar" v-if="!isFullScreen">
             <Sidebar @menu-click="handleMenuClick" :menu-router="!classObj.openMenuTabs" @open-task="openTask" />
         </div>
 
         <el-watermark
-            v-if="globalStore.isMasterProductPro && globalStore.watermarkShow && globalStore.watermark"
+            v-if="isXpackOrEE && watermarkShow && watermark"
             :content="loadContent()"
             :font="{
-                fontSize: globalStore.watermark.fontSize,
-                color: globalStore.isDarkTheme ? globalStore.watermark.darkColor : globalStore.watermark.lightColor,
+                fontSize: watermark.fontSize,
+                color: isDarkTheme ? watermark.darkColor : watermark.lightColor,
                 textBaseline: 'top',
             }"
-            :rotate="globalStore.watermark.rotate"
-            :gap="[globalStore.watermark.gap, globalStore.watermark.gap]"
+            :rotate="watermark.rotate"
+            :gap="[watermark.gap, watermark.gap]"
         >
             <div class="main-container">
                 <mobile-header v-if="classObj.mobile" />
                 <Tabs v-if="classObj.openMenuTabs" />
-                <app-main :keep-alive="classObj.openMenuTabs ? tabsStore.cachedTabs : null" class="app-main" />
-                <Footer class="app-footer" v-if="!globalStore.isFullScreen" />
+                <app-main :keep-alive="classObj.openMenuTabs ? tabsStore.keepAliveTabs : null" class="app-main" />
+                <Footer class="app-footer" v-if="!isFullScreen" />
             </div>
         </el-watermark>
         <div class="main-container" v-else>
             <mobile-header v-if="classObj.mobile" />
             <Tabs v-if="classObj.openMenuTabs" />
-            <app-main :keep-alive="classObj.openMenuTabs ? tabsStore.cachedTabs : null" class="app-main" />
-            <Footer class="app-footer" v-if="!globalStore.isFullScreen" />
+            <app-main :keep-alive="classObj.openMenuTabs ? tabsStore.keepAliveTabs : null" class="app-main" />
+            <Footer class="app-footer" v-if="!isFullScreen" />
         </div>
         <TaskList ref="taskListRef" />
+        <TerminalHost />
+        <TerminalDock />
     </div>
 </template>
 
 <script setup lang="ts">
 import { onMounted, computed, ref, watch, onBeforeUnmount } from 'vue';
 import { Sidebar, Footer, AppMain, MobileHeader, Tabs } from './components';
+import TerminalHost from '@/components/terminal/host.vue';
+import TerminalDock from '@/components/terminal/dock/index.vue';
 import useResize from './hooks/useResize';
-import { GlobalStore, MenuStore, TabsStore } from '@/store';
-import { DeviceType } from '@/enums/app';
+import { MenuStore, TabsStore } from '@/store';
 import { getSystemAvailable } from '@/api/modules/setting';
 import { useRoute, useRouter } from 'vue-router';
 import { loadMasterProductProFromDB, loadProductProFromDB } from '@/utils/xpack';
 import { useTheme } from '@/global/use-theme';
 import TaskList from '@/components/task-list/index.vue';
+import i18n from '@/lang';
+import { useGlobalStore } from '@/composables/useGlobalStore';
+
+const {
+    globalStore,
+    currentNode,
+    currentNodeAddr,
+    entrance,
+    isDarkTheme,
+    isFullScreen,
+    isLoading,
+    isMobile,
+    isXpackOrEE,
+    loadingText: globalLoadingText,
+    openMenuTabs,
+    watermark,
+    watermarkShow,
+} = useGlobalStore();
 const { switchTheme } = useTheme();
 
 useResize();
@@ -69,28 +90,30 @@ useResize();
 const taskListRef = ref();
 const openTask = () => {
     taskListRef.value.acceptParams();
-    if (globalStore.isMobile()) {
+    if (isMobile.value) {
         menuStore.setCollapse();
     }
 };
 const router = useRouter();
 const route = useRoute();
 const menuStore = MenuStore();
-const globalStore = GlobalStore();
+
 const tabsStore = TabsStore();
 
 const loading = ref(false);
-const loadingText = ref();
+const loadingText = computed(() =>
+    globalLoadingText.value ? i18n.global.t(`commons.loadingText.${globalLoadingText.value}`) : '',
+);
 
 let timer: NodeJS.Timer | null = null;
 
 const classObj = computed(() => {
     return {
-        fullScreen: globalStore.isFullScreen,
+        fullScreen: isFullScreen.value,
         hideSidebar: menuStore.isCollapse,
         openSidebar: !menuStore.isCollapse,
-        mobile: globalStore.device === DeviceType.Mobile,
-        openMenuTabs: globalStore.openMenuTabs,
+        mobile: isMobile.value,
+        openMenuTabs: openMenuTabs.value,
         withoutAnimation: menuStore.withoutAnimation,
     };
 });
@@ -103,21 +126,25 @@ const handleCollapse = () => {
 };
 
 const loadContent = () => {
-    let itemName = globalStore.watermark.content.replaceAll(
+    if (!watermark.value) {
+        return '';
+    }
+
+    let itemName = watermark.value.content.replaceAll(
         '${nodeName}',
-        globalStore.currentNode === 'local' ? globalStore.getMasterAlias() : globalStore.currentNode,
+        currentNode.value === 'local' ? globalStore.getMasterAlias() : currentNode.value,
     );
-    itemName = itemName.replaceAll('${nodeAddr}', globalStore.currentNodeAddr || '127.0.0.1');
+    itemName = itemName.replaceAll('${nodeAddr}', currentNodeAddr.value || '127.0.0.1');
     return itemName;
 };
 
 watch(
-    () => globalStore.isLoading,
+    () => isLoading.value,
     () => {
-        if (globalStore.isLoading) {
+        if (isLoading.value) {
             loadStatus();
         } else {
-            loading.value = globalStore.isLoading;
+            loading.value = isLoading.value;
         }
     },
 );
@@ -130,8 +157,8 @@ const handleMenuClick = async (path) => {
 const toLogin = () => {
     let baseUrl = window.location.origin;
     let newUrl = '';
-    if (globalStore.entrance) {
-        newUrl = baseUrl + '/' + globalStore.entrance;
+    if (entrance.value) {
+        newUrl = baseUrl + '/' + entrance.value;
     } else {
         newUrl = baseUrl + '/login';
     }
@@ -139,8 +166,7 @@ const toLogin = () => {
 };
 
 const loadStatus = async () => {
-    loading.value = globalStore.isLoading;
-    loadingText.value = globalStore.loadingText;
+    loading.value = isLoading.value;
     if (loading.value) {
         timer = setInterval(async () => {
             await getSystemAvailable()
@@ -164,14 +190,14 @@ onBeforeUnmount(() => {
     timer = null;
 });
 onMounted(() => {
-    if (globalStore.openMenuTabs && !tabsStore.activeTabPath) {
+    if (openMenuTabs.value && !tabsStore.activeTabPath) {
         handleMenuClick('/');
     }
 
     loadStatus();
     loadProductProFromDB();
     loadMasterProductProFromDB();
-    globalStore.isFullScreen = false;
+    isFullScreen.value = false;
 
     const mqList = window.matchMedia('(prefers-color-scheme: dark)');
     if (mqList.addEventListener) {
@@ -207,6 +233,8 @@ onMounted(() => {
     flex-direction: column;
     position: relative;
     height: 100vh;
+    height: 100dvh;
+    min-width: 0;
     transition: margin-left 0.3s;
     margin-left: var(--panel-menu-width);
     background-color: var(--panel-main-bg-color-9);
@@ -215,6 +243,8 @@ onMounted(() => {
 .app-main {
     padding: 7px 20px;
     flex: 1;
+    min-width: 0;
+    min-height: 0;
     overflow: auto;
 }
 .app-sidebar {
@@ -281,6 +311,13 @@ onMounted(() => {
     .main-container,
     .sidebar-container {
         transition: none;
+    }
+}
+
+@media (max-width: 767px) {
+    .app-main {
+        padding-right: 12px;
+        padding-left: 12px;
     }
 }
 </style>

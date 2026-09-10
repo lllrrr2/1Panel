@@ -86,7 +86,7 @@ import { ref, reactive } from 'vue';
 import type { ElForm } from 'element-plus';
 import { Rules } from '@/global/form-rules';
 import { addHost, editHost, testByInfo } from '@/api/modules/terminal';
-import { getGroupList } from '@/api/modules/group';
+import { getAgentGroupList } from '@/api/modules/group';
 import i18n from '@/lang';
 import { MsgError, MsgSuccess } from '@/utils/message';
 
@@ -126,7 +126,7 @@ const rules = reactive({
 });
 
 const loadGroups = async () => {
-    const res = await getGroupList('host');
+    const res = await getAgentGroupList('host');
     groupList.value = res.data;
     if (dialogData.value.title === 'create') {
         for (const item of groupList.value) {
@@ -170,16 +170,20 @@ const submitAddHost = (formEl: FormInstance | undefined, ops: string) => {
         }
         if (ops === 'testconn') {
             loading.value = true;
-            await testByInfo(dialogData.value.rowData).then((res) => {
-                loading.value = false;
-                if (res.data) {
-                    isOK.value = true;
-                    MsgSuccess(i18n.global.t('terminal.connTestOk'));
-                } else {
-                    isOK.value = false;
-                    MsgError(i18n.global.t('terminal.connTestFailed'));
-                }
-            });
+            await testByInfo(dialogData.value.rowData)
+                .then((res) => {
+                    loading.value = false;
+                    if (res.data) {
+                        isOK.value = true;
+                        MsgSuccess(i18n.global.t('terminal.connTestOk'));
+                    } else {
+                        isOK.value = false;
+                        MsgError(i18n.global.t('terminal.connTestFailed'));
+                    }
+                })
+                .catch(() => {
+                    loading.value = false;
+                });
         }
     });
 };

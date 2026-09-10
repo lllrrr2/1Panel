@@ -1,113 +1,137 @@
 package firewall
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/1Panel-dev/1Panel/agent/app/dto"
 	"github.com/1Panel-dev/1Panel/agent/app/repo"
 	"github.com/1Panel-dev/1Panel/agent/app/service"
 	"github.com/1Panel-dev/1Panel/agent/constant"
 	"github.com/1Panel-dev/1Panel/agent/global"
+	migrationutils "github.com/1Panel-dev/1Panel/agent/init/migration/migrations/utils"
 	"github.com/1Panel-dev/1Panel/agent/utils/firewall"
-	firewallClient "github.com/1Panel-dev/1Panel/agent/utils/firewall/client"
-	"github.com/1Panel-dev/1Panel/agent/utils/firewall/client/iptables"
+	"github.com/1Panel-dev/1Panel/agent/utils/firewall/iptables_helper"
+	"github.com/1Panel-dev/1Panel/agent/utils/firewall/nftables_helper"
+	"github.com/1Panel-dev/1Panel/agent/utils/firewall/ping"
 )
 
 func Init() {
-	if !needInit() {
-		return
-	}
-	InitPingStatus()
-	global.LOG.Info("initializing firewall settings...")
-	client, err := firewall.NewFirewallClient()
+	ctx := context.Background()
+	client, err := service.NewSelectedSystemFirewallClient()
 	if err != nil {
+		global.LOG.Errorf("select system firewall provider failed, err: %v", err)
 		return
 	}
 	clientName := client.Name()
-
-	settingRepo := repo.NewISettingRepo()
-	if clientName == "ufw" || clientName == "iptables" {
-		if err := iptables.LoadRulesFromFile(iptables.FilterTab, iptables.Chain1PanelForward, iptables.ForwardFileName); err != nil {
-			global.LOG.Errorf("load forward rules from file failed, err: %v", err)
-			return
+	if err := migrationutils.TransferHostFirewall(ctx, clientName); err != nil {
+		global.LOG.Errorf("transfer legacy host firewall records failed, err: %v", err)
+		return
+	}
+	if err := migrationutils.TransferLegacyHostFirewallRuleOwnership(ctx, clientName, service.AdoptLegacyHostFirewallRuleOwnership); err != nil {
+		global.LOG.Warnf("transfer legacy host firewall rule ownership failed, err: %v", err)
+	}
+	if err := migrationutils.TransferFirewallForwarding(ctx); err != nil {
+		global.LOG.Errorf("transfer legacy forwarding rules failed, err: %v", err)
+		return
+	}
+	if err := initForwardingRules(ctx); err != nil {
+		global.LOG.Warnf("restore forwarding rules failed, manual synchronization is available, err: %v", err)
+	}
+	if !needInit() {
+		repairIptablesBaseChains(clientName)
+		return
+	}
+	defer initDockerPortGuard(ctx)
+	InitPingStatus()
+	global.LOG.Info("initializing firewall settings...")
+	if clientName == "nftables" {
+		if err := nftables_helper.Restore(); err != nil {
+			global.LOG.Errorf("restore nftables rules failed, err: %v", err)
 		}
-		if err := iptables.LoadRulesFromFile(iptables.NatTab, iptables.Chain1PanelPreRouting, iptables.ForwardFileName1); err != nil {
-			global.LOG.Errorf("load prerouting rules from file failed, err: %v", err)
-			return
-		}
-		if err := iptables.LoadRulesFromFile(iptables.NatTab, iptables.Chain1PanelPostRouting, iptables.ForwardFileName2); err != nil {
-			global.LOG.Errorf("load postrouting rules from file failed, err: %v", err)
-			return
-		}
-		global.LOG.Infof("loaded iptables rules for forward from file successfully")
-
-		iptablesForwardStatus, _ := settingRepo.GetValueByKey("IptablesForwardStatus")
-		if iptablesForwardStatus == constant.StatusEnable {
-			if err := firewallClient.EnableIptablesForward(); err != nil {
-				global.LOG.Errorf("enable iptables forward failed, err: %v", err)
-				return
+		status, _ := repo.NewISettingRepo().GetValueByKey("IptablesStatus")
+		if status == constant.StatusEnable {
+			if err := nftables_helper.Bind(); err != nil {
+				global.LOG.Errorf("bind nftables base chains failed, err: %v", err)
 			}
 		}
+		return
 	}
 
 	if clientName != "iptables" {
 		return
 	}
-	if err := iptables.LoadRulesFromFile(iptables.FilterTab, iptables.Chain1PanelBasicBefore, iptables.BasicBeforeFileName); err != nil {
-		global.LOG.Errorf("load basic before rules from file failed, err: %v", err)
-		return
-	}
-	if err := iptables.LoadRulesFromFile(iptables.FilterTab, iptables.Chain1PanelBasic, iptables.BasicFileName); err != nil {
-		global.LOG.Errorf("load basic rules from file failed, err: %v", err)
-		return
-	}
-	if err := iptables.LoadRulesFromFile(iptables.FilterTab, iptables.Chain1PanelBasicAfter, iptables.BasicAfterFileName); err != nil {
-		global.LOG.Errorf("load basic after rules from file failed, err: %v", err)
-		return
-	}
+	settingRepo := repo.NewISettingRepo()
 	panelPort := service.LoadPanelPort()
 	if len(panelPort) == 0 {
 		global.LOG.Errorf("find 1panel service port failed")
 		return
 	}
-	if err := iptables.AddRule(iptables.FilterTab, iptables.Chain1PanelBasicBefore, fmt.Sprintf("-p tcp -m tcp --dport %v -j ACCEPT", panelPort)); err != nil {
-		global.LOG.Errorf("add port accept rule %v failed, err: %v", panelPort, err)
+	requiredPorts, err := service.LoadRequiredFirewallPortWhiteList()
+	if err != nil {
+		global.LOG.Errorf("load required firewall ports failed, err: %v", err)
+		return
+	}
+	if err := iptables_helper.RestoreBaseChains(panelPort, requiredPorts); err != nil {
+		global.LOG.Errorf("restore iptables base chains failed, err: %v", err)
 		return
 	}
 	global.LOG.Infof("loaded iptables rules for basic from file successfully")
-	iptablesService := service.IptablesService{}
+	firewallService := service.NewIFirewallService()
 	iptablesStatus, _ := settingRepo.GetValueByKey("IptablesStatus")
 	if iptablesStatus == constant.StatusEnable {
-		if err := iptablesService.Operate(dto.IptablesOp{Operate: "bind-base-without-init"}); err != nil {
+		if err := firewallService.OperateFilterChain(dto.FilterChainOperation{Operate: string(firewall.BaseOperationBindWithoutInit)}); err != nil {
 			global.LOG.Errorf("bind base chains failed, err: %v", err)
 			return
 		}
 	}
 
-	if err := iptables.LoadRulesFromFile(iptables.FilterTab, iptables.Chain1PanelInput, iptables.InputFileName); err != nil {
-		global.LOG.Errorf("load input rules from file failed, err: %v", err)
+}
+
+func repairIptablesBaseChains(clientName string) {
+	if clientName != constant.FirewallProviderIptables {
 		return
 	}
-	if err := iptables.LoadRulesFromFile(iptables.FilterTab, iptables.Chain1PanelOutput, iptables.OutputFileName); err != nil {
-		global.LOG.Errorf("load output rules from file failed, err: %v", err)
+	settingRepo := repo.NewISettingRepo()
+	status, _ := settingRepo.GetValueByKey("IptablesStatus")
+	if status != constant.StatusEnable {
 		return
 	}
-	global.LOG.Infof("loaded iptables rules for input and output from file successfully")
-	iptablesInputStatus, _ := settingRepo.GetValueByKey("IptablesInputStatus")
-	if iptablesInputStatus == constant.StatusEnable {
-		if err := iptablesService.Operate(dto.IptablesOp{Name: iptables.Chain1PanelInput, Operate: "bind"}); err != nil {
-			global.LOG.Errorf("bind input chains failed, err: %v", err)
+	manager := iptables_helper.Manager{
+		PanelPort:         service.LoadPanelPort,
+		LoadRequiredPorts: service.LoadRequiredFirewallPortWhiteList,
+	}
+	if err := manager.RepairBaseChains(); err != nil {
+		global.LOG.Warnf("repair iptables base chains failed, err: %v", err)
+	}
+}
+
+func initDockerPortGuard(ctx context.Context) {
+	const (
+		attempts = 12
+		delay    = 5 * time.Second
+	)
+	var restoreErr error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		restoreErr = service.ReconcileDockerPortGuard(ctx)
+		if restoreErr == nil {
 			return
 		}
-	}
-	iptablesOutputStatus, _ := settingRepo.GetValueByKey("IptablesOutputStatus")
-	if iptablesOutputStatus == constant.StatusEnable {
-		if err := iptablesService.Operate(dto.IptablesOp{Name: iptables.Chain1PanelOutput, Operate: "bind"}); err != nil {
-			global.LOG.Errorf("bind output chains failed, err: %v", err)
+		if attempt == attempts {
+			break
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			global.LOG.Warnf("restore Docker port guard on startup canceled, err: %v", ctx.Err())
 			return
+		case <-timer.C:
 		}
 	}
+	global.LOG.Warnf("restore Docker port guard on startup failed after %d attempts, err: %v", attempts, restoreErr)
 }
 
 func needInit() bool {
@@ -126,7 +150,7 @@ func needInit() bool {
 
 func InitPingStatus() {
 	global.LOG.Info("initializing ban ping status from settings...")
-	status := firewall.LoadPingStatus()
+	status := ping.LoadStatus()
 	statusInDB, _ := repo.NewISettingRepo().GetValueByKey("BanPing")
 	if statusInDB == status {
 		return
@@ -136,7 +160,11 @@ func InitPingStatus() {
 	if statusInDB == constant.StatusDisable {
 		enable = "0"
 	}
-	if err := firewall.UpdatePingStatus(enable); err != nil {
+	if err := ping.UpdateStatus(enable); err != nil {
 		global.LOG.Errorf("initialize ping status failed: %v", err)
 	}
+}
+
+func initForwardingRules(ctx context.Context) error {
+	return service.NewIForwardingService().Restore(ctx)
 }

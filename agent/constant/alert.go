@@ -20,9 +20,10 @@ const (
 const (
 	WeChat   = "wechat"
 	SMS      = "sms"
-	Email    = "mail"
+	Email    = "email"
 	WeCom    = "weCom"
 	DingTalk = "dingTalk"
 	FeiShu   = "feiShu"
 	Custom   = "custom"
+	Bark     = "bark"
 )

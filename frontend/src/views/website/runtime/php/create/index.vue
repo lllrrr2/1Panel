@@ -1,7 +1,7 @@
 <template>
     <DrawerPro
         v-model="open"
-        :header="$t('runtime.' + mode)"
+        :header="$t('commons.button.' + mode)"
         size="large"
         :resource="mode === 'edit' ? runtime.name : ''"
         @close="handleClose"
@@ -24,7 +24,7 @@
                     v-model="runtime.resource"
                     @change="changeResource(runtime.resource)"
                 >
-                    <el-radio :value="'appstore'" v-if="!globalStore.isOffLine">
+                    <el-radio :value="'appstore'" v-if="!isOffline">
                         {{ $t('menu.apps') }}
                     </el-radio>
                     <el-radio :value="'local'">
@@ -33,14 +33,15 @@
                 </el-radio-group>
             </el-form-item>
             <div v-if="runtime.resource === 'appstore'">
-                <el-form-item :label="$t('app.app')" prop="appID">
-                    <el-row :gutter="20">
-                        <el-col :span="12">
+                <el-form-item :label="$t('app.app')" prop="appDetailID" :rules="Rules.requiredSelect">
+                    <el-row :gutter="20" class="w-[calc(100%+20px)] gap-y-3 lg:w-auto lg:gap-y-0">
+                        <el-col :span="12" :xs="24" :sm="24" :md="12" class="min-w-0">
                             <el-select
                                 v-model="runtime.appID"
+                                :validate-event="false"
                                 :disabled="mode === 'edit'"
                                 @change="changeApp(runtime.appID)"
-                                class="p-w-200"
+                                class="w-full min-w-0 lg:!w-[200px]"
                             >
                                 <el-option
                                     v-for="(app, index) in apps"
@@ -50,10 +51,10 @@
                                 ></el-option>
                             </el-select>
                         </el-col>
-                        <el-col :span="12">
+                        <el-col :span="12" :xs="24" :sm="24" :md="12" class="min-w-0">
                             <el-select
                                 v-model="runtime.version"
-                                :disabled="mode === 'edit'"
+                                :validate-event="false"
                                 @change="changeVersion()"
                                 class="p-w-200"
                             >
@@ -62,6 +63,7 @@
                                     :key="index"
                                     :label="version"
                                     :value="version"
+                                    class="w-full min-w-0 lg:!w-[200px]"
                                 ></el-option>
                             </el-select>
                         </el-col>
@@ -150,9 +152,9 @@
                                     </span>
                                     <div>
                                         <span
-                                            v-if="!globalStore.isFxplay"
+                                            v-if="!isFxplay"
                                             class="custom-link"
-                                            @click="openLink(globalStore.docsUrl + '/user_manual/websites/php/#php_1')"
+                                            @click="openLink(docsUrl + '/user_manual/websites/php/#php_1')"
                                         >
                                             {{ $t('php.toExtensionsList') }}
                                         </span>
@@ -179,7 +181,7 @@
                                     class="ml-1 text-xs"
                                     type="primary"
                                     target="_blank"
-                                    :href="globalStore.docsUrl + '/user_manual/websites/php/'"
+                                    :href="docsUrl + '/user_manual/websites/php/'"
                                 >
                                     {{ $t('commons.button.helpDoc') }}
                                 </el-link>
@@ -195,7 +197,7 @@
         <template #footer>
             <span>
                 <el-button @click="handleClose" :disabled="loading">{{ $t('commons.button.cancel') }}</el-button>
-                <el-button type="primary" @click="submit(runtimeForm)" :disabled="loading">
+                <el-button v-permission type="primary" @click="submit(runtimeForm)" :disabled="loading">
                     {{ $t('commons.button.confirm') }}
                 </el-button>
             </span>
@@ -206,16 +208,18 @@
 <script lang="ts" setup>
 import { App } from '@/api/interface/app';
 import { Runtime } from '@/api/interface/runtime';
-import { getAppByKey, getAppDetail, searchApp } from '@/api/modules/app';
+import { getAppByKey, getAppDetail, getCurrentNodeCustomAppConfig, searchApp } from '@/api/modules/app';
 import { CreateRuntime, GetRuntime, ListPHPExtensions, UpdateRuntime } from '@/api/modules/runtime';
 import { Rules } from '@/global/form-rules';
 import i18n from '@/lang';
+import { newUUID } from '@/utils/id';
 import { MsgSuccess } from '@/utils/message';
 import { FormInstance } from 'element-plus';
 import { reactive, ref } from 'vue';
-import { getLabel } from '@/utils/util';
+import { getLabel } from '@/utils/app-store';
 import { useGlobalStore } from '@/composables/useGlobalStore';
-const { globalStore } = useGlobalStore();
+import { resolveRuntimeAppResource } from '@/utils/runtime-app-resource';
+const { docsUrl, isFxplay, isIntl, isOffline, isXpackOrEE } = useGlobalStore();
 
 interface OperateRrops {
     id?: number;
@@ -237,8 +241,9 @@ const appReq = reactive({
     type: 'php',
     page: 1,
     pageSize: 20,
+    resource: 'remote',
 });
-const phpSources = globalStore.isIntl
+const phpSources = isIntl.value
     ? [
           {
               label: i18n.global.t('runtime.default'),
@@ -335,7 +340,23 @@ const changeResource = (resource: string) => {
     }
 };
 
-const searchAppList = (appId: number) => {
+const loadRuntimeAppResource = async () => {
+    if (isOffline.value) {
+        return 'custom';
+    }
+    if (!isXpackOrEE.value) {
+        return 'remote';
+    }
+    try {
+        const res = await getCurrentNodeCustomAppConfig();
+        return resolveRuntimeAppResource(isOffline.value, res.data?.status);
+    } catch (error) {
+        return 'remote';
+    }
+};
+
+const searchAppList = async (appId: number) => {
+    appReq.resource = await loadRuntimeAppResource();
     searchApp(appReq).then((res) => {
         apps.value = res.data.items || [];
         if (res.data && res.data.items && res.data.items.length > 0) {
@@ -371,19 +392,28 @@ const changePHPVersion = (version: string) => {
 const changeVersion = () => {
     loading.value = true;
     initParam.value = false;
+    runtime.appDetailID = undefined;
     extensions.value = undefined;
     getAppDetail(runtime.appID, runtime.version, 'runtime')
         .then((res) => {
             runtime.appDetailID = res.data.id;
-            runtime.image = res.data.image + ':' + runtime.version;
+            runtimeForm.value?.clearValidate('appDetailID');
+            if (mode.value === 'create') {
+                runtime.image = res.data.image + ':' + runtime.version;
+            }
             appParams.value = res.data.params;
             const fileds = res.data.params.formFields;
             formFields.value = {};
             for (const index in fileds) {
                 formFields.value[fileds[index]['envKey']] = fileds[index];
-                runtime.params[fileds[index]['envKey']] = fileds[index]['default'];
+                const key = fileds[index]['envKey'];
+                if (mode.value === 'create' || runtime.params[key] === undefined || key === 'PHP_VERSION') {
+                    runtime.params[key] = fileds[index]['default'];
+                }
                 if (fileds[index]['envKey'] == 'PHP_VERSION') {
-                    runtime.image = '1panel-php-fpm:' + fileds[index]['default'];
+                    if (mode.value === 'create') {
+                        runtime.image = '1panel-php-fpm:' + fileds[index]['default'];
+                    }
                 }
             }
             initParam.value = true;
@@ -414,18 +444,20 @@ const submit = async (formEl: FormInstance | undefined) => {
             return;
         }
         try {
-            let res;
             if (mode.value == 'create') {
                 loading.value = true;
-                res = await CreateRuntime(runtime);
+                const taskID = newUUID();
+                runtime.taskID = taskID;
+                await CreateRuntime(runtime);
                 MsgSuccess(i18n.global.t('commons.msg.createSuccess'));
+                handleClose();
+                em('submit', taskID);
             } else {
                 loading.value = true;
-                res = await UpdateRuntime(runtime);
+                await UpdateRuntime(runtime);
                 MsgSuccess(i18n.global.t('commons.msg.updateSuccess'));
+                handleClose();
             }
-            handleClose();
-            em('submit', res.data.id);
         } catch (error) {
         } finally {
             loading.value = false;
@@ -491,7 +523,7 @@ const acceptParams = async (props: OperateRrops) => {
     initParam.value = false;
     if (props.mode === 'create') {
         Object.assign(runtime, initData(props.type));
-        if (globalStore.isOffLine) {
+        if (isOffline.value) {
             runtime.resource = 'local';
         } else {
             searchAppList(null);

@@ -36,7 +36,7 @@
         </el-form>
         <template #footer>
             <el-button @click="handleClose" :disabled="loading">{{ $t('commons.button.cancel') }}</el-button>
-            <el-button type="primary" @click="submit(proxyForm)" :disabled="loading">
+            <el-button v-permission type="primary" @click="submit(proxyForm)" :disabled="loading">
                 {{ $t('commons.button.confirm') }}
             </el-button>
         </template>
@@ -51,8 +51,7 @@ import { FormInstance } from 'element-plus';
 import { ref } from 'vue';
 import { MsgSuccess } from '@/utils/message';
 import { Website } from '@/api/interface/website';
-import { getRandomStr } from '@/utils/util';
-
+import { getRandomStr } from '@/utils/id';
 const proxyForm = ref<FormInstance>();
 const rules = ref({
     username: [Rules.requiredInput, Rules.name],

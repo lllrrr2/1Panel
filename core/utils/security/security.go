@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
-	"strconv"
 	"strings"
 
 	"github.com/1Panel-dev/1Panel/core/app/repo"
@@ -18,6 +17,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+var publicSharePagePattern = regexp.MustCompile(`^/s/[A-Za-z0-9]{10,16}$`)
+
 func HandleNotRoute(c *gin.Context) bool {
 	if !checkBindDomain(c) {
 		HandleNotSecurity(c, "err_domain")
@@ -27,7 +28,7 @@ func HandleNotRoute(c *gin.Context) bool {
 		HandleNotSecurity(c, "err_ip_limit")
 		return false
 	}
-	if checkFrontendPath(c) {
+	if CanServeFrontendPath(c) {
 		ToIndexHtml(c)
 		return false
 	}
@@ -39,7 +40,9 @@ func HandleNotRoute(c *gin.Context) bool {
 }
 
 func CheckSecurity(c *gin.Context) bool {
-	if !checkEntrance(c) && !checkSession(c) {
+	authService := service.NewIAuthService()
+	entrance := authService.GetSecurityEntrance()
+	if entrance != "" && !checkEntrance(c) && !checkSession(c) {
 		HandleNotSecurity(c, "")
 		return false
 	}
@@ -93,18 +96,14 @@ func checkEntrance(c *gin.Context) bool {
 }
 
 func HandleNotSecurity(c *gin.Context, resType string) {
-	resPage, err := service.NewIAuthService().GetResponsePage()
-	if err != nil {
-		c.String(http.StatusInternalServerError, "Internal Server Error")
-		return
-	}
-	if resPage == "444" {
+	code := LoadErrCode()
+	if code == 444 {
 		CloseDirectly(c)
 		return
 	}
 
-	file := fmt.Sprintf("html/%s.html", resPage)
-	if resPage == "200" && resType != "" {
+	file := fmt.Sprintf("html/%d.html", code)
+	if code == http.StatusOK && resType != "" {
 		file = fmt.Sprintf("html/200_%s.html", resType)
 	}
 	data, err := res.ErrorMsg.ReadFile(file)
@@ -112,16 +111,40 @@ func HandleNotSecurity(c *gin.Context, resType string) {
 		c.String(http.StatusInternalServerError, "Internal Server Error")
 		return
 	}
-	statusCode, err := strconv.Atoi(resPage)
-	if err != nil {
-		c.String(http.StatusInternalServerError, "Internal Server Error")
-		return
-	}
-	c.Data(statusCode, "text/html; charset=utf-8", data)
+	c.Data(code, "text/html; charset=utf-8", data)
 }
 
-func isFrontendPath(c *gin.Context) bool {
-	reqUri := strings.TrimSuffix(c.Request.URL.Path, "/")
+func LoadErrCode() int {
+	settingRepo := repo.NewISettingRepo()
+	codeVal, err := settingRepo.GetValueByKey("NoAuthSetting")
+	if err != nil {
+		return http.StatusInternalServerError
+	}
+
+	switch codeVal {
+	case "400":
+		return http.StatusBadRequest
+	case "401":
+		return http.StatusUnauthorized
+	case "403":
+		return http.StatusForbidden
+	case "404":
+		return http.StatusNotFound
+	case "408":
+		return http.StatusRequestTimeout
+	case "416":
+		return http.StatusRequestedRangeNotSatisfiable
+	case "500":
+		return http.StatusInternalServerError
+	case "444":
+		return 444
+	default:
+		return http.StatusOK
+	}
+}
+
+func IsFrontendPath(path string) bool {
+	reqUri := strings.TrimSuffix(path, "/")
 	if _, ok := constant.WebUrlMap[reqUri]; ok {
 		return true
 	}
@@ -133,15 +156,23 @@ func isFrontendPath(c *gin.Context) bool {
 	return false
 }
 
-func checkFrontendPath(c *gin.Context) bool {
-	if !isFrontendPath(c) {
+func CanServeFrontendPath(c *gin.Context) bool {
+	if !IsFrontendPath(c.Request.URL.Path) {
 		return false
+	}
+	if isPublicFileSharePagePath(c.Request.URL.Path) {
+		return true
 	}
 	authService := service.NewIAuthService()
 	if authService.GetSecurityEntrance() != "" {
-		return authService.IsLogin(c)
+		return checkEntrance(c) || authService.IsLogin(c)
 	}
 	return true
+}
+
+func isPublicFileSharePagePath(path string) bool {
+	reqUri := strings.TrimSuffix(path, "/")
+	return publicSharePagePattern.MatchString(reqUri)
 }
 
 func checkBindDomain(c *gin.Context) bool {
@@ -164,10 +195,8 @@ func checkIPLimit(c *gin.Context) bool {
 	if len(status.Value) == 0 {
 		return true
 	}
-	clientIP := common.GetRealClientIP(c)
-	if common.IsPrivateIP(clientIP) {
-		return true
-	}
+	trustedProxies, _ := settingRepo.Get(repo.WithByKey("AllowIPTrustedProxies"))
+	clientIP := common.ResolveClientIP(c, trustedProxies.Value)
 
 	for _, ip := range strings.Split(status.Value, ",") {
 		if len(ip) == 0 {

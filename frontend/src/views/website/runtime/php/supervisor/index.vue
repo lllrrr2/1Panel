@@ -3,10 +3,11 @@
         <template #content>
             <ComplexTable :data="data" v-loading="loading" v-model:selects="selects">
                 <template #toolbar>
-                    <el-button type="primary" @click="openCreate">
+                    <el-button v-permission type="primary" @click="openCreate">
                         {{ $t('commons.button.create') }}
                     </el-button>
                     <el-button
+                        v-permission
                         @click="batchRestart"
                         :disabled="!selects.length || selects.every((item) => item.name === 'php-fpm')"
                     >
@@ -50,16 +51,18 @@
                     <template #default="{ row }">
                         <div v-if="row.status && row.status.length > 0 && row.hasLoad">
                             <Status
+                                v-permission
                                 v-if="checkStatus(row.status) === 'RUNNING'"
                                 status="running"
                                 @click="operate('stop', row.name)"
                             />
                             <Status
+                                v-permission
                                 v-else-if="checkStatus(row.status) === 'WARNING'"
                                 status="unhealthy"
                                 @click="operate('restart', row.name)"
                             />
-                            <Status v-else status="stopped" @click="operate('start', row.name)" />
+                            <Status v-else v-permission status="stopped" @click="operate('start', row.name)" />
                         </div>
                         <div v-if="!row.hasLoad">
                             <el-button link loading></el-button>
@@ -114,7 +117,7 @@
                     :ellipsis="6"
                     :buttons="buttons"
                     :label="$t('commons.table.operate')"
-                    :fixed="mobile ? false : 'right'"
+                    :fixed="isMobile ? false : 'right'"
                     width="280px"
                     fix
                 />
@@ -127,16 +130,15 @@
 
 <script setup lang="ts">
 import { ref } from 'vue';
-import { computed } from 'vue';
 import Create from './create/index.vue';
 import File from './file/index.vue';
 import { GetSupervisorProcess, operateSupervisorProcess } from '@/api/modules/runtime';
-import { GlobalStore } from '@/store';
 import i18n from '@/lang';
 import { HostTool } from '@/api/interface/host-tool';
 import { MsgSuccess } from '@/utils/message';
-const globalStore = GlobalStore();
+import { useGlobalStore } from '@/composables/useGlobalStore';
 
+const { isMobile } = useGlobalStore();
 const loading = ref(false);
 const fileRef = ref();
 const data = ref();
@@ -210,17 +212,16 @@ const loadStatus = async () => {
     } catch (error) {}
 };
 
-const mobile = computed(() => {
-    return globalStore.isMobile();
-});
-
 const checkStatus = (status: HostTool.ProcessStatus[]): string => {
     if (!status || status.length === 0) return 'STOPPED';
 
-    const statusCounts = status.reduce((acc, curr) => {
-        acc[curr.status] = (acc[curr.status] || 0) + 1;
-        return acc;
-    }, {} as Record<string, number>);
+    const statusCounts = status.reduce(
+        (acc, curr) => {
+            acc[curr.status] = (acc[curr.status] || 0) + 1;
+            return acc;
+        },
+        {} as Record<string, number>,
+    );
 
     if (statusCounts['STARTING']) return 'STARTING';
     if (statusCounts['RUNNING'] === status.length) return 'RUNNING';
@@ -301,53 +302,57 @@ const getFile = (name: string, file: string, runtimeID: number) => {
     fileRef.value.acceptParams(name, file, 'get', runtimeID);
 };
 
-const edit = (row: HostTool.SupersivorProcess) => {
+const edit = (row: HostTool.SupervisorProcess) => {
     createRef.value.acceptParams('update', row, runtimeID.value);
 };
 
 const buttons = [
     {
         label: i18n.global.t('commons.button.edit'),
-        click: function (row: HostTool.SupersivorProcess) {
+        permission: true,
+        click: function (row: HostTool.SupervisorProcess) {
             edit(row);
         },
-        show: function (row: HostTool.SupersivorProcess) {
+        show: function (row: HostTool.SupervisorProcess) {
             return row.name != 'php-fpm';
         },
     },
     {
         label: i18n.global.t('website.sourceFile'),
-        click: function (row: HostTool.SupersivorProcess) {
+        permission: true,
+        click: function (row: HostTool.SupervisorProcess) {
             getFile(row.name, 'config', runtimeID.value);
         },
-        show: function (row: HostTool.SupersivorProcess) {
+        show: function (row: HostTool.SupervisorProcess) {
             return row.name != 'php-fpm';
         },
     },
     {
         label: i18n.global.t('commons.button.log'),
-        click: function (row: HostTool.SupersivorProcess) {
+        click: function (row: HostTool.SupervisorProcess) {
             getFile(row.name, 'out.log', runtimeID.value);
         },
-        show: function (row: HostTool.SupersivorProcess) {
+        show: function (row: HostTool.SupervisorProcess) {
             return row.name != 'php-fpm';
         },
     },
     {
         label: i18n.global.t('commons.button.restart'),
-        click: function (row: HostTool.SupersivorProcess) {
+        permission: true,
+        click: function (row: HostTool.SupervisorProcess) {
             operate('restart', row.name);
         },
-        show: function (row: HostTool.SupersivorProcess) {
+        show: function (row: HostTool.SupervisorProcess) {
             return row.name != 'php-fpm';
         },
     },
     {
         label: i18n.global.t('commons.button.delete'),
-        click: function (row: HostTool.SupersivorProcess) {
+        permission: true,
+        click: function (row: HostTool.SupervisorProcess) {
             operate('delete', row.name);
         },
-        show: function (row: HostTool.SupersivorProcess) {
+        show: function (row: HostTool.SupervisorProcess) {
             return row.name != 'php-fpm';
         },
     },

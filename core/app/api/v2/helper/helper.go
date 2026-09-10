@@ -18,9 +18,18 @@ func ErrorWithDetail(ctx *gin.Context, code int, msgKey string, err error) {
 		Code:    code,
 		Message: "",
 	}
-	if msgKey == "ErrCaptchaCode" || msgKey == "ErrAuth" {
+	if msgKey == "ErrCaptchaCode" || msgKey == "ErrAuth" || msgKey == "ErrLoginLocked" {
 		res.Code = 401
 		res.Message = msgKey
+	}
+	if msgKey == "ErrRBAC" {
+		res.Code = 412
+		if err != nil {
+			res.Message = err.Error()
+			ctx.JSON(http.StatusOK, res)
+			ctx.Abort()
+			return
+		}
 	}
 	res.Message = i18n.GetMsgWithMap(msgKey, map[string]interface{}{"detail": err})
 	ctx.JSON(http.StatusOK, res)

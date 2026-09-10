@@ -3,8 +3,8 @@
         <el-card v-if="showStopped" class="mask-prompt">
             <span>{{ $t('tool.supervisor.notStartWarn') }}</span>
         </el-card>
-        <LayoutContent :title="$t(' tool.supervisor.list', 2)" v-loading="loading">
-            <template #prompt v-if="!globalStore.isFxplay">
+        <LayoutContent :title="$t('tool.supervisor.list', 2)" v-loading="loading">
+            <template #prompt v-if="!isFxplay">
                 <el-alert type="info" :closable="false">
                     <template #title>
                         {{ $t('toolbox.common.toolboxHelper') }}
@@ -23,8 +23,8 @@
                 />
             </template>
             <template v-if="showTable" #leftToolBar>
-                <el-button type="primary" @click="openCreate" :disabled="showStopped">
-                    {{ $t('commons.button.create') + $t('tool.supervisor.list').toLowerCase() }}
+                <el-button v-permission v-node-admin type="primary" @click="openCreate" :disabled="showStopped">
+                    {{ $t('commons.button.create') }}
                 </el-button>
             </template>
             <template v-if="showTable" #rightToolBar>
@@ -74,16 +74,26 @@
                         <template #default="{ row }">
                             <div v-if="row.status && row.status.length > 0 && row.hasLoad">
                                 <Status
+                                    v-permission
+                                    v-node-admin
                                     v-if="checkStatus(row.status) === 'RUNNING'"
                                     status="running"
                                     @click="operate('stop', row.name)"
                                 />
                                 <Status
+                                    v-permission
+                                    v-node-admin
                                     v-else-if="checkStatus(row.status) === 'WARNING'"
                                     status="unhealthy"
                                     @click="operate('restart', row.name)"
                                 />
-                                <Status v-else status="stopped" @click="operate('start', row.name)" />
+                                <Status
+                                    v-else
+                                    v-permission
+                                    v-node-admin
+                                    status="stopped"
+                                    @click="operate('start', row.name)"
+                                />
                             </div>
                             <div v-if="!row.hasLoad">
                                 <el-button link loading></el-button>
@@ -147,7 +157,7 @@
                         :ellipsis="6"
                         :buttons="buttons"
                         :label="$t('commons.table.operate')"
-                        :fixed="mobile ? false : 'right'"
+                        :fixed="isMobile ? false : 'right'"
                         width="280px"
                         fix
                     />
@@ -173,12 +183,13 @@ import Create from './create/index.vue';
 import File from './file/index.vue';
 import ProcessDetail from '@/views/host/process/process/detail/index.vue';
 import { getSupervisorProcess, operateSupervisorProcess } from '@/api/modules/host-tool';
-import { GlobalStore } from '@/store';
+import { useGlobalStore } from '@/composables/useGlobalStore';
 import i18n from '@/lang';
 import { HostTool } from '@/api/interface/host-tool';
 import { MsgSuccess } from '@/utils/message';
 import { routerToFileWithPath } from '@/utils/router';
-const globalStore = GlobalStore();
+
+const { docsUrl, isFxplay, isMobile } = useGlobalStore();
 
 const loading = ref(false);
 const setSuperVisor = ref(false);
@@ -279,17 +290,16 @@ const loadStatus = async () => {
     } catch (error) {}
 };
 
-const mobile = computed(() => {
-    return globalStore.isMobile();
-});
-
 const checkStatus = (status: HostTool.ProcessStatus[]): string => {
     if (!status || status.length === 0) return 'STOPPED';
 
-    const statusCounts = status.reduce((acc, curr) => {
-        acc[curr.status] = (acc[curr.status] || 0) + 1;
-        return acc;
-    }, {} as Record<string, number>);
+    const statusCounts = status.reduce(
+        (acc, curr) => {
+            acc[curr.status] = (acc[curr.status] || 0) + 1;
+            return acc;
+        },
+        {} as Record<string, number>,
+    );
 
     if (statusCounts['STARTING']) return 'STARTING';
     if (statusCounts['RUNNING'] === status.length) return 'RUNNING';
@@ -332,45 +342,53 @@ const openLog = (name: string) => {
     logRef.value.acceptParams(name);
 };
 
-const edit = (row: HostTool.SupersivorProcess) => {
+const edit = (row: HostTool.SupervisorProcess) => {
     createRef.value.acceptParams('update', row);
 };
 
 const buttons = [
     {
         label: i18n.global.t('commons.button.edit'),
-        click: function (row: HostTool.SupersivorProcess) {
+        permission: true,
+        nodeAdmin: true,
+        click: function (row: HostTool.SupervisorProcess) {
             edit(row);
         },
     },
     {
         label: i18n.global.t('website.sourceFile'),
-        click: function (row: HostTool.SupersivorProcess) {
+        permission: true,
+        nodeAdmin: true,
+        click: function (row: HostTool.SupervisorProcess) {
             getFile(row.name, 'config');
         },
     },
     {
         label: i18n.global.t('commons.button.log'),
-        click: function (row: HostTool.SupersivorProcess) {
+        click: function (row: HostTool.SupervisorProcess) {
             openLog(row.name);
         },
     },
     {
         label: i18n.global.t('commons.button.restart'),
-        click: function (row: HostTool.SupersivorProcess) {
+        permission: true,
+        nodeAdmin: true,
+        click: function (row: HostTool.SupervisorProcess) {
             operate('restart', row.name);
         },
     },
     {
         label: i18n.global.t('commons.button.delete'),
-        click: function (row: HostTool.SupersivorProcess) {
+        permission: true,
+        nodeAdmin: true,
+        click: function (row: HostTool.SupervisorProcess) {
             operate('delete', row.name);
         },
     },
 ];
 
 const toDoc = () => {
-    window.open(globalStore.docsUrl + '/user_manual/toolbox/supervisor/', '_blank', 'noopener,noreferrer');
+    window.open(docsUrl.value + '/user_manual/toolbox/supervisor/', '_blank', 'noopener,noreferrer');
 };
 
 onMounted(() => {

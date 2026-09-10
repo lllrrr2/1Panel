@@ -1,5 +1,5 @@
 <template>
-    <div>
+    <div :class="{ 'fill-height': fill }">
         <el-card :style="{ height: height }" class="home-card">
             <div class="header">
                 <div class="header-left flex flex-wrap gap-3">
@@ -22,20 +22,51 @@ defineOptions({ name: 'CardWithHeader' });
 defineProps({
     header: String,
     height: String,
+    fill: Boolean,
 });
 </script>
 
 <style scoped lang="scss">
+.fill-height {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+
+    .home-card {
+        flex: 1;
+        min-height: 0;
+
+        :deep(.el-card__body) {
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+
+        .header {
+            flex-shrink: 0;
+        }
+
+        .body-content {
+            flex: 1;
+            min-height: 0;
+        }
+    }
+}
+
 .home-card {
     .header {
         display: flex;
         justify-content: space-between;
         align-items: center;
+        gap: 12px;
+        min-width: 0;
 
         .header-left {
             display: flex;
             align-items: center;
             gap: 12px;
+            min-width: 0;
 
             .header-span {
                 position: relative;
@@ -44,6 +75,8 @@ defineProps({
                 margin-left: 18px;
                 display: flex;
                 align-items: center;
+                min-width: 0;
+                overflow-wrap: anywhere;
 
                 &::before {
                     position: absolute;
@@ -62,11 +95,34 @@ defineProps({
         .header-right {
             display: flex;
             align-items: center;
+            min-width: 0;
         }
     }
 
     .body-content {
         margin-top: 20px;
+    }
+}
+
+@media (max-width: 767px) {
+    .home-card .header {
+        flex-wrap: wrap;
+        align-items: flex-start;
+
+        .header-left {
+            flex: 1 1 200px;
+            max-width: 100%;
+        }
+
+        .header-right {
+            flex: 0 1 auto;
+            max-width: 100%;
+            margin-left: auto;
+        }
+
+        .header-right:empty {
+            display: none;
+        }
     }
 }
 </style>

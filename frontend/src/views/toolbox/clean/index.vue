@@ -2,7 +2,7 @@
     <div v-loading="loading">
         <LayoutContent :title="$t('setting.diskClean')" :divider="true">
             <template #leftToolBar>
-                <el-button type="primary" @click="scanData">
+                <el-button v-permission v-node-admin type="primary" @click="scanData">
                     {{ $t('clean.scan') }}
                 </el-button>
             </template>
@@ -78,6 +78,8 @@
                     <div>
                         <el-text class="clean_title">{{ $t('clean.totalScan') }} {{ computeSize(totalSize) }}</el-text>
                         <el-button
+                            v-permission
+                            v-node-admin
                             type="primary"
                             class="-mt-2 ml-20"
                             :disabled="selectSize <= 0"
@@ -256,8 +258,8 @@
 </template>
 <script lang="ts" setup>
 import { onMounted, reactive, ref } from 'vue';
-import { computeSize } from '@/utils/util';
-import { getSettingInfo } from '@/api/modules/setting';
+import { computeSize } from '@/utils/size';
+import { getAgentSettingInfo } from '@/api/modules/setting';
 import { clean, scan } from '@/api/modules/toolbox';
 import i18n from '@/lang';
 import { MsgSuccess } from '@/utils/message';
@@ -314,6 +316,10 @@ const form = reactive({
     lastCleanSize: '',
     lastCleanData: '',
 });
+
+const hasChildren = (node: any) => Array.isArray(node?.children) && node.children.length > 0;
+
+const canDeleteNode = (node: any) => !!node?.canDelete;
 
 const scanData = async () => {
     loading.value = true;
@@ -388,29 +394,19 @@ const onSubmitClean = async () => {
 };
 
 const search = async () => {
-    const res = await getSettingInfo();
+    const res = await getAgentSettingInfo();
     form.lastCleanTime = res.data.lastCleanTime;
     form.lastCleanSize = res.data.lastCleanSize;
     form.lastCleanData = res.data.lastCleanData;
 };
 
 const loadSubmitCheck = (data: any) => {
-    if (data.children === null) {
-        if (data.isCheck) {
-            submitCleans.value.push({ treeType: data.type, name: data.name, size: data.size });
-        }
-        return;
-    }
-    for (const item of data) {
-        if (item.type === 'unknown_backup' && item.isCheck && item.children) {
-            loadSubmitCheck(item.children);
-            continue;
-        }
-        if (item.isCheck && item.type !== 'app_tmp_download') {
+    const nodes = Array.isArray(data) ? data : [data];
+    for (const item of nodes) {
+        if (canDeleteNode(item) && item.isCheck) {
             submitCleans.value.push({ treeType: item.type, name: item.name, size: item.size });
-            continue;
         }
-        if (item.children) {
+        if (hasChildren(item)) {
             loadSubmitCheck(item.children);
         }
     }
@@ -431,56 +427,50 @@ function onChange(data: any, checked: any) {
     selectSize.value = 0;
     let systemSelects = systemRef.value.getCheckedNodes(false, true);
     for (const item of systemSelects) {
-        if (item.children === null) {
+        if (canDeleteNode(item)) {
             selectSize.value = selectSize.value + Number(item.size);
         }
     }
     let backupSelects = backupRef.value.getCheckedNodes(false, true);
     for (const item of backupSelects) {
-        if (item.children === null) {
+        if (canDeleteNode(item)) {
             selectSize.value = selectSize.value + Number(item.size);
         }
     }
     let uploadSelects = uploadRef.value.getCheckedNodes(false, true);
     for (const item of uploadSelects) {
-        if (item.children === null) {
+        if (canDeleteNode(item)) {
             selectSize.value = selectSize.value + Number(item.size);
         }
     }
     let downloadSelects = downloadRef.value.getCheckedNodes(false, true);
     for (const item of downloadSelects) {
-        if (item.children === null) {
+        if (canDeleteNode(item)) {
             selectSize.value = selectSize.value + Number(item.size);
         }
     }
     let systemLogSelects = systemLogRef.value.getCheckedNodes(false, true);
     for (const item of systemLogSelects) {
-        if (item.children === null) {
+        if (canDeleteNode(item)) {
             selectSize.value = selectSize.value + Number(item.size);
         }
     }
     let containerSelects = containerRef.value.getCheckedNodes(false, true);
     for (const item of containerSelects) {
-        if (item.children === null) {
+        if (canDeleteNode(item)) {
             selectSize.value = selectSize.value + Number(item.size);
         }
     }
 }
 
 function loadCheck(data: any, checkList: any) {
-    if (data.children === null) {
-        if (data.isCheck) {
-            checkList.push(data.id);
-        }
-        return;
-    }
-    for (const item of data) {
-        if (item.isCheck) {
+    const nodes = Array.isArray(data) ? data : [data];
+    for (const item of nodes) {
+        if (canDeleteNode(item) && item.isCheck) {
             selectSize.value = selectSize.value + Number(item.size);
             checkList.push(item.id);
-            continue;
         }
-        if (item.children) {
+        if (hasChildren(item)) {
             loadCheck(item.children, checkList);
         }
     }
@@ -520,6 +510,8 @@ function load18n(label: string) {
             return i18n.global.t('clean.snapshot');
         case 'rollback':
             return i18n.global.t('clean.rollback');
+        case 'rollback_community_restore':
+            return i18n.global.t('license.restoreCommunity');
         case 'tmp_backup':
             return i18n.global.t('clean.tmpBackup');
         case 'unknown_app':
@@ -586,7 +578,7 @@ function load18n(label: string) {
         case 'CustomAppstore':
             return i18n.global.t('xpack.customApp.name');
         case 'NodeFile':
-            return i18n.global.t('xpack.exchange.exchange');
+            return i18n.global.t('xpack.sync.file');
         case 'RuntimeExtension':
             return i18n.global.t('website.runtime');
         case 'Image':

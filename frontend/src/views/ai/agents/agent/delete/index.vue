@@ -16,7 +16,7 @@
         <template #footer>
             <span class="dialog-footer">
                 <el-button @click="handleClose" :disabled="loading">{{ $t('commons.button.cancel') }}</el-button>
-                <el-button type="primary" @click="submit" :loading="loading">
+                <el-button v-permission type="primary" @click="submit" :loading="loading">
                     {{ $t('commons.button.confirm') }}
                 </el-button>
             </span>
@@ -29,7 +29,7 @@
 import { FormInstance } from 'element-plus';
 import { ref } from 'vue';
 import { deleteAgent } from '@/api/modules/ai';
-import { newUUID } from '@/utils/util';
+import { newUUID } from '@/utils/id';
 import TaskLog from '@/components/log/task/index.vue';
 
 const open = ref(false);

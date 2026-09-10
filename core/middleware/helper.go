@@ -1,36 +1,21 @@
 package middleware
 
 import (
-	"net/http"
+	"strings"
 
-	"github.com/1Panel-dev/1Panel/core/app/repo"
+	"github.com/1Panel-dev/1Panel/core/utils/publicshare"
 )
 
-func LoadErrCode() int {
-	settingRepo := repo.NewISettingRepo()
-	codeVal, err := settingRepo.GetValueByKey("NoAuthSetting")
-	if err != nil {
-		return 500
+func ShouldProxyToAgent(reqPath string) bool {
+	if strings.HasPrefix(reqPath, "/1panel/swagger") || !strings.HasPrefix(reqPath, "/api/v2") {
+		return false
 	}
+	if strings.HasPrefix(reqPath, "/api/v2/core") && !strings.HasPrefix(reqPath, "/api/v2/core/xpack") {
+		return false
+	}
+	return true
+}
 
-	switch codeVal {
-	case "400":
-		return http.StatusBadRequest
-	case "401":
-		return http.StatusUnauthorized
-	case "403":
-		return http.StatusForbidden
-	case "404":
-		return http.StatusNotFound
-	case "408":
-		return http.StatusRequestTimeout
-	case "416":
-		return http.StatusRequestedRangeNotSatisfiable
-	case "500":
-		return http.StatusInternalServerError
-	case "444":
-		return 444
-	default:
-		return http.StatusOK
-	}
+func IsPublicFileShareAPI(reqPath string) bool {
+	return publicshare.IsAPI(reqPath)
 }

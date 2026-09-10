@@ -2,6 +2,7 @@ package service
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -15,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 	"unicode/utf8"
 
@@ -41,11 +43,16 @@ import (
 	"github.com/1Panel-dev/1Panel/agent/global"
 	"github.com/1Panel-dev/1Panel/agent/utils/common"
 	"github.com/1Panel-dev/1Panel/agent/utils/files"
+	terminalai "github.com/1Panel-dev/1Panel/agent/utils/terminal/ai"
 	"github.com/pkg/errors"
 )
 
 type FileService struct {
 }
+
+const fileHistorySnapshotMaxSize = 10 * 1024 * 1024
+
+var fileTransferLocks = newFileTransferLocks()
 
 type IFileService interface {
 	GetFileList(op request.FileOption) (response.FileInfo, error)
@@ -55,7 +62,9 @@ type IFileService interface {
 	Delete(op request.FileDelete) error
 	BatchDelete(op request.FileBatchDelete) error
 	Compress(c request.FileCompress) error
+	StopCompress(taskID string) error
 	DeCompress(c request.FileDeCompress) error
+	StopDeCompress(taskID string) error
 	GetContent(op request.FileContentReq) (response.FileInfo, error)
 	GetPreviewContent(op request.FileContentReq) (response.FileInfo, error)
 	SaveContent(edit request.FileEdit) error
@@ -65,12 +74,12 @@ type IFileService interface {
 	ChangeName(req request.FileRename) error
 	Wget(w request.FileWget) (string, error)
 	MvFile(m request.FileMove) error
+	StopMvFile(taskID string) error
 	ChangeOwner(req request.FileRoleUpdate) error
 	ChangeMode(op request.FileCreate) error
 	BatchChangeModeAndOwner(op request.FileRoleReq) error
 	ReadLogByLine(req request.FileReadByLineReq) (*response.FileLineContent, error)
 
-	GetPathByType(pathType string) string
 	BatchCheckFiles(req request.FilePathsCheck) []response.ExistFileInfo
 	GetHostMount() []dto.DiskInfo
 	GetUsersAndGroups() (*response.UserGroupResponse, error)
@@ -78,10 +87,7 @@ type IFileService interface {
 	ConvertLog(req dto.PageInfo) (int64, []response.FileConvertLog, error)
 	BatchGetRemarks(req request.FileRemarkBatch) map[string]string
 	SetRemark(req request.FileRemarkUpdate) error
-}
-
-var filteredPaths = []string{
-	"/.1panel_clash",
+	AISearch(req request.FileAISearch) (*response.FileAISearchResult, error)
 }
 
 const (
@@ -106,8 +112,27 @@ func (f *FileService) GetFileList(op request.FileOption) (response.FileInfo, err
 	if err != nil {
 		return fileInfo, err
 	}
+	shareMap, err := NewIFileShareService().SharePathCodeMap()
+	if err != nil {
+		return fileInfo, err
+	}
+	applyFileShares(info, shareMap)
 	fileInfo.FileInfo = *info
 	return fileInfo, nil
+}
+
+func applyFileShares(info *files.FileInfo, shareMap map[string]string) {
+	if info == nil {
+		return
+	}
+	if code, ok := shareMap[info.Path]; ok {
+		info.ShareCode = code
+	} else {
+		info.ShareCode = ""
+	}
+	for _, item := range info.Items {
+		applyFileShares(item, shareMap)
+	}
 }
 
 func (f *FileService) SearchUploadWithPage(req request.SearchUploadWithPage) (int64, interface{}, error) {
@@ -133,6 +158,10 @@ func (f *FileService) SearchUploadWithPage(req request.SearchUploadWithPage) (in
 			Name:      item.Name(),
 		})
 	}
+
+	sort.SliceStable(files, func(i, j int) bool {
+		return files[i].CreatedAt > files[j].CreatedAt
+	})
 
 	total, start, end := len(files), (req.Page-1)*req.PageSize, req.Page*req.PageSize
 	if start > total {
@@ -170,14 +199,7 @@ func (f *FileService) GetFileTree(op request.FileOption) ([]response.FileTree, e
 }
 
 func shouldFilterPath(path string) bool {
-	cleanedPath := filepath.Clean(path)
-	for _, filteredPath := range filteredPaths {
-		cleanedFilteredPath := filepath.Clean(filteredPath)
-		if cleanedFilteredPath == cleanedPath || strings.HasPrefix(cleanedPath, cleanedFilteredPath+"/") {
-			return true
-		}
-	}
-	return false
+	return files.ShouldFilterSensitivePath(path)
 }
 
 func (f *FileService) buildFileTree(node *response.FileTree, items []*files.FileInfo, op request.FileOption, level int) error {
@@ -219,8 +241,12 @@ func (f *FileService) buildChildNode(childNode *response.FileTree, fileInfo *fil
 	return f.buildFileTree(childNode, subInfo.Items, op, level-1)
 }
 
+func hasInvalidFileName(fullPath string) bool {
+	return files.IsInvalidChar(filepath.Base(fullPath))
+}
+
 func (f *FileService) Create(op request.FileCreate) error {
-	if files.IsInvalidChar(op.Path) {
+	if hasInvalidFileName(op.Path) {
 		return buserr.New("ErrInvalidChar")
 	}
 	fo := files.NewFileOp()
@@ -272,16 +298,37 @@ func (f *FileService) Delete(op request.FileDelete) error {
 	if recycleBinStatus.Value == "Disable" {
 		op.ForceDelete = true
 	}
+	var historyTargets []string
 	if op.ForceDelete {
-		if op.IsDir {
-			return fo.DeleteDir(op.Path)
-		} else {
-			return fo.DeleteFile(op.Path)
+		var err error
+		historyTargets, err = f.collectPermanentDeleteTargets(op.Path, op.IsDir)
+		if err != nil {
+			return err
 		}
+	}
+	if op.ForceDelete {
+		var err error
+		if op.IsDir {
+			err = fo.DeleteDir(op.Path)
+		} else {
+			err = fo.DeleteFile(op.Path)
+		}
+		if err != nil {
+			return err
+		}
+		if err := cleanupTrashInfoByEntryPath(op.Path); err != nil {
+			global.LOG.Warnf("cleanup trashinfo failed for %s: %v", op.Path, err)
+		}
+		f.cleanupPermanentDeleteHistory(historyTargets)
+		return nil
 	}
 	info, _ := fo.Fs.Stat(op.Path)
 	if info == nil || files.IsSymlink(info.Mode()) {
-		return os.Remove(op.Path)
+		if err := os.Remove(op.Path); err != nil {
+			return err
+		}
+		f.cleanupPermanentDeleteHistory([]string{op.Path})
+		return nil
 	}
 
 	if err := NewIRecycleBinService().Create(request.RecycleBinCreate{SourcePath: op.Path}); err != nil {
@@ -294,15 +341,27 @@ func (f *FileService) BatchDelete(op request.FileBatchDelete) error {
 	fo := files.NewFileOp()
 	if op.IsDir {
 		for _, file := range op.Paths {
+			targets, err := f.collectPermanentDeleteTargets(file, true)
+			if err != nil {
+				return err
+			}
 			if err := fo.DeleteDir(file); err != nil {
 				return err
 			}
+			if err := cleanupTrashInfoByEntryPath(file); err != nil {
+				global.LOG.Warnf("cleanup trashinfo failed for %s: %v", file, err)
+			}
+			f.cleanupPermanentDeleteHistory(targets)
 		}
 	} else {
 		for _, file := range op.Paths {
 			if err := fo.DeleteFile(file); err != nil {
 				return err
 			}
+			if err := cleanupTrashInfoByEntryPath(file); err != nil {
+				global.LOG.Warnf("cleanup trashinfo failed for %s: %v", file, err)
+			}
+			f.cleanupPermanentDeleteHistory([]string{file})
 		}
 	}
 	return nil
@@ -310,7 +369,10 @@ func (f *FileService) BatchDelete(op request.FileBatchDelete) error {
 
 func (f *FileService) ChangeMode(op request.FileCreate) error {
 	fo := files.NewFileOp()
-	return fo.ChmodR(op.Path, op.Mode, op.Sub)
+	if err := fo.ChmodR(op.Path, op.Mode, op.Sub); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (f *FileService) BatchChangeModeAndOwner(op request.FileRoleReq) error {
@@ -329,9 +391,44 @@ func (f *FileService) BatchChangeModeAndOwner(op request.FileRoleReq) error {
 	return nil
 }
 
+func (f *FileService) collectPermanentDeleteTargets(targetPath string, isDir bool) ([]string, error) {
+	if !isDir {
+		return []string{targetPath}, nil
+	}
+
+	var targets []string
+	if err := filepath.WalkDir(targetPath, func(currentPath string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d == nil || d.IsDir() {
+			return nil
+		}
+		targets = append(targets, currentPath)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return targets, nil
+}
+
+func (f *FileService) cleanupPermanentDeleteHistory(targets []string) {
+	if len(targets) == 0 {
+		return
+	}
+	for _, target := range targets {
+		if err := historyService.DeleteRelatedHistory(target); err != nil {
+			global.LOG.Warnf("cleanup file history failed for %s: %v", target, err)
+		}
+	}
+}
+
 func (f *FileService) ChangeOwner(req request.FileRoleUpdate) error {
 	fo := files.NewFileOp()
-	return fo.ChownR(req.Path, req.User, req.Group, req.Sub)
+	if err := fo.ChownR(req.Path, req.User, req.Group, req.Sub); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (f *FileService) Compress(c request.FileCompress) error {
@@ -339,7 +436,76 @@ func (f *FileService) Compress(c request.FileCompress) error {
 	if !c.Replace && fo.Stat(filepath.Join(c.Dst, c.Name)) {
 		return buserr.New("ErrFileIsExist")
 	}
-	return fo.Compress(c.Files, c.Dst, c.Name, files.CompressType(c.Type), c.Secret)
+	if err := preflightCompressTool(files.CompressType(c.Type)); err != nil {
+		return err
+	}
+	taskItem, err := task.NewTask(c.Name, task.TaskExec, task.TaskScopeTask, c.TaskID, 1)
+	if err != nil {
+		return err
+	}
+	go func() {
+		taskItem.AddSubTask(c.Name, func(t *task.Task) error {
+			t.LogStart(c.Name)
+			compressType := files.CompressType(c.Type)
+			dstFile := filepath.Join(c.Dst, c.Name)
+			success := false
+			defer func() {
+				if !success {
+					_ = os.Remove(dstFile)
+				}
+			}()
+			if err := fo.Compress(t.TaskCtx, c.Files, c.Dst, c.Name, compressType, c.Secret, nil); err != nil {
+				return err
+			}
+			info, err := os.Stat(dstFile)
+			if err != nil {
+				return err
+			}
+			if info.Size() == 0 {
+				return fmt.Errorf("compressed file not generated: %s", dstFile)
+			}
+			success = true
+			return nil
+		}, nil)
+		_ = taskItem.Execute()
+	}()
+	return nil
+}
+
+func preflightCompressTool(compressType files.CompressType) error {
+	switch compressType {
+	case files.Tar, files.Gz, files.Bz2, files.TarBz2, files.Tgz, files.TarGz, files.Xz, files.TarXz, files.Rar, files.X7z:
+		_, err := files.NewShellArchiver(compressType)
+		return err
+	default:
+		return nil
+	}
+}
+
+func preflightDecompressTool(decompressType files.CompressType) error {
+	switch decompressType {
+	case files.Rar:
+		_, err := files.NewExtractShellArchiver(decompressType)
+		return err
+	default:
+		return nil
+	}
+}
+
+func (f *FileService) StopCompress(taskID string) error {
+	if cancel, ok := global.LoadTaskCancel(taskID); ok {
+		cancel()
+		return nil
+	}
+	return buserr.New("TaskNotFound")
+}
+
+func (f *FileService) StopDeCompress(taskID string) error {
+	if cancel, ok := global.LoadTaskCancel(taskID); ok {
+		cancel()
+		return nil
+	}
+	return buserr.New("TaskNotFound")
 }
 
 func (f *FileService) DeCompress(c request.FileDeCompress) error {
@@ -347,10 +513,226 @@ func (f *FileService) DeCompress(c request.FileDeCompress) error {
 	if c.Type == "tar" && len(c.Secret) != 0 {
 		c.Type = "tar.gz"
 	}
-	return fo.Decompress(c.Path, c.Dst, files.CompressType(c.Type), c.Secret)
+	if err := preflightDecompressTool(files.CompressType(c.Type)); err != nil {
+		return err
+	}
+	taskItem, err := task.NewTask(c.Path, task.TaskExec, task.TaskScopeTask, c.TaskID, 1)
+	if err != nil {
+		return err
+	}
+	go func() {
+		taskItem.AddSubTask(c.Path, func(t *task.Task) error {
+			t.LogStart(c.Path)
+			dstExisted := fo.Stat(c.Dst)
+			parentDir := filepath.Dir(c.Dst)
+			if !fo.Stat(parentDir) {
+				if err := fo.CreateDir(parentDir, constant.DirPerm); err != nil {
+					return err
+				}
+			}
+			tempDst, err := os.MkdirTemp(parentDir, ".decompress-*")
+			if err != nil {
+				return err
+			}
+			success := false
+			defer func() {
+				_ = os.RemoveAll(tempDst)
+				if !success && !dstExisted {
+					_ = os.RemoveAll(c.Dst)
+				}
+			}()
+			if err := fo.DecompressWithOptions(t.TaskCtx, c.Path, tempDst, files.CompressType(c.Type), c.Secret, files.DecompressOptions{
+				PreserveOwner:     true,
+				AllowCLIReextract: true,
+			}); err != nil {
+				return err
+			}
+			if err := fo.CreateDir(c.Dst, constant.DirPerm); err != nil {
+				return err
+			}
+			if err := copyDecompressTree(t.TaskCtx, tempDst, c.Dst); err != nil {
+				return err
+			}
+			success = true
+			return nil
+		}, nil)
+		_ = taskItem.Execute()
+	}()
+	return nil
+}
+
+func copyDecompressTree(ctx context.Context, srcDir, dstDir string) error {
+	state := decompressCopyState{hardlinks: make(map[decompressFileIdentity]string)}
+	entries, err := os.ReadDir(srcDir)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if err := copyDecompressEntryWithState(ctx, filepath.Join(srcDir, entry.Name()), filepath.Join(dstDir, entry.Name()), &state); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type decompressFileIdentity struct {
+	device uint64
+	inode  uint64
+}
+
+type decompressCopyState struct {
+	hardlinks map[decompressFileIdentity]string
+}
+
+func decompressHardlinkIdentity(info os.FileInfo) (decompressFileIdentity, bool) {
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || stat.Nlink < 2 {
+		return decompressFileIdentity{}, false
+	}
+	return decompressFileIdentity{device: uint64(stat.Dev), inode: uint64(stat.Ino)}, true
+}
+
+func copyDecompressEntry(ctx context.Context, srcPath, dstPath string) (retErr error) {
+	state := decompressCopyState{hardlinks: make(map[decompressFileIdentity]string)}
+	return copyDecompressEntryWithState(ctx, srcPath, dstPath, &state)
+}
+
+func copyDecompressEntryWithState(ctx context.Context, srcPath, dstPath string, state *decompressCopyState) (retErr error) {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	info, err := os.Lstat(srcPath)
+	if err != nil {
+		return err
+	}
+
+	if info.Mode()&os.ModeSymlink != 0 {
+		if err := os.RemoveAll(dstPath); err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(dstPath), constant.DirPerm); err != nil {
+			return err
+		}
+		target, err := os.Readlink(srcPath)
+		if err != nil {
+			return err
+		}
+		if err := os.Symlink(target, dstPath); err != nil {
+			return err
+		}
+		return applyDecompressOwnership(srcPath, dstPath)
+	}
+
+	if info.IsDir() {
+		dstInfo, err := os.Lstat(dstPath)
+		keepExistingDir := err == nil && dstInfo.IsDir() && dstInfo.Mode()&os.ModeSymlink == 0
+		if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		if !keepExistingDir {
+			if err := os.RemoveAll(dstPath); err != nil {
+				return err
+			}
+			if err := os.MkdirAll(dstPath, info.Mode().Perm()); err != nil {
+				return err
+			}
+			if err := applyDecompressOwnership(srcPath, dstPath); err != nil {
+				return err
+			}
+			if err := os.Chmod(dstPath, info.Mode().Perm()); err != nil {
+				return err
+			}
+		}
+		entries, err := os.ReadDir(srcPath)
+		if err != nil {
+			return err
+		}
+		for _, entry := range entries {
+			if err := copyDecompressEntryWithState(ctx, filepath.Join(srcPath, entry.Name()), filepath.Join(dstPath, entry.Name()), state); err != nil {
+				return err
+			}
+		}
+		if keepExistingDir {
+			return nil
+		}
+		return os.Chtimes(dstPath, info.ModTime(), info.ModTime())
+	}
+
+	dstInfo, err := os.Lstat(dstPath)
+	keepExistingFile := err == nil && dstInfo.Mode().IsRegular()
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if !keepExistingFile {
+		if err := os.RemoveAll(dstPath); err != nil {
+			return err
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(dstPath), constant.DirPerm); err != nil {
+		return err
+	}
+	identity, isHardlink := decompressHardlinkIdentity(info)
+	if !keepExistingFile && isHardlink {
+		if existingPath, ok := state.hardlinks[identity]; ok {
+			if err := os.Link(existingPath, dstPath); err != nil {
+				return err
+			}
+			return os.Chtimes(dstPath, info.ModTime(), info.ModTime())
+		}
+	}
+
+	srcFile, err := os.Open(srcPath)
+	if err != nil {
+		return err
+	}
+	defer srcFile.Close()
+
+	dstFile, err := os.OpenFile(dstPath, os.O_CREATE|os.O_RDWR|os.O_TRUNC, info.Mode().Perm())
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cerr := dstFile.Close(); cerr != nil && retErr == nil {
+			retErr = cerr
+		}
+	}()
+
+	if _, err := io.Copy(dstFile, srcFile); err != nil {
+		return err
+	}
+	if !keepExistingFile {
+		if err := applyDecompressOwnership(srcPath, dstPath); err != nil {
+			return err
+		}
+		if err := os.Chmod(dstPath, info.Mode().Perm()); err != nil {
+			return err
+		}
+		if isHardlink {
+			state.hardlinks[identity] = dstPath
+		}
+	}
+	return os.Chtimes(dstPath, info.ModTime(), info.ModTime())
+}
+
+func applyDecompressOwnership(srcPath, dstPath string) error {
+	info, err := os.Lstat(srcPath)
+	if err != nil {
+		return err
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return nil
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return os.Lchown(dstPath, int(stat.Uid), int(stat.Gid))
+	}
+	return os.Chown(dstPath, int(stat.Uid), int(stat.Gid))
 }
 
 func (f *FileService) GetContent(op request.FileContentReq) (response.FileInfo, error) {
+	if files.ShouldDenySensitiveFileRead(op.Path) {
+		return response.FileInfo{}, buserr.New("ErrSensitiveFileRead")
+	}
 	info, err := files.NewFileInfo(files.FileOption{
 		Path:     op.Path,
 		Expand:   true,
@@ -387,6 +769,9 @@ func (f *FileService) GetContent(op request.FileContentReq) (response.FileInfo, 
 }
 
 func (f *FileService) GetPreviewContent(op request.FileContentReq) (response.FileInfo, error) {
+	if files.ShouldDenySensitiveFileRead(op.Path) {
+		return response.FileInfo{}, buserr.New("ErrSensitiveFileRead")
+	}
 	info, err := files.NewFileInfo(files.FileOption{
 		Path:     op.Path,
 		Expand:   false,
@@ -396,6 +781,9 @@ func (f *FileService) GetPreviewContent(op request.FileContentReq) (response.Fil
 		return response.FileInfo{}, err
 	}
 
+	if files.IsBinaryPreviewFile(info.MimeType, info.Extension) {
+		return response.FileInfo{}, buserr.New("ErrFileCanNotRead")
+	}
 	if files.IsBlockDevice(info.FileMode) {
 		return response.FileInfo{FileInfo: *info}, nil
 	}
@@ -472,58 +860,173 @@ func (f *FileService) SaveContent(edit request.FileEdit) error {
 	}
 
 	fo := files.NewFileOp()
-	return fo.WriteFile(edit.Path, strings.NewReader(edit.Content), info.FileMode)
+	oldContent, _ := os.ReadFile(edit.Path)
+	if bytes.Equal(oldContent, []byte(edit.Content)) {
+		return nil
+	}
+
+	if err := fo.WriteFile(edit.Path, strings.NewReader(edit.Content), info.FileMode); err != nil {
+		return err
+	}
+	if err := historyService.RecordSave(edit.Path, oldContent, info.FileMode); err != nil {
+		global.LOG.Warnf("record file save history failed for %s: %v", edit.Path, err)
+	}
+	return nil
 }
 
 func (f *FileService) ChangeName(req request.FileRename) error {
-	if files.IsInvalidChar(req.NewName) {
+	if hasInvalidFileName(req.NewName) {
 		return buserr.New("ErrInvalidChar")
 	}
 	fo := files.NewFileOp()
-	return fo.Rename(req.OldName, req.NewName)
+	content, mode, shouldRecordHistory := readEditableFileHistoryContent(req.OldName)
+	if err := fo.Rename(req.OldName, req.NewName); err != nil {
+		return err
+	}
+	if shouldRecordHistory {
+		if histErr := historyService.RecordOperation(fileHistoryOpRename, req.OldName, content, mode, req.OldName, req.NewName); histErr != nil {
+			global.LOG.Warnf("record file rename history failed for %s: %v", req.OldName, histErr)
+		}
+	}
+	return nil
 }
 
 func (f *FileService) Wget(w request.FileWget) (string, error) {
 	fo := files.NewFileOp()
 	key := "file-wget-" + common.GetUuid()
-	return key, fo.DownloadFileWithProcess(w.Url, filepath.Join(w.Path, w.Name), key, w.IgnoreCertificate)
+	options := files.DownloadOptions{
+		IgnoreCertificate: w.IgnoreCertificate,
+	}
+	if w.UseProxy {
+		systemProxy, err := NewISettingService().GetSystemProxy()
+		if err != nil {
+			return "", err
+		}
+		options.Proxy = &files.DownloadProxyConfig{
+			Type:     systemProxy.Type,
+			URL:      systemProxy.URL,
+			Port:     systemProxy.Port,
+			User:     systemProxy.User,
+			Password: systemProxy.Password,
+		}
+	}
+	return key, fo.DownloadFileWithProcess(w.Url, filepath.Join(w.Path, w.Name), key, options)
 }
 
 func (f *FileService) MvFile(m request.FileMove) error {
 	fo := files.NewFileOp()
+	if err := validateFileMove(fo, m); err != nil {
+		return err
+	}
+	if m.TaskID == "" {
+		m.TaskID = common.GetUuid()
+	}
+	if !fileTransferLocks.Acquire(m.TaskID, getFileTransferPaths(m)) {
+		return buserr.New("TaskIsExecuting")
+	}
+	taskItem, err := task.NewTask(m.NewPath, task.TaskExec, task.TaskScopeTask, m.TaskID, 1)
+	if err != nil {
+		fileTransferLocks.Release(m.TaskID)
+		return err
+	}
+	go func() {
+		defer fileTransferLocks.Release(m.TaskID)
+		taskItem.AddSubTaskWithOps(m.NewPath, func(t *task.Task) error {
+			t.LogStart(m.NewPath)
+			err := f.moveFileWithContext(t.TaskCtx, m)
+			if err != nil && t.TaskCtx.Err() != nil {
+				return t.TaskCtx.Err()
+			}
+			return err
+		}, nil, 0, 0)
+		_ = taskItem.Execute()
+	}()
+	return nil
+}
+
+func (f *FileService) StopMvFile(taskID string) error {
+	if cancel, ok := global.LoadTaskCancel(taskID); ok {
+		cancel()
+		return nil
+	}
+	return buserr.New("TaskNotFound")
+}
+
+func validateFileMove(fo files.FileOp, m request.FileMove) error {
 	if !fo.Stat(m.NewPath) {
 		return buserr.New("ErrPathNotFound")
 	}
-	for _, oldPath := range m.OldPaths {
+	for _, oldPath := range append(append([]string{}, m.OldPaths...), m.CoverPaths...) {
 		if !fo.Stat(oldPath) {
 			return buserr.WithName("ErrFileNotFound", oldPath)
 		}
-		if oldPath == m.NewPath || strings.Contains(m.NewPath, filepath.Clean(oldPath)+"/") {
+		oldPath = filepath.Clean(oldPath)
+		newPath := filepath.Clean(m.NewPath)
+		if oldPath == newPath || strings.HasPrefix(newPath, oldPath+string(filepath.Separator)) {
 			return buserr.New("ErrMovePathFailed")
 		}
 	}
+	return nil
+}
+
+func (f *FileService) moveFileWithContext(ctx context.Context, m request.FileMove) error {
+	fo := files.NewFileOp()
+	type moveSnapshot struct {
+		path    string
+		content []byte
+		mode    os.FileMode
+		record  bool
+	}
 	var errs []error
 	if m.Type == "cut" {
+		snapshots := make([]moveSnapshot, 0, len(m.OldPaths))
+		for _, oldPath := range m.OldPaths {
+			content, mode, record := readEditableFileHistoryContent(oldPath)
+			snapshots = append(snapshots, moveSnapshot{path: oldPath, content: content, mode: mode, record: record})
+		}
 		if len(m.CoverPaths) > 0 {
 			for _, src := range m.CoverPaths {
-				if err := fo.CopyAndReName(src, m.NewPath, "", true); err != nil {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				if err := fo.CopyAndReNameWithContext(ctx, src, m.NewPath, "", true); err != nil {
 					errs = append(errs, err)
 					global.LOG.Errorf("cut copy file [%s] to [%s] failed, err: %s", src, m.NewPath, err.Error())
+					continue
+				}
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				if err := fo.DeleteDir(src); err != nil {
+					removeErr := fmt.Errorf("remove merged source [%s] failed: %w", src, err)
+					errs = append(errs, removeErr)
+					global.LOG.Errorf("%s", removeErr.Error())
 				}
 			}
 		}
-		return fo.Cut(m.OldPaths, m.NewPath, m.Name, m.Cover)
+		if err := fo.CutWithContext(ctx, m.OldPaths, m.NewPath, m.Name, m.Cover); err != nil {
+			return err
+		}
+		for _, snapshot := range snapshots {
+			if snapshot.record {
+				targetPath := buildHistoryMoveTargetPath(m.NewPath, m.Name, snapshot.path, len(m.OldPaths))
+				if histErr := historyService.RecordOperation(fileHistoryOpMove, snapshot.path, snapshot.content, snapshot.mode, snapshot.path, targetPath); histErr != nil {
+					global.LOG.Warnf("record file move history failed for %s: %v", snapshot.path, histErr)
+				}
+			}
+		}
+		return aggregateFileMoveErrors(errs)
 	}
 	if m.Type == "copy" {
 		for _, src := range m.OldPaths {
-			if err := fo.CopyAndReName(src, m.NewPath, m.Name, m.Cover); err != nil {
+			if err := fo.CopyAndReNameWithContext(ctx, src, m.NewPath, m.Name, m.Cover); err != nil {
 				errs = append(errs, err)
 				global.LOG.Errorf("copy file [%s] to [%s] failed, err: %s", src, m.NewPath, err.Error())
 			}
 		}
 		if len(m.CoverPaths) > 0 {
 			for _, src := range m.CoverPaths {
-				if err := fo.CopyAndReName(src, m.NewPath, "", true); err != nil {
+				if err := fo.CopyAndReNameWithContext(ctx, src, m.NewPath, "", true); err != nil {
 					errs = append(errs, err)
 					global.LOG.Errorf("copy file [%s] to [%s] failed, err: %s", src, m.NewPath, err.Error())
 				}
@@ -531,17 +1034,61 @@ func (f *FileService) MvFile(m request.FileMove) error {
 		}
 	}
 
-	var errString string
-	for _, err := range errs {
-		errString += err.Error() + "\n"
+	return aggregateFileMoveErrors(errs)
+}
+
+func readEditableFileHistoryContent(filePath string) ([]byte, os.FileMode, bool) {
+	info, err := os.Lstat(filePath)
+	if err != nil {
+		return nil, 0640, false
 	}
-	if errString != "" {
-		return errors.New(errString)
+	mode := info.Mode()
+	if mode.IsDir() || mode&os.ModeSymlink != 0 || !mode.IsRegular() || files.IsBlockDevice(mode) || info.Size() > fileHistorySnapshotMaxSize {
+		return nil, mode, false
 	}
-	return nil
+	if files.IsBinaryPreviewFile(files.GetMimeType(filePath), filepath.Ext(info.Name())) {
+		return nil, mode, false
+	}
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, mode, false
+	}
+	defer file.Close()
+
+	headBuf := make([]byte, 1024)
+	n, err := file.Read(headBuf)
+	if err != nil && err != io.EOF {
+		return nil, mode, false
+	}
+	if n > 0 && files.DetectBinary(headBuf[:n]) {
+		return nil, mode, false
+	}
+	if _, err := file.Seek(0, 0); err != nil {
+		return nil, mode, false
+	}
+	content, err := io.ReadAll(io.LimitReader(file, fileHistorySnapshotMaxSize+1))
+	if err != nil || int64(len(content)) > fileHistorySnapshotMaxSize {
+		return nil, mode, false
+	}
+	return content, mode, true
+}
+
+func buildHistoryMoveTargetPath(dst, name, sourcePath string, sourceCount int) string {
+	if strings.TrimSpace(dst) == "" {
+		return sourcePath
+	}
+	if strings.TrimSpace(name) != "" && sourceCount == 1 {
+		return filepath.Join(dst, name)
+	}
+	return filepath.Join(dst, filepath.Base(sourcePath))
 }
 
 func (f *FileService) FileDownload(d request.FileDownload) (string, error) {
+	for _, p := range d.Paths {
+		if files.ShouldDenySensitiveFileRead(p) {
+			return "", buserr.New("ErrSensitiveFileRead")
+		}
+	}
 	filePath := d.Paths[0]
 	if d.Compress {
 		tempPath := filepath.Join(os.TempDir(), fmt.Sprintf("%d", time.Now().UnixNano()))
@@ -549,7 +1096,7 @@ func (f *FileService) FileDownload(d request.FileDownload) (string, error) {
 			return "", err
 		}
 		fo := files.NewFileOp()
-		if err := fo.Compress(d.Paths, tempPath, d.Name, files.CompressType(d.Type), ""); err != nil {
+		if err := fo.Compress(context.Background(), d.Paths, tempPath, d.Name, files.CompressType(d.Type), "", nil); err != nil {
 			return "", err
 		}
 		filePath = filepath.Join(tempPath, d.Name)
@@ -673,6 +1220,14 @@ func (f *FileService) ReadLogByLine(req request.FileReadByLineReq) (*response.Fi
 		logFilePath, _ = ini_conf.GetIniValue(configPath, "supervisord", "logfile")
 	case constant.Supervisor:
 		logFilePath = path.Join(global.Dir.DataDir, "tools", "supervisord", "log", req.Name)
+	case "ai-proxy":
+		safeName := path.Base(req.Name)
+		if safeName != req.Name || strings.Contains(safeName, "..") {
+			return nil, buserr.New("ErrInvalidParams")
+		}
+		logFilePath = path.Join(global.Dir.LogDir, "ai", safeName)
+	default:
+		return nil, buserr.WithName("ErrNotSupportType", req.Type)
 	}
 
 	file, err := os.Open(logFilePath)
@@ -691,7 +1246,7 @@ func (f *FileService) ReadLogByLine(req request.FileReadByLineReq) (*response.Fi
 		logFileRes  *dto.LogFileRes
 	)
 	if stat.Size() > files.MaxReadFileSize {
-		lines, err = files.TailFromEnd(logFilePath, req.PageSize)
+		lines, _ = files.TailFromEnd(logFilePath, req.PageSize)
 		isEndOfFile = true
 		scope = "tail"
 	} else {
@@ -716,17 +1271,6 @@ func (f *FileService) ReadLogByLine(req request.FileReadByLineReq) (*response.Fi
 		res.End = logFileRes.IsEndOfFile
 	}
 	return res, nil
-}
-
-func (f *FileService) GetPathByType(pathType string) string {
-	if pathType == "websiteDir" {
-		value, _ := settingRepo.GetValueByKey("WEBSITE_DIR")
-		if value == "" {
-			return path.Join(global.Dir.BaseDir, "1panel", "www")
-		}
-		return value
-	}
-	return ""
 }
 
 func (f *FileService) BatchCheckFiles(req request.FilePathsCheck) []response.ExistFileInfo {
@@ -1018,4 +1562,162 @@ func (f *FileService) ConvertLog(req dto.PageInfo) (total int64, data []response
 	}
 
 	return total, data, nil
+}
+
+func (f *FileService) AISearch(req request.FileAISearch) (*response.FileAISearchResult, error) {
+	root := filepath.Clean(strings.TrimSpace(req.Path))
+	if root == "" {
+		return nil, buserr.WithDetail("ErrInvalidParams", "path is required", nil)
+	}
+	query := strings.TrimSpace(req.Query)
+	if query == "" {
+		return nil, buserr.WithDetail("ErrInvalidParams", "query is required", nil)
+	}
+	st, err := os.Stat(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, buserr.New("ErrPathNotFound")
+		}
+		return nil, err
+	}
+	if !st.IsDir() {
+		return nil, buserr.New("ErrPathNotFound")
+	}
+
+	maxItems := req.MaxItems
+	if maxItems <= 0 {
+		maxItems = files.DefaultFileAIMaxItems
+	}
+	if maxItems > 2000 {
+		maxItems = 2000
+	}
+
+	containSub := true
+	if req.ContainSub != nil {
+		containSub = *req.ContainSub
+	}
+
+	searchOpts, err := files.MergeContentSearchOptions(
+		req.MatchCase, req.WholeWord, req.UseRegex,
+		req.Extensions,
+		req.MinSize, req.MaxSize,
+		req.ModifiedAfter, req.ModifiedBefore,
+		req.MaxScanFiles,
+		req.MaxFileBytes,
+		req.MaxHitsPerFile, req.MaxTotalHits,
+		req.ContentHitsPromptMaxBytes,
+		req.LlmMaxOutputTokens,
+	)
+	if err != nil {
+		return nil, buserr.WithDetail("ErrInvalidParams", err.Error(), nil)
+	}
+
+	matchFn, err := files.NewContentLineMatcher(query, searchOpts)
+	if err != nil {
+		return nil, buserr.WithDetail("ErrFileAISearchBadPattern", err.Error(), nil)
+	}
+
+	cfg, timeout, err := terminalai.LoadFileAIRuntimeConfig()
+	aiEnabled := err == nil
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+
+	items, truncated, err := files.CollectDirInventory(root, containSub, maxItems)
+	if err != nil {
+		return nil, err
+	}
+
+	preFiltered := false
+	llmItems := items
+	qLower := strings.ToLower(query)
+	if len(llmItems) > 0 && query != "" {
+		filtered := make([]files.AISearchInventoryItem, 0, len(llmItems))
+		for _, it := range llmItems {
+			rel := strings.TrimSpace(it.RelPath)
+			if rel == "" {
+				continue
+			}
+			if !req.UseRegex && !req.MatchCase && !req.WholeWord && strings.Contains(strings.ToLower(rel), qLower) {
+				filtered = append(filtered, it)
+			}
+		}
+		if len(filtered) >= 8 {
+			llmItems = filtered
+			preFiltered = true
+		}
+	}
+
+	start := time.Now()
+	contentHits, scannedFiles, hitsTrunc := files.SearchFileAIContentHits(root, llmItems, searchOpts, matchFn)
+	hitsDTO := make([]response.FileAIContentHit, 0, len(contentHits))
+	for _, h := range contentHits {
+		hitsDTO = append(hitsDTO, response.FileAIContentHit{Path: h.Path, Line: h.Line, Text: h.Text})
+	}
+
+	matchDesc := searchOpts.ContentMatchDescription()
+	result := &response.FileAISearchResult{
+		Hits:                 hitsDTO,
+		ContentScannedFiles:  scannedFiles,
+		ContentHitsTruncated: hitsTrunc,
+		Truncated:            truncated,
+		PreFiltered:          preFiltered,
+		ItemCount:            len(llmItems),
+	}
+
+	if len(llmItems) == 0 {
+		if aiEnabled {
+			result.Mode = "ai"
+			result.Summary = i18n.GetMsgByKey("FileAISearchEmptyDir")
+			if result.Summary == "" || result.Summary == "FileAISearchEmptyDir" {
+				result.Summary = "No files or directories found under this path (or all entries were filtered)."
+			}
+		} else {
+			result.Mode = "grep"
+			result.Summary = ""
+		}
+		result.Duration = time.Since(start).Round(time.Millisecond).String()
+		return result, nil
+	}
+
+	if !aiEnabled {
+		result.Mode = "grep"
+		result.Summary = ""
+		result.Duration = time.Since(start).Round(time.Millisecond).String()
+		return result, nil
+	}
+
+	result.Mode = "ai"
+
+	clientTimeout := timeout
+	if clientTimeout < 30*time.Second {
+		clientTimeout = 90 * time.Second
+	}
+	if clientTimeout > 5*time.Minute {
+		clientTimeout = 5 * time.Minute
+	}
+
+	runCtx, cancel := context.WithTimeout(context.Background(), timeout+time.Minute)
+	defer cancel()
+
+	llmMaxOut := searchOpts.LlmMaxOutputTokens
+	summary, usage, err := files.RunFileAISearchLLM(runCtx, cfg, clientTimeout, root, query, req.ResponseLanguage, llmItems, truncated, preFiltered, contentHits, scannedFiles, hitsTrunc, matchDesc, searchOpts.ContentHitsPromptMaxBytes, llmMaxOut)
+	if err != nil {
+		result.Mode = "grep"
+		result.Summary = ""
+		result.Duration = time.Since(start).Round(time.Millisecond).String()
+		if errors.Is(err, context.DeadlineExceeded) || strings.Contains(strings.ToLower(err.Error()), "timeout") {
+			return result, nil
+		}
+		return result, nil
+	}
+	result.Summary = summary
+	result.PromptTokens = usage.PromptTokens
+	result.CompletionTokens = usage.CompletionTokens
+	result.TotalTokens = usage.TotalTokens
+	if result.TotalTokens == 0 {
+		result.TotalTokens = usage.PromptTokens + usage.CompletionTokens
+	}
+	result.Duration = time.Since(start).Round(time.Millisecond).String()
+	return result, nil
 }

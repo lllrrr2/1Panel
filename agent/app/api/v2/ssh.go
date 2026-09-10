@@ -225,6 +225,21 @@ func (b *BaseApi) ExportSSHLogs(c *gin.Context) {
 }
 
 // @Tags SSH
+// @Summary Clean host SSH logs
+// @Success 200
+// @Security ApiKeyAuth
+// @Security Timestamp
+// @Router /hosts/ssh/log/clean [post]
+// @x-panel-log {"bodyKeys":[],"paramKeys":[],"BeforeFunctions":[],"formatZH":"清空 SSH 登录日志","formatEN":"clean SSH login logs"}
+func (b *BaseApi) CleanSSHLogs(c *gin.Context) {
+	if err := sshService.CleanLog(); err != nil {
+		helper.InternalServer(c, err)
+		return
+	}
+	helper.Success(c)
+}
+
+// @Tags SSH
 // @Summary Load host SSH conf
 // @Accept json
 // @Param request body dto.OperationWithName true "request"
@@ -249,14 +264,14 @@ func (b *BaseApi) LoadSSHFile(c *gin.Context) {
 // @Tags SSH
 // @Summary Update host SSH setting by file
 // @Accept json
-// @Param request body dto.SSHConf true "request"
+// @Param request body dto.SSHConfUpdate true "request"
 // @Success 200
 // @Security ApiKeyAuth
 // @Security Timestamp
 // @Router /hosts/ssh/file/update [post]
 // @x-panel-log {"bodyKeys":["key"],"paramKeys":[],"BeforeFunctions":[],"formatZH":"修改 SSH 配置文件 [key]","formatEN":"update SSH conf [key]"}
 func (b *BaseApi) UpdateSSHByFile(c *gin.Context) {
-	var req dto.SettingUpdate
+	var req dto.SSHConfUpdate
 	if err := helper.CheckBindAndValidate(&req, c); err != nil {
 		return
 	}

@@ -105,11 +105,11 @@ import LicenseImport from '@/components/license-import/index.vue';
 import DockerProxy from '@/components/docker-proxy/index.vue';
 import BindFree from '@/views/setting/license/bind/free.vue';
 import BindXpack from '@/views/setting/license/bind/xpack.vue';
-import { dateFormat } from '@/utils/util';
+import { dateFormat } from '@/utils/date';
 import i18n from '@/lang';
 import { MsgError, MsgSuccess } from '@/utils/message';
-import { GlobalStore } from '@/store';
-const globalStore = GlobalStore();
+import { useGlobalStore } from '@/composables/useGlobalStore';
+const { globalStore } = useGlobalStore();
 
 const loading = ref();
 const licenseRef = ref();

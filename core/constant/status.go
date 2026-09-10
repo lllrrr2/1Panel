@@ -1,8 +1,9 @@
 package constant
 
 const (
-	StatusSuccess = "Success"
-	StatusFailed  = "Failed"
+	StatusSuccess  = "Success"
+	StatusFailed   = "Failed"
+	StatusCanceled = "Canceled"
 
 	// node
 	StatusWaiting        = "Waiting"
@@ -27,4 +28,10 @@ const (
 	StatusNormal     = "Normal"
 	StatusDeleted    = "Deleted"
 	StatusLoading    = "Loading"
+
+	StatusInactive     = "Inactive"
+	StatusUnknown      = "Unknown"
+	StatusBuilding     = "Building"
+	StatusDegraded     = "Degraded"
+	StatusInaccessible = "Inaccessible"
 )

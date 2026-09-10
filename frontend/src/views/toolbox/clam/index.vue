@@ -2,10 +2,10 @@
     <div>
         <LayoutContent v-loading="loading" v-if="!isRecordShow && !isSettingShow" :title="$t('toolbox.clam.clam')">
             <template #prompt>
-                <el-alert type="info" :closable="false">
+                <el-alert class="clam-helper-alert" type="info" :closable="false">
                     <template #title>
                         {{ $t('toolbox.clam.clamHelper') }}
-                        <el-link class="ml-1 text-xs" v-if="!globalStore.isFxplay" @click="toDoc()" type="primary">
+                        <el-link class="ml-1 text-xs" v-if="!isFxplay" @click="toDoc()" type="primary">
                             {{ $t('commons.button.helpDoc') }}
                         </el-link>
                     </template>
@@ -20,10 +20,22 @@
                 />
             </template>
             <template #leftToolBar v-if="clamStatus.isExist">
-                <el-button type="primary" :disabled="!clamStatus.isRunning" @click="onOpenDialog('add')">
+                <el-button
+                    v-permission
+                    v-node-admin
+                    type="primary"
+                    :disabled="!clamStatus.isRunning"
+                    @click="onOpenDialog('add')"
+                >
                     {{ $t('toolbox.clam.clamCreate') }}
                 </el-button>
-                <el-button plain :disabled="selects.length === 0 || !clamStatus.isRunning" @click="onDelete(null)">
+                <el-button
+                    v-permission
+                    v-node-admin
+                    plain
+                    :disabled="selects.length === 0 || !clamStatus.isRunning"
+                    @click="onDelete(null)"
+                >
                     {{ $t('commons.button.delete') }}
                 </el-button>
             </template>
@@ -40,6 +52,7 @@
                     :class="{ mask: !clamStatus.isRunning }"
                     v-if="!isSettingShow"
                     :pagination-config="paginationConfig"
+                    :scrollbar-always-on="isMobile"
                     v-model:selects="selects"
                     @sort-change="search"
                     @search="search"
@@ -48,7 +61,7 @@
                     <el-table-column type="selection" fix />
                     <el-table-column
                         :label="$t('commons.table.name')"
-                        :min-width="60"
+                        :min-width="isMobile ? 140 : 60"
                         prop="name"
                         sortable
                         show-overflow-tooltip
@@ -62,7 +75,7 @@
                     <el-table-column
                         :label="$t('toolbox.clam.scanDir')"
                         :min-width="120"
-                        prop="path"
+                        prop="scanDir"
                         show-overflow-tooltip
                     >
                         <template #default="{ row }">
@@ -139,6 +152,8 @@
                         <template #default="{ row }">
                             <fu-input-rw-switch
                                 v-model="row.description"
+                                v-permission
+                                v-node-admin
                                 @enter="onChange(row)"
                                 @blur="onChange(row)"
                             />
@@ -149,6 +164,7 @@
                         :buttons="buttons"
                         :ellipsis="10"
                         :label="$t('commons.table.operate')"
+                        :fixed="isMobile ? false : 'right'"
                         fix
                     />
                 </ComplexTable>
@@ -182,15 +198,13 @@ import ClamStatus from '@/views/toolbox/clam/status/index.vue';
 import SettingDialog from '@/views/toolbox/clam/setting/index.vue';
 import { Toolbox } from '@/api/interface/toolbox';
 import { transSpecToStr } from '@/views/cronjob/cronjob/helper';
-import { GlobalStore } from '@/store';
-import { storeToRefs } from 'pinia';
+import { useGlobalStore } from '@/composables/useGlobalStore';
 import { routerToFileWithPath, routerToName } from '@/utils/router';
 
 const loading = ref();
 const selects = ref<any>([]);
 
-const globalStore = GlobalStore();
-const { isProductPro } = storeToRefs(globalStore);
+const { docsUrl, isFxplay, isProductPro, isMobile } = useGlobalStore();
 const data = ref();
 const paginationConfig = reactive({
     cacheSizeKey: 'clam-page-size',
@@ -248,7 +262,7 @@ const getStatus = (status: any) => {
 };
 
 const toDoc = () => {
-    window.open(globalStore.docsUrl + '/user_manual/toolbox/clam/', '_blank', 'noopener,noreferrer');
+    window.open(docsUrl.value + '/user_manual/toolbox/clam/', '_blank', 'noopener,noreferrer');
 };
 
 const onChange = async (row: any) => {
@@ -339,6 +353,8 @@ const onChangeStatus = async (id: number, status: string) => {
 const buttons = [
     {
         label: i18n.global.t('commons.button.handle'),
+        permission: true,
+        nodeAdmin: true,
         click: async (row: Toolbox.ClamInfo) => {
             loading.value = true;
             await handleClamScan(row.id)
@@ -354,6 +370,8 @@ const buttons = [
     },
     {
         label: i18n.global.t('commons.button.edit'),
+        permission: true,
+        nodeAdmin: true,
         click: (row: Toolbox.ClamInfo) => {
             onOpenDialog('edit', row);
         },
@@ -366,6 +384,8 @@ const buttons = [
     },
     {
         label: i18n.global.t('commons.button.delete'),
+        permission: true,
+        nodeAdmin: true,
         click: (row: Toolbox.ClamInfo) => {
             onDelete(row);
         },
@@ -376,3 +396,23 @@ onMounted(() => {
     search();
 });
 </script>
+
+<style scoped lang="scss">
+@media only screen and (max-width: 767px) {
+    .clam-helper-alert {
+        :deep(.el-alert__content),
+        :deep(.el-alert__title) {
+            width: 100%;
+            min-width: 0;
+        }
+
+        :deep(.el-alert__title) {
+            display: block;
+        }
+
+        :deep(.el-link) {
+            white-space: nowrap;
+        }
+    }
+}
+</style>

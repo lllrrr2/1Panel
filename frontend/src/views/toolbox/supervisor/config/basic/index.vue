@@ -10,7 +10,7 @@
                     <span class="input-help">{{ $t('tool.supervisor.serviceNameHelper') }}</span>
                 </el-form-item>
                 <el-form-item>
-                    <el-button type="primary" @click="submit(initForm)" :disabled="loading">
+                    <el-button v-permission v-node-admin type="primary" @click="submit(initForm)" :disabled="loading">
                         {{ $t('commons.button.confirm') }}
                     </el-button>
                 </el-form-item>
@@ -48,7 +48,7 @@ const getStatus = async () => {
     try {
         loading.value = true;
         const res = await getSupervisorStatus();
-        data.value = res.data.config as HostTool.Supersivor;
+        data.value = res.data.config as HostTool.Supervisor;
     } catch (error) {}
     loading.value = false;
 };

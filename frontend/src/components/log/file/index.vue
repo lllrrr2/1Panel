@@ -27,30 +27,37 @@
                 <slot name="button"></slot>
             </span>
         </div>
-        <div class="log-container" ref="logContainer" @scroll="onScroll" :style="containerStyle">
+        <div
+            :class="['log-container', { 'task-mode': isTaskMode }]"
+            ref="logContainer"
+            @scroll="onScroll"
+            :style="containerStyle"
+        >
             <div class="log-spacer" :style="{ height: `${totalHeight}px` }"></div>
             <div class="log-viewport" :style="{ transform: `translateY(${offsetY}px)` }">
                 <div
                     v-for="(log, index) in visibleLogs"
                     :key="`${startIndex + index}-${log}`"
-                    class="log-item"
+                    :class="['log-item', { 'task-mode': isTaskMode }]"
                     :style="{ height: `${logHeight}px` }"
                 >
-                    <hightlight :log="log" :type="config.colorMode ?? 'nginx'"></hightlight>
+                    <Highlight :log="log" :type="config.colorMode ?? 'nginx'"></Highlight>
                 </div>
             </div>
-            <hightlight v-if="logs.length === 0" :log="$t('commons.log.noLog')" type="system"></hightlight>
+            <Highlight v-if="logs.length === 0" :log="$t('commons.log.noLog')" type="system"></Highlight>
         </div>
     </div>
 </template>
 <script lang="ts" setup>
 import { nextTick, onMounted, onUnmounted, reactive, ref, computed } from 'vue';
-import { downloadFile } from '@/utils/util';
+import { downloadFile } from '@/utils/file';
 import { readByLine } from '@/api/modules/files';
-import { GlobalStore } from '@/store';
+import { readTaskLogByLine } from '@/api/modules/log';
+import { useGlobalStore } from '@/composables/useGlobalStore';
 import bus from '@/global/bus';
-import hightlight from '@/components/log/custom-hightlight/index.vue';
-const globalStore = GlobalStore();
+import Highlight from '@/components/log/custom-highlight/index.vue';
+import { translateTaskText } from '@/utils/task';
+const { currentNode } = useGlobalStore();
 
 interface LogProps {
     id?: number;
@@ -146,7 +153,8 @@ const isTailDisabled = ref();
 const firstLoading = ref(false);
 const logs = ref<string[]>([]);
 const logContainer = ref<HTMLElement | null>(null);
-const logHeight = 23;
+const isTaskMode = computed(() => props.config.colorMode === 'task');
+const logHeight = computed(() => (isTaskMode.value ? 16 : 23));
 const containerHeight = ref(500);
 const scrollTop = ref(0);
 const lastScrollTop = ref(0);
@@ -155,16 +163,16 @@ const totalPages = ref(0);
 let resizeObserver: ResizeObserver | null = null;
 const isEndOfFile = ref(false);
 
-const totalHeight = computed(() => logs.value.length * logHeight);
+const totalHeight = computed(() => logs.value.length * logHeight.value);
 
 const visibleCount = computed(() => {
     const buffer = 5;
-    return Math.ceil(containerHeight.value / logHeight) + buffer * 2;
+    return Math.ceil(containerHeight.value / logHeight.value) + buffer * 2;
 });
 
 const startIndex = computed(() => {
     const buffer = 5;
-    const index = Math.floor(scrollTop.value / logHeight) - buffer;
+    const index = Math.floor(scrollTop.value / logHeight.value) - buffer;
     return Math.max(0, index);
 });
 
@@ -177,7 +185,7 @@ const visibleLogs = computed(() => {
 });
 
 const offsetY = computed(() => {
-    return startIndex.value * logHeight;
+    return startIndex.value * logHeight.value;
 });
 
 const updateContainerHeight = () => {
@@ -226,7 +234,7 @@ const changeLoading = () => {
 
 const onDownload = async () => {
     changeLoading();
-    downloadFile(logPath.value, props.config.operateNode || globalStore.currentNode);
+    downloadFile(logPath.value, props.config.operateNode || currentNode.value);
     changeLoading();
 };
 
@@ -262,7 +270,12 @@ const getContent = async (pre: boolean) => {
 
     let res;
     try {
-        res = await readByLine(readReq, props.config.operateNode || globalStore.currentNode);
+        const operateNode = props.config.operateNode || currentNode.value;
+        if (readReq.type === 'task') {
+            res = await readTaskLogByLine(readReq, operateNode);
+        } else {
+            res = await readByLine(readReq, operateNode);
+        }
     } catch (error) {
         isLoading.value = false;
         firstLoading.value = false;
@@ -292,7 +305,7 @@ const getContent = async (pre: boolean) => {
                 return String.fromCharCode(parseInt(grp, 16));
             }),
         );
-        const newLogs = res.data.lines;
+        const newLogs = res.data.lines.map((line) => translateTaskText(line));
         if (tailLog.value && newLogs.length === readReq.pageSize && readReq.page < res.data.total) {
             readReq.page++;
         }
@@ -333,7 +346,7 @@ const getContent = async (pre: boolean) => {
                 if (pre) {
                     if (readReq.page > 1) {
                         const addedLines = newLogs.length;
-                        const newScrollPosition = lastScrollTop.value + addedLines * logHeight;
+                        const newScrollPosition = lastScrollTop.value + addedLines * logHeight.value;
                         logContainer.value.scrollTop = newScrollPosition;
                     }
                 } else {
@@ -361,7 +374,7 @@ const getContent = async (pre: boolean) => {
     }
     if (logs.value && logs.value.length > 3000) {
         const removedCount = readReq.pageSize;
-        const currentScrollRatio = scrollTop.value / (logs.value.length * logHeight);
+        const currentScrollRatio = scrollTop.value / (logs.value.length * logHeight.value);
 
         if (pre) {
             logs.value.splice(logs.value.length - removedCount, removedCount);
@@ -373,8 +386,8 @@ const getContent = async (pre: boolean) => {
             logs.value.splice(0, removedCount);
             nextTick(() => {
                 if (logContainer.value) {
-                    const newScrollTop = currentScrollRatio * (logs.value.length * logHeight);
-                    logContainer.value.scrollTop = Math.max(0, newScrollTop - removedCount * logHeight);
+                    const newScrollTop = currentScrollRatio * (logs.value.length * logHeight.value);
+                    logContainer.value.scrollTop = Math.max(0, newScrollTop - removedCount * logHeight.value);
                 }
             });
             if (minPage.value > 1) {
@@ -495,6 +508,23 @@ defineExpose({ changeTail, onDownload, clearLog });
     color: #f5f5f5;
     box-sizing: border-box;
     white-space: nowrap;
+}
+
+.log-item.task-mode {
+    padding: 0 5px;
+    font-family: 'SFMono-Regular', 'SF Mono', Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+    font-size: 14px;
+    line-height: 16px;
+    letter-spacing: 0;
+    font-variant-ligatures: none;
+}
+
+.log-container.task-mode :deep(.token),
+.log-container.task-mode :deep(.whitespace-pre) {
+    font-family: inherit;
+    line-height: inherit;
+    letter-spacing: inherit;
+    font-variant-ligatures: inherit;
 }
 
 .log-content {

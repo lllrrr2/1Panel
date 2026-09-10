@@ -1,126 +1,93 @@
 <template>
-    <div>
+    <div class="terminal-page" :class="{ 'is-mobile': isMobile }">
         <el-tabs
             type="card"
-            class="terminal-tabs card-interval"
+            class="terminal-tabs"
             style="background-color: var(--panel-terminal-tag-bg-color)"
             v-model="terminalValue"
-            :before-leave="beforeLeave"
+            addable
+            @tab-add="showConnections = !showConnections"
             @tab-change="quickCmd = ''"
             @edit="handleTabsRemove"
         >
             <el-tab-pane
-                :key="item.index"
-                v-for="item in terminalTabs"
+                :key="item.key"
+                v-for="item in store.entries"
                 :closable="true"
                 :label="item.title"
-                :name="item.index"
+                :name="item.key"
             >
                 <template #label>
-                    <span class="custom-tabs-label">
-                        <span
-                            v-if="item.status === 'online'"
-                            :style="`color: ${
-                                item.latency < 100 ? '#69db7c' : item.latency < 300 ? '#f59f00' : '#d9480f'
-                            }; display: inline-flex; align-items: center`"
-                        >
-                            <span>&nbsp;{{ item.latency }}&nbsp;ms&nbsp;</span>
-                            <el-icon>
-                                <circleCheck />
-                            </el-icon>
+                    <el-tooltip
+                        :content="`${item.title} · ${
+                            item.status === 'online' ? `${item.latency} ms` : $t('commons.button.reconnect')
+                        }`"
+                        placement="top-start"
+                        :show-after="300"
+                    >
+                        <span class="terminal-tab-label">
+                            <span v-if="item.status === 'online'" class="terminal-tab-status" aria-hidden="true">
+                                <span class="terminal-status-dot"></span>
+                            </span>
+                            <el-button
+                                v-else
+                                icon="Refresh"
+                                class="terminal-tab-reconnect"
+                                :aria-label="$t('commons.button.reconnect')"
+                                link
+                                @click.stop="onReconnect(item)"
+                            />
+                            <span class="terminal-tab-title">{{ item.title }}</span>
+                            <span
+                                v-if="item.key === terminalValue && item.status === 'online'"
+                                class="terminal-tab-latency"
+                            >
+                                {{ item.latency }} ms
+                            </span>
                         </span>
-                        <el-button
-                            v-if="item.status === 'closed'"
-                            icon="Refresh"
-                            class="text-white"
-                            size="default"
-                            link
-                            @click="onReconnect(item)"
-                        />
-                        <span v-if="item.title.length <= 20">&nbsp;{{ item.title }}&nbsp;</span>
-                        <el-tooltip v-else :content="item.title" placement="top-start">
-                            <span>&nbsp;{{ item.title.substring(0, 17) }}...&nbsp;</span>
-                        </el-tooltip>
-                    </span>
+                    </el-tooltip>
                 </template>
-                <Terminal
+                <!-- The Terminal itself is rendered by components/terminal/host.vue and teleported here. -->
+                <div
+                    class="terminal-slot"
+                    :ref="(el: any) => onSlot(item.key, el)"
                     :style="{
-                        height: cmdPanelVisible
-                            ? `calc(100vh - ${loadHeightWithPanel()})`
-                            : `calc(100vh - ${loadHeight()})`,
+                        height: `calc(100vh - ${loadHeight()})`,
                         'background-color': `var(--panel-logs-bg-color)`,
                     }"
-                    :ref="'t-' + item.index"
-                    :key="item.Refresh"
-                ></Terminal>
+                ></div>
 
-                <transition name="el-fade-in">
-                    <div
-                        v-show="cmdPanelVisible"
-                        class="mb-2 border-b border-[var(--el-border-color)] pb-2 w-full bg-[var(--el-bg-color)]"
+                <div class="flex items-center gap-2 w-full py-2 flex-wrap">
+                    <AiSetting v-if="!isMobile" class="shrink-0" />
+                    <el-cascader
+                        v-model="quickCmd"
+                        :options="commandTree"
+                        :props="quickCommandProps"
+                        :show-all-levels="false"
+                        filterable
+                        clearable
+                        class="quick-command-cascader min-w-[180px] max-w-[260px] shrink-0"
+                        :placeholder="$t('terminal.quickCommand')"
+                        @change="handleQuickCommandChange"
                     >
-                        <el-tabs v-model="activeGroupTab" type="card" class="command-tabs">
-                            <el-tab-pane
-                                v-for="group in commandTree"
-                                :key="group.value"
-                                :label="''"
-                                :name="group.value"
+                        <template #default="{ data }">
+                            <el-tooltip
+                                v-if="!data.children?.length"
+                                placement="right"
+                                popper-class="command-detail-tooltip"
                             >
-                                <template #label>
-                                    <span class="group-tab-label">
-                                        <span v-if="group.label.length <= 6">{{ group.label }}</span>
-                                        <el-tooltip v-else :content="group.label" placement="top">
-                                            <span>{{ group.label.substring(0, 6) }}...</span>
-                                        </el-tooltip>
-                                    </span>
+                                <template #content>
+                                    <div class="command-detail-content">{{ data.value }}</div>
                                 </template>
-                                <div class="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-2 p-0">
-                                    <el-tag
-                                        v-for="cmd in group.children"
-                                        :key="cmd.value"
-                                        class="command-tag"
-                                        @click="executeCommand(cmd.value)"
-                                        type="info"
-                                        effect="plain"
-                                    >
-                                        <div class="flex items-center justify-between w-full gap-1.5">
-                                            <span class="command-tag-name" :title="cmd.label">
-                                                {{
-                                                    cmd.label.length > 8 ? cmd.label.substring(0, 8) + '...' : cmd.label
-                                                }}
-                                            </span>
-                                            <el-popover placement="top" :width="320" trigger="hover">
-                                                <template #reference>
-                                                    <el-icon class="command-preview-icon">
-                                                        <InfoFilled />
-                                                    </el-icon>
-                                                </template>
-                                                <div class="command-preview">
-                                                    <div class="command-preview-name">
-                                                        <strong>{{ cmd.label }}</strong>
-                                                    </div>
-                                                    <div class="command-preview-value">{{ cmd.value }}</div>
-                                                </div>
-                                            </el-popover>
-                                        </div>
-                                    </el-tag>
+                                <div class="cascader-option">
+                                    <span class="cascader-option-label">{{ data.label }}</span>
                                 </div>
-                            </el-tab-pane>
-                        </el-tabs>
-                    </div>
-                </transition>
-
-                <div class="flex items-center gap-3 w-full py-2 flex-wrap">
-                    <el-button
-                        @click="cmdPanelVisible = !cmdPanelVisible"
-                        type="primary"
-                        class="min-w-[120px] max-w-[150px] shrink-0"
-                    >
-                        {{ $t('terminal.quickCommand') }}
-                        <el-icon class="ml-1">
-                            <component :is="cmdPanelVisible ? 'ArrowUp' : 'ArrowDown'" />
-                        </el-icon>
-                    </el-button>
+                            </el-tooltip>
+                            <div v-else class="cascader-option">
+                                <span class="cascader-option-label">{{ data.label }}</span>
+                            </div>
+                        </template>
+                    </el-cascader>
                     <el-input
                         v-model="batchVal"
                         @keydown.enter.exact.prevent="batchInput"
@@ -136,51 +103,59 @@
                     />
                 </div>
             </el-tab-pane>
-            <el-tab-pane :closable="false" name="newTabs">
-                <template #label>
-                    <el-button v-popover="popoverRef" class="tagButton" icon="Plus"></el-button>
-                    <el-popover
-                        ref="popoverRef"
-                        width="320px"
-                        trigger="hover"
-                        virtual-triggering
-                        persistent
-                        :offset="-4"
-                    >
-                        <div class="p-2 space-y-2">
-                            <div class="flex gap-2">
-                                <button
-                                    @click="onNewSsh"
-                                    class="flex-1 flex flex-col items-center justify-center px-3 py-2.5 bg-[var(--el-fill-color-light)] hover:bg-[var(--panel-main-bg-color-9)] rounded transition-colors duration-200 cursor-pointer group border-0 outline-none"
+            <template #add-icon>
+                <el-popover
+                    v-model:visible="showConnections"
+                    width="320px"
+                    trigger="click"
+                    placement="bottom-start"
+                    persistent
+                >
+                    <template #reference>
+                        <el-button
+                            class="terminal-action terminal-add"
+                            @click.stop
+                            @keydown.stop
+                            icon="Plus"
+                            text
+                            :aria-label="$t('terminal.createConn')"
+                        />
+                    </template>
+                    <div class="p-2 space-y-2">
+                        <div class="flex gap-2">
+                            <button
+                                v-if="!isNodeAdmin"
+                                @click="onNewSsh"
+                                class="flex-1 flex flex-col items-center justify-center px-3 py-2.5 bg-[var(--el-fill-color-light)] hover:bg-[var(--panel-main-bg-color-9)] rounded transition-colors duration-200 cursor-pointer group border-0 outline-none"
+                            >
+                                <el-icon
+                                    class="text-xl mb-1 text-[var(--el-text-color-primary)] group-hover:text-[var(--el-color-primary)] transition-colors"
                                 >
-                                    <el-icon
-                                        class="text-xl mb-1 text-[var(--el-text-color-primary)] group-hover:text-[var(--el-color-primary)] transition-colors"
-                                    >
-                                        <Plus />
-                                    </el-icon>
-                                    <span
-                                        class="text-xs text-[var(--el-text-color-primary)] group-hover:text-[var(--el-color-primary)] font-medium truncate w-full text-center transition-colors"
-                                    >
-                                        {{ $t('terminal.createConn') }}
-                                    </span>
-                                </button>
-                                <button
-                                    @click="onNewLocal"
-                                    class="flex-1 flex flex-col items-center justify-center px-3 py-2.5 bg-[var(--el-fill-color-light)] hover:bg-[var(--panel-main-bg-color-9)] rounded transition-colors duration-200 cursor-pointer group border-0 outline-none"
+                                    <Plus />
+                                </el-icon>
+                                <span
+                                    class="text-xs text-[var(--el-text-color-primary)] group-hover:text-[var(--el-color-primary)] font-medium truncate w-full text-center transition-colors"
                                 >
-                                    <el-icon
-                                        class="text-xl mb-1 text-[var(--el-text-color-primary)] group-hover:text-[var(--el-color-primary)] transition-colors"
-                                    >
-                                        <House />
-                                    </el-icon>
-                                    <span
-                                        class="text-xs text-[var(--el-text-color-primary)] group-hover:text-[var(--el-color-primary)] font-medium truncate w-full text-center transition-colors"
-                                    >
-                                        {{ $t('terminal.localhost') }}
-                                    </span>
-                                </button>
-                            </div>
-
+                                    {{ $t('terminal.createConn') }}
+                                </span>
+                            </button>
+                            <button
+                                @click="onNewLocal"
+                                class="flex-1 flex flex-col items-center justify-center px-3 py-2.5 bg-[var(--el-fill-color-light)] hover:bg-[var(--panel-main-bg-color-9)] rounded transition-colors duration-200 cursor-pointer group border-0 outline-none"
+                            >
+                                <el-icon
+                                    class="text-xl mb-1 text-[var(--el-text-color-primary)] group-hover:text-[var(--el-color-primary)] transition-colors"
+                                >
+                                    <House />
+                                </el-icon>
+                                <span
+                                    class="text-xs text-[var(--el-text-color-primary)] group-hover:text-[var(--el-color-primary)] font-medium truncate w-full text-center transition-colors"
+                                >
+                                    {{ $t('terminal.localhost') }}
+                                </span>
+                            </button>
+                        </div>
+                        <template v-if="!isNodeAdmin">
                             <el-divider class="my-0" />
 
                             <div class="search-container px-1 py-1 bg-[var(--el-fill-color-light)] rounded">
@@ -239,26 +214,28 @@
                                     </span>
                                 </template>
                             </el-tree>
-                        </div>
-                    </el-popover>
-                </template>
-            </el-tab-pane>
-            <div v-if="terminalTabs.length === 0">
+                        </template>
+                    </div>
+                </el-popover>
+            </template>
+            <div v-if="store.entries.length === 0">
                 <el-empty
                     :style="{ height: `calc(100vh - ${loadEmptyHeight()})`, 'background-color': '#000' }"
                     :description="$t('terminal.emptyTerminal')"
                 ></el-empty>
             </div>
         </el-tabs>
-        <el-tooltip :content="loadTooltip()" placement="top">
-            <el-button
-                @click="toggleFullscreen"
-                v-if="!mobile"
-                class="bg-transparent border-0 absolute right-[50px] font-semibold text-sm"
-                :style="{ top: loadFullScreenHeight() }"
-                icon="FullScreen"
-            ></el-button>
-        </el-tooltip>
+        <div v-if="!isMobile" class="terminal-actions">
+            <el-tooltip :content="loadTooltip()" placement="top">
+                <el-button
+                    class="terminal-action"
+                    icon="FullScreen"
+                    text
+                    :aria-label="loadTooltip()"
+                    @click="toggleFullscreen"
+                />
+            </el-tooltip>
+        </div>
 
         <HostDialog
             ref="dialogRef"
@@ -270,8 +247,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, getCurrentInstance, watch, nextTick, computed, onMounted } from 'vue';
-import Terminal from '@/components/terminal/index.vue';
+import { ref, watch, nextTick, onMounted, onBeforeUnmount, onActivated, onDeactivated } from 'vue';
 import HostDialog from '@/views/terminal/terminal/host-create.vue';
 import type Node from 'element-plus/es/components/tree/src/model/node';
 import { ElTree } from 'element-plus';
@@ -279,17 +255,18 @@ import screenfull from 'screenfull';
 import i18n from '@/lang';
 import { Host } from '@/api/interface/host';
 import { getHostTree, testByID, testLocalConn } from '@/api/modules/terminal';
-import { GlobalStore } from '@/store';
+import { useGlobalStore } from '@/composables/useGlobalStore';
 import router from '@/routers';
 import { getCommandTree } from '@/api/modules/command';
-import { getAgentSettingByKey } from '@/api/modules/setting';
+import { getAgentSettingInfo } from '@/api/modules/setting';
+import AiSetting from '@/views/terminal/setting/ai/index.vue';
+import { MsgWarning } from '@/utils/message';
+import { TerminalSessionStore } from '@/store';
+
+const { isFullScreen, isMobile, isNodeAdmin, openMenuTabs } = useGlobalStore();
+const store = TerminalSessionStore();
 
 const dialogRef = ref();
-const ctx = getCurrentInstance() as any;
-const globalStore = GlobalStore();
-const mobile = computed(() => {
-    return globalStore.isMobile();
-});
 
 const toggleFullscreen = () => {
     if (screenfull.isEnabled) {
@@ -297,24 +274,22 @@ const toggleFullscreen = () => {
     }
 };
 const loadTooltip = () => {
-    return i18n.global.t('commons.button.' + (globalStore.isFullScreen ? 'quitFullscreen' : 'fullscreen'));
+    return i18n.global.t('commons.button.' + (isFullScreen.value ? 'quitFullscreen' : 'fullscreen'));
 };
 
 let timer: ReturnType<typeof setInterval> | null = null;
 const terminalValue = ref();
-const terminalTabs = ref([]) as any;
-let tabIndex = 0;
 
 const commandTree = ref();
-const cmdPanelVisible = ref(false);
-const activeGroupTab = ref('');
+const quickCommandProps = {
+    expandTrigger: 'hover' as const,
+};
 let quickCmd = ref();
 let batchVal = ref();
 let isBatch = ref<boolean>(false);
 
-const popoverRef = ref();
-
 const hostFilterInfo = ref('');
+const showConnections = ref(false);
 const hostTree = ref<Array<Host.HostTree>>();
 const treeRef = ref<InstanceType<typeof ElTree>>();
 const defaultProps = {
@@ -329,73 +304,121 @@ interface Tree {
 const initCmd = ref('');
 
 const acceptParams = async () => {
-    globalStore.isFullScreen = false;
+    isFullScreen.value = false;
     loadCommandTree();
-    loadHostTree();
-    if (terminalTabs.value.length === 0) {
-        await getAgentSettingByKey('LocalSSHConnShow').then((res) => {
-            if (res.data === 'Enable') {
-                onNewLocal();
-            }
-        });
+    if (!isNodeAdmin.value) {
+        loadHostTree();
+    } else {
+        hostTree.value = [];
     }
-    timer = setInterval(() => {
-        syncTerminal();
-    }, 1000 * 5);
-    if (!mobile.value) {
+    if (store.entries.length === 0) {
+        await openDefaultLocalConn();
+    } else {
+        // sessions kept alive while we were away: show them and re-fit to this container
+        if (!store.find(terminalValue.value)) {
+            terminalValue.value = store.entries[0].key;
+        }
+        await claim();
+        store.sync();
+    }
+    timer = setInterval(store.sync, 1000 * 5);
+    if (!isMobile.value) {
         screenfull.on('change', () => {
-            globalStore.isFullScreen = screenfull.isFullscreen;
+            isFullScreen.value = screenfull.isFullscreen;
         });
     }
 };
 
+const openDefaultLocalConn = async () => {
+    if (isNodeAdmin.value) {
+        onNewLocal();
+        return;
+    }
+    await getAgentSettingInfo().then((res) => {
+        if (res.data?.localSSHConnShow === 'Enable') {
+            onNewLocal();
+        }
+    });
+};
+
+// Leaving the page keeps every session connected in the host; only the poll stops.
 const cleanTimer = () => {
     clearInterval(Number(timer));
     timer = null;
-    for (const terminal of terminalTabs.value) {
-        if (ctx && ctx.refs[`t-${terminal.index}`][0]) {
-            terminal.status = ctx.refs[`t-${terminal.index}`][0].onClose();
+};
+
+// Slots are claimed explicitly, not from the ref callback: under a locked menu tab
+// (keep-alive) the page keeps rendering while detached, and the dock takes the
+// Terminals over meanwhile. Only a visible page owns its slots; release on leave
+// and take them back on return, the same way the dock does.
+const slotEls: Record<string, HTMLElement> = {};
+const onSlot = (key: string, el: HTMLElement | null) => {
+    if (el) slotEls[key] = el;
+    else delete slotEls[key];
+};
+let pageVisible = true;
+const claim = async () => {
+    for (const item of store.entries) {
+        if (pageVisible) {
+            store.setSlot(item.key, slotEls[item.key] || null);
+        } else if (store.slots[item.key] && store.slots[item.key] === slotEls[item.key]) {
+            store.setSlot(item.key, null);
         }
     }
+    if (!pageVisible) return;
+    await nextTick();
+    for (const item of store.entries) {
+        store.instances[item.key]?.refit();
+    }
 };
+watch(
+    () => store.entries.length,
+    () => nextTick(claim),
+);
+onActivated(() => {
+    pageVisible = true;
+    claim();
+});
+onDeactivated(() => {
+    pageVisible = false;
+    claim();
+});
 
 const loadHeight = () => {
-    return globalStore.openMenuTabs ? '250px' : '210px';
-};
-const loadHeightWithPanel = () => {
-    return globalStore.openMenuTabs ? '490px' : '450px';
+    return openMenuTabs.value ? '250px' : '210px';
 };
 const loadEmptyHeight = () => {
-    return globalStore.openMenuTabs ? '201px' : '156px';
-};
-const loadFullScreenHeight = () => {
-    return globalStore.openMenuTabs ? '105px' : '60px';
+    return openMenuTabs.value ? '201px' : '156px';
 };
 
-const handleTabsRemove = (targetName: string, action: 'remove' | 'add') => {
+const handleTabsRemove = async (targetName: string, action: 'remove' | 'add') => {
     if (action !== 'remove') {
         return;
     }
-    if (ctx) {
-        ctx.refs[`t-${targetName}`] && ctx.refs[`t-${targetName}`][0].onClose();
+    if (!store.find(targetName)) {
+        return;
     }
-    const tabs = terminalTabs.value;
+    const tabs = store.entries;
     let activeName = terminalValue.value;
     if (activeName === targetName) {
-        tabs.forEach((tab: any, index: any) => {
-            if (tab.index === targetName) {
+        tabs.forEach((tab, index) => {
+            if (tab.key === targetName) {
                 const nextTab = tabs[index + 1] || tabs[index - 1];
                 if (nextTab) {
-                    activeName = nextTab.index;
+                    activeName = nextTab.key;
                 }
             }
         });
     }
     terminalValue.value = activeName;
-    terminalTabs.value = tabs.filter((tab: any) => tab.index !== targetName);
+    store.remove(targetName);
 };
 
 const loadHostTree = async () => {
+    if (isNodeAdmin.value) {
+        hostTree.value = [];
+        return;
+    }
     const res = await getHostTree({});
     hostTree.value = res.data;
 };
@@ -414,72 +437,56 @@ const loadCommandTree = async () => {
             item.label = i18n.global.t('commons.table.default');
         }
     }
-    if (commandTree.value.length > 0) {
-        activeGroupTab.value = commandTree.value[0].value;
+};
+
+const sendToTerminals = (command: string, all: boolean) => {
+    const keys = all ? store.entries.map((e) => e.key) : [terminalValue.value];
+    for (const key of keys) {
+        store.instances[key]?.sendMsg(command);
     }
 };
 
-const executeCommand = (command: string) => {
-    if (!ctx) {
+const handleQuickCommandChange = (val: Array<string>) => {
+    if (!val?.length) {
         return;
     }
-    if (isBatch.value) {
-        for (const tab of terminalTabs.value) {
-            ctx.refs[`t-${tab.index}`] && ctx.refs[`t-${tab.index}`][0].sendMsg(command + '\n');
-        }
-    } else {
-        ctx.refs[`t-${terminalValue.value}`] && ctx.refs[`t-${terminalValue.value}`][0].sendMsg(command + '\n');
-    }
+    sendToTerminals(val[val.length - 1] + '\n', isBatch.value);
+    quickCmd.value = '';
 };
 
 function batchInput() {
-    if (batchVal.value === '' || !ctx) {
+    if (batchVal.value === '') {
         return;
     }
-    if (isBatch.value) {
-        for (const tab of terminalTabs.value) {
-            ctx.refs[`t-${tab.index}`] && ctx.refs[`t-${tab.index}`][0].sendMsg(batchVal.value + '\n');
-        }
-        batchVal.value = '';
-        return;
-    }
-    ctx.refs[`t-${terminalValue.value}`] && ctx.refs[`t-${terminalValue.value}`][0].sendMsg(batchVal.value + '\n');
+    sendToTerminals(batchVal.value + '\n', isBatch.value);
     batchVal.value = '';
 }
 
-function beforeLeave(activeName: string) {
-    if (activeName === 'newTabs') {
-        return false;
-    }
-}
-
 const onNewSsh = () => {
+    showConnections.value = false;
+    if (isNodeAdmin.value) {
+        MsgWarning(i18n.global.t('terminal.nodeAdminLocalOnly'));
+        return;
+    }
     dialogRef.value!.acceptParams({ isLocal: false });
 };
+
+const connectionError = 'Failed to set up the connection. Please check the host information';
+
+const openTab = async (title: string, wsID: number, error: string) => {
+    const cmd = initCmd.value;
+    initCmd.value = '';
+    terminalValue.value = await store.open({ title, wsID, initCmd: cmd, error });
+};
+
 const onNewLocal = async () => {
+    showConnections.value = false;
     const res = await testLocalConn();
     if (!res.data) {
         dialogRef.value!.acceptParams({ isLocal: true });
         return;
     }
-    terminalTabs.value.push({
-        index: tabIndex,
-        title: i18n.global.t('terminal.localhost'),
-        wsID: 0,
-        status: 'online',
-        latency: 0,
-    });
-    terminalValue.value = tabIndex;
-    nextTick(() => {
-        ctx.refs[`t-${terminalValue.value}`] &&
-            ctx.refs[`t-${terminalValue.value}`][0].acceptParams({
-                endpoint: '/api/v2/hosts/terminal',
-                initCmd: initCmd.value,
-                error: '',
-            });
-        initCmd.value = '';
-    });
-    tabIndex++;
+    await openTab(i18n.global.t('terminal.localhost'), 0, '');
 };
 
 const onClickConn = (node: Node, data: Tree) => {
@@ -490,82 +497,37 @@ const onClickConn = (node: Node, data: Tree) => {
 };
 
 const onReconnect = async (item: any) => {
-    if (ctx) {
-        ctx.refs[`t-${item.index}`] && ctx.refs[`t-${item.index}`][0].onClose();
-    }
-    item.Refresh = !item.Refresh;
-    if (item.wsID === 0) {
-        const res = await testLocalConn();
-        nextTick(() => {
-            ctx.refs[`t-${item.index}`] &&
-                ctx.refs[`t-${item.index}`][0].acceptParams({
-                    endpoint: '/api/v2/hosts/terminal',
-                    initCmd: initCmd.value,
-                    error: res.data ? '' : 'Failed to set up the connection. Please check the host information',
-                });
-            initCmd.value = '';
-        });
-        syncTerminal();
-        return;
-    }
-
-    const res = await testByID(item.wsID);
-    nextTick(() => {
-        ctx.refs[`t-${item.index}`] &&
-            ctx.refs[`t-${item.index}`][0].acceptParams({
-                endpoint: '/api/v2/core/hosts/terminal',
-                args: `id=${item.wsID}`,
-                initCmd: initCmd.value,
-                error: res.data ? '' : 'Failed to set up the connection. Please check the host information',
-            });
-        initCmd.value = '';
-    });
-    syncTerminal();
+    const res = item.wsID === 0 ? await testLocalConn() : await testByID(item.wsID);
+    const cmd = initCmd.value;
+    initCmd.value = '';
+    await store.reconnect(item.key, res.data ? '' : connectionError, cmd);
+    store.sync();
 };
 
 const onConnTerminal = async (title: string, wsID: number) => {
+    showConnections.value = false;
+    if (isNodeAdmin.value) {
+        MsgWarning(i18n.global.t('terminal.nodeAdminLocalOnly'));
+        return;
+    }
     const res = await testByID(wsID);
-    terminalTabs.value.push({
-        index: tabIndex,
-        title: title,
-        wsID: wsID,
-        status: res.data ? 'online' : 'closed',
-        latency: 0,
-    });
-    terminalValue.value = tabIndex;
-    nextTick(() => {
-        ctx.refs[`t-${terminalValue.value}`] &&
-            ctx.refs[`t-${terminalValue.value}`][0].acceptParams({
-                endpoint: '/api/v2/core/hosts/terminal',
-                args: `id=${wsID}`,
-                initCmd: initCmd.value,
-                error: res.data ? '' : 'Authentication failed. Please check the host information!',
-            });
-        initCmd.value = '';
-    });
-    tabIndex++;
+    await openTab(title, wsID, res.data ? '' : 'Authentication failed. Please check the host information!');
 };
 
-function syncTerminal() {
-    for (const terminal of terminalTabs.value) {
-        if (ctx && ctx.refs[`t-${terminal.index}`][0]) {
-            terminal.status = ctx.refs[`t-${terminal.index}`][0].isWsOpen() ? 'online' : 'closed';
-            terminal.latency = ctx.refs[`t-${terminal.index}`][0].getLatency();
-        }
-    }
-}
-
 const changeFullScreen = () => {
-    globalStore.isFullScreen = screenfull.isFullscreen;
+    isFullScreen.value = screenfull.isFullscreen;
 };
 
 defineExpose({
     acceptParams,
-    cleanTimer,
 });
 
 onBeforeUnmount(() => {
     document.removeEventListener('fullscreenchange', changeFullScreen);
+    // parent refs are already null in the parent's onUnmounted, so leave-page cleanup lives here
+    cleanTimer();
+    pageVisible = false;
+    claim();
 });
 
 onMounted(() => {
@@ -578,9 +540,50 @@ onMounted(() => {
 </script>
 
 <style lang="scss" scoped>
+.terminal-page {
+    --terminal-actions-width: 40px;
+    position: relative;
+    min-width: 0;
+    padding-top: 7px;
+
+    &.is-mobile {
+        --terminal-actions-width: 0px;
+    }
+}
+
+.terminal-actions {
+    position: absolute;
+    top: 7px;
+    right: 0;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    width: var(--terminal-actions-width);
+    height: var(--el-tabs-header-height, 40px);
+}
+
+.terminal-action {
+    width: 32px;
+    height: 32px;
+    margin: 0;
+    padding: 0;
+    border-radius: 6px;
+    color: var(--el-text-color-regular);
+
+    &:hover {
+        color: var(--el-color-primary);
+    }
+}
+
+.terminal-add {
+    margin: 0 4px;
+}
+
 .terminal-tabs {
     :deep(.el-tabs__header) {
-        padding: 0;
+        justify-content: flex-start;
+        padding: 0 var(--terminal-actions-width) 0 0;
+        min-height: var(--el-tabs-header-height);
         position: relative;
         margin: 0 0 3px 0;
     }
@@ -594,6 +597,17 @@ onMounted(() => {
     :deep(.el-tabs__item) {
         padding: 0;
     }
+    :deep(.el-tabs__nav-wrap) {
+        flex: 0 1 auto;
+        min-width: 0;
+    }
+
+    :deep(.el-tabs__new-tab) {
+        width: auto;
+        height: auto;
+        margin: 0;
+        border: 0;
+    }
     :deep(.el-tabs__item.is-active) {
         color: var(--panel-terminal-tag-active-text-color);
         background-color: var(--panel-terminal-tag-active-bg-color);
@@ -604,11 +618,85 @@ onMounted(() => {
     :deep(.el-tabs__item.is-active:hover) {
         color: var(--panel-terminal-tag-active-text-color);
     }
+    :deep(.el-tabs__header .el-tabs__item.is-closable) {
+        padding: 0 12px;
+
+        .is-icon-close {
+            width: 14px;
+            margin-left: 6px;
+            right: 0;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity var(--el-transition-duration);
+        }
+
+        &.is-active,
+        &:hover,
+        &:focus-within {
+            .is-icon-close {
+                opacity: 1;
+                pointer-events: auto;
+            }
+        }
+
+        @media (hover: none), (pointer: coarse) {
+            .is-icon-close {
+                opacity: 1;
+                pointer-events: auto;
+            }
+        }
+    }
 }
 
-.tagButton {
-    border: 0;
-    background-color: var(--el-tabs__item);
+.terminal-tab-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    max-width: 220px;
+}
+
+.terminal-tab-status,
+.terminal-tab-reconnect {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 14px;
+    height: 14px;
+    padding: 0;
+}
+
+.terminal-status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-color: var(--el-color-success);
+}
+
+.terminal-tab-reconnect {
+    color: inherit;
+}
+
+.terminal-tab-title {
+    min-width: 0;
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.terminal-tab-latency {
+    flex-shrink: 0;
+    font-size: 12px;
+    font-weight: 400;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    opacity: 0.7;
+}
+
+.terminal-slot {
+    width: 100%;
 }
 
 .host-tree {
@@ -637,9 +725,6 @@ onMounted(() => {
     font-size: 32px;
     font-weight: 600;
 }
-.el-tabs--top.el-tabs--card > .el-tabs__header .el-tabs__item:last-child {
-    padding-right: 0px;
-}
 .el-input__wrapper {
     border-radius: 50px;
 }
@@ -651,97 +736,32 @@ onMounted(() => {
     transition: height 0.2s ease;
 }
 
-.command-tabs {
-    :deep(.el-tabs__header) {
-        margin-bottom: 0;
-        background-color: var(--el-bg-color);
-    }
-    :deep(.el-tabs__content) {
-        height: 180px;
-        overflow-y: auto;
-        overflow-x: hidden;
-        background-color: var(--el-bg-color);
-    }
-    :deep(.el-tabs__item) {
-        min-width: 80px;
-        max-width: 110px;
-        text-align: center;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        overflow: hidden;
-        padding: 0 8px;
-    }
-}
-.group-tab-label {
-    width: 90px;
-    display: inline-block;
-    text-align: center;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    font-size: 14px;
-}
-
-.command-tag {
-    cursor: pointer;
-    height: auto;
-    padding: 8px 12px;
-    transition: all 0.3s;
-    border-radius: 4px;
-    white-space: nowrap;
-    border: 1px solid transparent;
-
-    &:hover {
-        border-color: var(--el-color-primary);
+.quick-command-cascader {
+    :deep(.el-input__wrapper) {
+        border-radius: 6px;
     }
 }
 
-.command-tag-name {
-    font-weight: 500;
-    font-size: 13px;
-    flex: 1;
-    text-align: left;
-}
-
-.command-preview-icon {
-    font-size: 14px;
-    opacity: 0.6;
-    transition: opacity 0.3s;
-    cursor: help;
-    flex-shrink: 0;
+.cascader-option {
+    width: 100%;
     display: flex;
     align-items: center;
-
-    &:hover {
-        opacity: 1;
-    }
+    min-width: 0;
 }
 
-.command-preview {
-    .command-preview-name {
-        font-size: 13px;
-        margin-bottom: 6px;
-        color: var(--el-text-color-primary);
-        word-break: break-word;
-    }
-
-    .command-preview-value {
-        font-size: 12px;
-        font-family: monospace;
-        padding: 8px;
-        background-color: var(--el-fill-color-light);
-        border-radius: 4px;
-        color: var(--el-text-color-regular);
-        word-break: break-all;
-        white-space: pre-wrap;
-    }
-}
-
-.command-tag-name {
+.cascader-option-label {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    display: inline-block;
+}
+
+:deep(.command-detail-tooltip) {
+    max-width: 420px;
+}
+
+.command-detail-content {
+    white-space: pre-wrap;
+    word-break: break-all;
+    line-height: 1.5;
 }
 </style>

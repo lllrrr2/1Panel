@@ -22,6 +22,7 @@
                 height="200px"
                 id="cpuChart"
                 type="line"
+                renderer="svg"
                 :option="chartsOption['cpuChart']"
                 v-if="chartsOption['cpuChart']"
             />
@@ -31,6 +32,7 @@
                 height="200px"
                 id="memoryChart"
                 type="line"
+                renderer="svg"
                 :option="chartsOption['memoryChart']"
                 v-if="chartsOption['memoryChart']"
             />
@@ -40,6 +42,7 @@
                 height="200px"
                 id="ioChart"
                 type="line"
+                renderer="svg"
                 :option="chartsOption['ioChart']"
                 v-if="chartsOption['ioChart']"
             />
@@ -49,6 +52,7 @@
                 height="200px"
                 id="networkChart"
                 type="line"
+                renderer="svg"
                 :option="chartsOption['networkChart']"
                 v-if="chartsOption['networkChart']"
             />
@@ -59,7 +63,7 @@
 <script lang="ts" setup>
 import { onBeforeUnmount, ref } from 'vue';
 import { containerStats } from '@/api/modules/container';
-import { dateFormatForSecond } from '@/utils/util';
+import { dateFormatForSecond } from '@/utils/date';
 import VCharts from '@/components/v-charts/index.vue';
 import i18n from '@/lang';
 

@@ -36,7 +36,7 @@
             </el-input>
         </el-form-item>
         <el-form-item>
-            <el-button type="primary" @click="exec">{{ $t('commons.button.handle') }}</el-button>
+            <el-button v-permission type="primary" @click="exec">{{ $t('commons.button.handle') }}</el-button>
         </el-form-item>
     </el-form>
     <TaskLog ref="taskLogRef" @close="search" />
@@ -45,7 +45,7 @@
 <script setup lang="ts">
 import { execComposer, getWebsite } from '@/api/modules/website';
 import i18n from '@/lang';
-import { newUUID } from '@/utils/util';
+import { newUUID } from '@/utils/id';
 import TaskLog from '@/components/log/task/index.vue';
 import FileList from '@/components/file-list/index.vue';
 

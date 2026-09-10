@@ -1,7 +1,7 @@
 <template>
     <div>
         <DialogPro v-model="open" :title="form.title" size="small" @close="handleClose">
-            <div v-loading="loading">
+            <div v-loading="loading" class="del-dialog-body">
                 <el-row type="flex" justify="center">
                     <el-col :span="22">
                         <el-alert class="mt-2" :show-icon="true" type="warning" :closable="false">
@@ -59,7 +59,7 @@ interface DialogProps {
     names: Array<string>;
 
     api: Function;
-    params: Object;
+    params: object;
     successMsg: string;
     noMsg: boolean;
 }
@@ -109,3 +109,10 @@ defineExpose({
     acceptParams,
 });
 </script>
+
+<style scoped>
+.del-dialog-body {
+    max-height: 60vh;
+    overflow-y: auto;
+}
+</style>

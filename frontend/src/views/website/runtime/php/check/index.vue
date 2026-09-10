@@ -40,7 +40,7 @@
                 <el-button @click="open = false">
                     {{ $t('commons.button.cancel') }}
                 </el-button>
-                <el-button type="primary" @click="onConfirm">
+                <el-button v-permission type="primary" @click="onConfirm">
                     {{ $t('commons.button.confirm') }}
                 </el-button>
             </span>
@@ -51,6 +51,7 @@
 import { App } from '@/api/interface/app';
 import i18n from '@/lang';
 import { MsgSuccess } from '@/utils/message';
+import { newUUID } from '@/utils/id';
 import { ref } from 'vue';
 import { DeleteRuntime } from '@/api/modules/runtime';
 import { routerToName } from '@/utils/router';
@@ -58,7 +59,7 @@ import ErrPrompt from '@/components/error-prompt/index.vue';
 
 interface CheckRrops {
     items: App.AppInstallResource[];
-    installID: Number;
+    installID: number;
     key: string;
 }
 const installData = ref<CheckRrops>({
@@ -69,7 +70,7 @@ const installData = ref<CheckRrops>({
 const open = ref(false);
 const map = new Map();
 const forceDelete = ref(false);
-const em = defineEmits(['close']);
+const em = defineEmits(['close', 'task']);
 
 const acceptParams = (props: CheckRrops) => {
     map.clear();
@@ -106,14 +107,17 @@ const onConfirm = () => {
             type: 'info',
         },
     ).then(() => {
+        const taskID = newUUID();
         const params = {
             id: installData.value.installID.valueOf(),
             forceDelete: true,
+            taskID: taskID,
         };
         DeleteRuntime(params).then(() => {
             MsgSuccess(i18n.global.t('commons.msg.operationSuccess'));
             open.value = false;
-            em('close', open);
+            em('task', taskID);
+            em('close', open.value);
         });
     });
 };

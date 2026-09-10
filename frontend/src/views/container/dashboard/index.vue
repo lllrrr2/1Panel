@@ -39,15 +39,15 @@
                     </el-tag>
                 </template>
             </CardWithHeader>
-            <el-row :gutter="7" class="card-interval">
-                <el-col :span="8">
+            <el-row :gutter="7" class="card-interval container-stat-row">
+                <el-col :span="8" :xs="24">
                     <CardWithHeader :header="$t('container.compose')">
                         <template #body>
                             <span class="count" @click="routerToName('Compose')">{{ countItem.composeCount }}</span>
                         </template>
                     </CardWithHeader>
                 </el-col>
-                <el-col :span="8">
+                <el-col :span="8" :xs="24">
                     <CardWithHeader :header="$t('container.composeTemplate')">
                         <template #body>
                             <span class="count" @click="routerToName('ComposeTemplate')">
@@ -56,7 +56,7 @@
                         </template>
                     </CardWithHeader>
                 </el-col>
-                <el-col :span="8">
+                <el-col :span="8" :xs="24">
                     <CardWithHeader :header="$t('container.image')">
                         <template #body>
                             <span class="count" @click="routerToName('Image')">{{ countItem.imageCount }}</span>
@@ -64,22 +64,22 @@
                     </CardWithHeader>
                 </el-col>
             </el-row>
-            <el-row :gutter="7" class="card-interval">
-                <el-col :span="8">
+            <el-row :gutter="7" class="card-interval container-stat-row">
+                <el-col :span="8" :xs="24">
                     <CardWithHeader :header="$t('container.imageRepo')">
                         <template #body>
                             <span class="count" @click="routerToName('Repo')">{{ countItem.repoCount }}</span>
                         </template>
                     </CardWithHeader>
                 </el-col>
-                <el-col :span="8">
+                <el-col :span="8" :xs="24">
                     <CardWithHeader :header="$t('container.network')">
                         <template #body>
                             <span class="count" @click="routerToName('Network')">{{ countItem.networkCount }}</span>
                         </template>
                     </CardWithHeader>
                 </el-col>
-                <el-col :span="8">
+                <el-col :span="8" :xs="24">
                     <CardWithHeader :header="$t('container.volume')">
                         <template #body>
                             <span class="count" @click="routerToName('Volume')">{{ countItem.volumeCount }}</span>
@@ -94,10 +94,11 @@
                         direction="vertical"
                         align="center"
                         v-loading="usageLoading"
-                        :column="4"
+                        :column="isMobile ? 2 : 4"
+                        :label-width="isMobile ? '50%' : '25%'"
                         class="mt-2"
                     >
-                        <el-descriptions-item label-width="25%" align="center" :label="$t('container.image')">
+                        <el-descriptions-item align="center" :label="$t('container.image')">
                             {{
                                 $t('container.usage', [
                                     computeSize2(countItem.imageUsage),
@@ -107,6 +108,7 @@
                             <el-button
                                 v-if="countItem.imageReclaimable"
                                 class="-mt-0.5"
+                                v-permission
                                 @click="onClean('image', true)"
                                 link
                                 type="primary"
@@ -114,7 +116,7 @@
                                 {{ $t('container.clean') }}
                             </el-button>
                         </el-descriptions-item>
-                        <el-descriptions-item label-width="25%" align="center" :label="$t('menu.container')">
+                        <el-descriptions-item align="center" :label="$t('menu.container')">
                             {{
                                 $t('container.usage', [
                                     computeSize2(countItem.containerUsage),
@@ -124,6 +126,7 @@
                             <el-button
                                 v-if="countItem.containerReclaimable"
                                 class="-mt-0.5"
+                                v-permission
                                 @click="onClean('container', false)"
                                 link
                                 type="primary"
@@ -131,7 +134,7 @@
                                 {{ $t('container.clean') }}
                             </el-button>
                         </el-descriptions-item>
-                        <el-descriptions-item label-width="25%" align="center" :label="$t('container.localVolume')">
+                        <el-descriptions-item align="center" :label="$t('container.localVolume')">
                             {{
                                 $t('container.usage', [
                                     computeSize2(countItem.volumeUsage),
@@ -141,6 +144,7 @@
                             <el-button
                                 v-if="countItem.volumeReclaimable"
                                 class="-mt-0.5"
+                                v-permission
                                 @click="onClean('volume', false)"
                                 link
                                 type="primary"
@@ -148,7 +152,7 @@
                                 {{ $t('container.clean') }}
                             </el-button>
                         </el-descriptions-item>
-                        <el-descriptions-item label-width="25%" align="center" :label="$t('container.buildCache')">
+                        <el-descriptions-item align="center" :label="$t('container.buildCache')">
                             {{
                                 $t('container.usage', [
                                     computeSize2(countItem.buildCacheUsage),
@@ -158,6 +162,7 @@
                             <el-button
                                 v-if="countItem.buildCacheUsage"
                                 class="-mt-0.5"
+                                v-permission
                                 @click="onClean('buildcache', false)"
                                 link
                                 type="primary"
@@ -196,14 +201,17 @@
 <script lang="ts" setup>
 import { containerItemStats, containerPrune, loadContainerStatus, loadDaemonJson } from '@/api/modules/container';
 import DockerStatus from '@/views/container/docker-status/index.vue';
-import { getSettingInfo } from '@/api/modules/setting';
-import { computeSize2, newUUID } from '@/utils/util';
+import { getAgentSettingInfo } from '@/api/modules/setting';
+import { computeSize2 } from '@/utils/size';
+import { newUUID } from '@/utils/id';
 import TaskLog from '@/components/log/task/index.vue';
 import { routerToName } from '@/utils/router';
 import { onMounted, reactive, ref } from 'vue';
 import i18n from '@/lang';
+import { useGlobalStore } from '@/composables/useGlobalStore';
 
 const taskLogRef = ref();
+const { isMobile } = useGlobalStore();
 
 const loading = ref();
 const usageLoading = ref(false);
@@ -290,7 +298,7 @@ const loadContainerSetting = async () => {
     const res = await loadDaemonJson();
     countItem.mirrors = res.data.registryMirrors || [];
 
-    const settingRes = await getSettingInfo();
+    const settingRes = await getAgentSettingInfo();
     countItem.sockPath = settingRes.data.dockerSockPath || 'unix:///var/run/docker.sock';
 };
 
@@ -347,5 +355,11 @@ onMounted(() => {
     font-weight: 500;
     line-height: 32px;
     cursor: pointer;
+}
+
+@media (max-width: 767px) {
+    .container-stat-row {
+        row-gap: 7px;
+    }
 }
 </style>

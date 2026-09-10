@@ -13,7 +13,7 @@
                 </el-button>
             </template>
             <template #rightToolBar>
-                <el-select v-model="group" @change="search()" clearable class="p-w-200 mr-5">
+                <el-select v-model="group" @change="search()" clearable class="p-w-200">
                     <template #prefix>{{ $t('commons.table.group') }}</template>
                     <el-option :label="$t('commons.table.all')" value=""></el-option>
                     <div v-for="item in groupList" :key="item.id">
@@ -26,6 +26,7 @@
                     </div>
                 </el-select>
                 <TableSearch @search="search()" v-model:searchName="info" />
+                <TableRefresh @search="search()" />
             </template>
             <template #main>
                 <ComplexTable
@@ -40,7 +41,7 @@
                     <el-table-column :label="$t('commons.table.port')" prop="port" />
                     <el-table-column
                         :label="$t('commons.table.group')"
-                        prop="description"
+                        prop="group"
                         min-width="80"
                         show-overflow-tooltip
                     >
@@ -78,10 +79,10 @@
 </template>
 
 <script setup lang="ts">
-import GroupDialog from '@/components/group/index.vue';
+import GroupDialog from '@/components/agent-group/index.vue';
 import OperateDialog from '@/views/terminal/host/operate/index.vue';
 import { deleteHost, editHostGroup, searchHosts } from '@/api/modules/terminal';
-import { getGroupList } from '@/api/modules/group';
+import { getAgentGroupList } from '@/api/modules/group';
 import { reactive, ref } from 'vue';
 import i18n from '@/lang';
 import { Host } from '@/api/interface/host';
@@ -152,7 +153,7 @@ const onBatchDelete = async (row: Host.Host | null) => {
 };
 
 const loadGroups = async () => {
-    const res = await getGroupList('host');
+    const res = await getAgentGroupList('host');
     groupList.value = res.data;
 };
 

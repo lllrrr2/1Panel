@@ -2,8 +2,15 @@ package alert
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
+	"mime"
+	network "net"
+	"net/http"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
 	"github.com/1Panel-dev/1Panel/agent/app/dto"
 	"github.com/1Panel-dev/1Panel/agent/app/model"
 	"github.com/1Panel-dev/1Panel/agent/app/repo"
@@ -11,32 +18,24 @@ import (
 	"github.com/1Panel-dev/1Panel/agent/constant"
 	"github.com/1Panel-dev/1Panel/agent/global"
 	"github.com/1Panel-dev/1Panel/agent/i18n"
+	"github.com/1Panel-dev/1Panel/agent/utils/bark"
 	"github.com/1Panel-dev/1Panel/agent/utils/email"
 	"github.com/1Panel-dev/1Panel/agent/utils/psutil"
-	"github.com/1Panel-dev/1Panel/agent/utils/re"
 	"github.com/jinzhu/copier"
-	network "net"
-	"net/http"
-	"os"
-	"os/exec"
-	"strconv"
-	"strings"
-	"sync"
-	"time"
 )
 
 var cronJobAlertTypes = []string{"shell", "app", "website", "database", "directory", "log", "snapshot", "curl", "cutWebsiteLog", "clean", "ntp"}
 
-func CreateTaskScanEmailAlertLog(alert dto.AlertDTO, create dto.AlertLogCreate, pushAlert dto.PushAlert, method string, transport *http.Transport, agentInfo *dto.AgentInfo) error {
+func CreateTaskScanEmailAlertLog(alert dto.AlertDTO, create dto.AlertLogCreate, pushAlert dto.PushAlert, method string, transport *http.Transport, agentInfo *dto.AgentInfo, emailConfig model.AlertConfig) error {
 	params := CreateAlertParams(GetCronJobTypeName(pushAlert.Param))
 	alertDetail := ProcessAlertDetail(alert, pushAlert.TaskName, params, method)
 	alertRule := ProcessAlertRule(alert)
 	create.AlertRule = alertRule
 	create.AlertDetail = alertDetail
-	return CreateEmailAlertLog(create, alert, params, transport, agentInfo)
+	return CreateEmailAlertLog(create, alert, params, transport, agentInfo, emailConfig)
 }
 
-func CreateEmailAlertLog(create dto.AlertLogCreate, alert dto.AlertDTO, params []dto.Param, transport *http.Transport, agentInfo *dto.AgentInfo) error {
+func CreateEmailAlertLog(create dto.AlertLogCreate, alert dto.AlertDTO, params []dto.Param, transport *http.Transport, agentInfo *dto.AgentInfo, emailConfig model.AlertConfig) error {
 	var alertLog model.AlertLog
 	alertRepo := repo.NewIAlertRepo()
 	config, err := alertRepo.GetConfig(alertRepo.WithByType(constant.CommonConfig))
@@ -45,11 +44,6 @@ func CreateEmailAlertLog(create dto.AlertLogCreate, alert dto.AlertDTO, params [
 	}
 	var cfg dto.AlertCommonConfig
 	err = json.Unmarshal([]byte(config.Config), &cfg)
-	if err != nil {
-		return err
-	}
-	create.Method = constant.Email
-	emailConfig, err := alertRepo.GetConfig(alertRepo.WithByType(constant.EmailConfig))
 	if err != nil {
 		return err
 	}
@@ -71,13 +65,14 @@ func CreateEmailAlertLog(create dto.AlertLogCreate, alert dto.AlertDTO, params [
 		if username == "" {
 			username = emailInfo.Sender
 		}
+		encodedDisplayName := mime.BEncoding.Encode("UTF-8", emailInfo.DisplayName)
 		smtpConfig := email.SMTPConfig{
 			Host:       emailInfo.Host,
 			Port:       emailInfo.Port,
 			Sender:     emailInfo.Sender,
 			Username:   username,
 			Password:   emailInfo.Password,
-			From:       fmt.Sprintf(`"%s" <%s>`, emailInfo.DisplayName, emailInfo.Sender),
+			From:       fmt.Sprintf(`"%s" <%s>`, encodedDisplayName, emailInfo.Sender),
 			Encryption: emailInfo.Encryption,
 			Recipient:  emailInfo.Recipient,
 		}
@@ -99,6 +94,34 @@ func CreateEmailAlertLog(create dto.AlertLogCreate, alert dto.AlertDTO, params [
 		create.Status = constant.AlertSuccess
 		return SaveAlertLog(create, &alertLog)
 	}
+}
+
+func CreateBarkAlertLog(create dto.AlertLogCreate, alert dto.AlertDTO, params []dto.Param, transport *http.Transport, agentInfo *dto.AgentInfo, barkConfig model.AlertConfig) error {
+	var alertLog model.AlertLog
+
+	var barkInfo dto.AlertWebhookConfig
+	err := json.Unmarshal([]byte(barkConfig.Config), &barkInfo)
+	if err != nil {
+		return err
+	}
+	if barkInfo.Url == "" {
+		create.Message = "bark config url is required"
+		create.Status = constant.AlertError
+		return SaveAlertLog(create, &alertLog)
+	}
+
+	content := GetSendContent(alert.Type, params, agentInfo)
+	if content == "" {
+		content = i18n.GetMsgWithMap("CommonAlert", map[string]interface{}{"msg": alert.Title})
+	}
+
+	if err = bark.SendMessage(barkInfo.Url, i18n.GetMsgByKey("PanelAlertTitle"), content, transport); err != nil {
+		create.Message = err.Error()
+		create.Status = constant.AlertError
+		return SaveAlertLog(create, &alertLog)
+	}
+	create.Status = constant.AlertSuccess
+	return SaveAlertLog(create, &alertLog)
 }
 
 func SaveAlertLog(create dto.AlertLogCreate, alertLog *model.AlertLog) error {
@@ -128,6 +151,117 @@ func CreateNewAlertTask(quota, alertType, quotaType, method string) {
 		global.LOG.Errorf("error creating alert tasks, err: %v", err)
 	}
 	global.LOG.Infof("%s alert %s push completed", alertType, method)
+}
+
+func AttachQueuedAlertTaskMetadata(rawDetail string, task dto.AlertTaskMetadata) (string, error) {
+	if err := validateQueuedAlertTaskMetadata(task); err != nil {
+		return "", err
+	}
+	var detail dto.AlertDetail
+	if err := json.Unmarshal([]byte(rawDetail), &detail); err != nil {
+		return "", fmt.Errorf("decode queued alert detail: %w", err)
+	}
+	detail.Task = &task
+	data, err := json.Marshal(detail)
+	if err != nil {
+		return "", fmt.Errorf("encode queued alert detail: %w", err)
+	}
+	return string(data), nil
+}
+
+func RecordQueuedAlertTask(logID uint, task dto.AlertTaskMetadata) (bool, error) {
+	if logID == 0 {
+		return false, fmt.Errorf("queued alert log ID is required")
+	}
+	if global.AlertDB == nil {
+		return false, fmt.Errorf("alert database is unavailable")
+	}
+	if err := validateQueuedAlertTaskMetadata(task); err != nil {
+		return false, err
+	}
+	alertRepo := repo.NewIAlertRepo()
+	log, err := alertRepo.GetLog(repo.WithByID(logID))
+	if err != nil {
+		return false, err
+	}
+	if log.Status != constant.AlertPushing {
+		if log.Status == constant.AlertSuccess {
+			if existing, taskErr := alertRepo.GetAlertTask(alertRepo.WithByDeliveryLogID(logID)); taskErr == nil && existing.DeliveryLogID != nil {
+				return false, nil
+			}
+		}
+		return false, fmt.Errorf("alert delivery log %d is not pending", logID)
+	}
+	storedTask, alertTask, err := queuedAlertTaskFromLog(log)
+	if err != nil {
+		return false, err
+	}
+	if storedTask != task {
+		return false, fmt.Errorf("queued alert task metadata changed before reservation")
+	}
+	return alertRepo.CreatePendingAlertTask(logID, task.AlertID, &alertTask)
+}
+
+func FinalizeQueuedAlertDelivery(logID uint, succeeded bool, message string) (bool, error) {
+	if logID == 0 {
+		return false, fmt.Errorf("queued alert log ID is required")
+	}
+	if global.AlertDB == nil {
+		return false, fmt.Errorf("alert database is unavailable")
+	}
+	var fallback *model.AlertTask
+	if succeeded {
+		alertRepo := repo.NewIAlertRepo()
+		log, err := alertRepo.GetLog(repo.WithByID(logID))
+		if err != nil {
+			return false, err
+		}
+		if log.Status != constant.AlertPushing {
+			return false, nil
+		}
+		_, task, err := queuedAlertTaskFromLog(log)
+		if err != nil {
+			return false, err
+		}
+		fallback = &task
+	}
+	return repo.NewIAlertRepo().FinalizePendingAlertTask(logID, succeeded, message, fallback)
+}
+
+func queuedAlertTaskFromLog(log model.AlertLog) (dto.AlertTaskMetadata, model.AlertTask, error) {
+	var detail dto.AlertDetail
+	if err := json.Unmarshal([]byte(log.AlertDetail), &detail); err != nil {
+		return dto.AlertTaskMetadata{}, model.AlertTask{}, fmt.Errorf("decode queued alert task metadata: %w", err)
+	}
+	if detail.Task == nil {
+		return dto.AlertTaskMetadata{}, model.AlertTask{}, fmt.Errorf("queued alert task metadata is missing")
+	}
+	if err := validateQueuedAlertTaskMetadata(*detail.Task); err != nil {
+		return dto.AlertTaskMetadata{}, model.AlertTask{}, err
+	}
+	if detail.Task.AlertID != log.AlertId || detail.Task.Type != log.Type || detail.Task.Method != log.Method {
+		return dto.AlertTaskMetadata{}, model.AlertTask{}, fmt.Errorf("queued alert task metadata does not match its log")
+	}
+	task := model.AlertTask{
+		Type:      detail.Task.Type,
+		Quota:     detail.Task.Quota,
+		QuotaType: detail.Task.QuotaType,
+		Method:    detail.Task.Method,
+	}
+	return *detail.Task, task, nil
+}
+
+func validateQueuedAlertTaskMetadata(task dto.AlertTaskMetadata) error {
+	if task.AlertID == 0 {
+		return fmt.Errorf("queued alert task alert ID is required")
+	}
+	if strings.TrimSpace(task.Type) == "" {
+		return fmt.Errorf("queued alert task type is required")
+	}
+	if strings.TrimSpace(task.Method) == "" {
+		return fmt.Errorf("queued alert task method is required")
+	}
+	return nil
 }
 
 func ProcessAlertDetail(alert dto.AlertDTO, project string, params []dto.Param, method string) string {
@@ -207,14 +341,13 @@ func CreateAlertParams(param string) []dto.Param {
 
 var checkTaskMutex sync.Mutex
 
-func CheckSMSSendLimit(method string) bool {
-	alertRepo := repo.NewIAlertRepo()
-	config, err := alertRepo.GetConfig(alertRepo.WithByType(constant.SMSConfig))
-	if err != nil {
+func CheckSMSSendLimit(config model.AlertConfig, method string) bool {
+	if config.Type != constant.SMS {
 		return false
 	}
+	alertRepo := repo.NewIAlertRepo()
 	var cfg dto.AlertSmsConfig
-	cfg, err = ParseAlertSmsConfig(config.Config)
+	cfg, err := ParseAlertSmsConfig(config.Config)
 	if err != nil {
 		return false
 	}
@@ -234,6 +367,10 @@ func CheckSMSSendLimit(method string) bool {
 	}
 
 	return true
+}
+
+func IsAlertConfigEnabled(config model.AlertConfig) bool {
+	return config.Status == constant.AlertEnable
 }
 
 type Settings struct {
@@ -393,133 +530,6 @@ func FindRecentSuccessLoginsNotInWhitelist(minutes int, whitelist []string) ([]m
 		}
 	}
 	return abnormalLogs, nil
-}
-
-func CountRecentFailedSSHLog(minutes uint, maxAllowed uint) (int, bool, error) {
-	lines, err := grepSSHLog([]string{"Failed password", "Invalid user", "authentication failure"})
-	if err != nil {
-		return 0, false, err
-	}
-
-	thresholdTime := time.Now().Add(-time.Duration(minutes) * time.Minute)
-	count := 0
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		t, err := parseLogTime(line)
-		if err != nil {
-			continue
-		}
-		if t.After(thresholdTime) {
-			count++
-		}
-	}
-	return count, count >= int(maxAllowed), nil
-}
-
-func FindRecentSuccessLoginNotInWhitelist(minutes int, whitelist []string) ([]string, error) {
-	lines, err := grepSSHLog([]string{"Accepted password", "Accepted publickey"})
-	if err != nil {
-		return nil, err
-	}
-
-	thresholdTime := time.Now().Add(-time.Duration(minutes) * time.Minute)
-	var abnormalLogins []string
-
-	whitelistMap := make(map[string]struct{}, len(whitelist))
-	for _, ip := range whitelist {
-		whitelistMap[ip] = struct{}{}
-	}
-
-	ipRegex := re.GetRegex(re.AlertIPPattern)
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-
-		t, err := parseLogTime(line)
-		if err != nil || t.Before(thresholdTime) {
-			continue
-		}
-
-		match := ipRegex.FindStringSubmatch(line)
-		if len(match) >= 2 {
-			ip := match[1]
-			if _, ok := whitelistMap[ip]; !ok {
-				abnormalLogins = append(abnormalLogins, fmt.Sprintf("%s-%s", ip, t.Format("2006-01-02 15:04:05")))
-			}
-		}
-	}
-
-	return abnormalLogins, nil
-}
-
-func findGrepPath() (string, error) {
-	path, err := exec.LookPath("grep")
-	if err != nil {
-		return "", fmt.Errorf("grep not found in PATH: %w", err)
-	}
-	return path, nil
-}
-
-func grepSSHLog(keywords []string) ([]string, error) {
-	logFiles := []string{"/var/log/secure", "/var/log/auth.log"}
-	var results []string
-	seen := make(map[string]struct{})
-
-	grepPath, err := findGrepPath()
-	if err != nil {
-		return nil, fmt.Errorf("find grep failed: %w", err)
-	}
-
-	for _, logFile := range logFiles {
-		if _, err := os.Stat(logFile); err != nil {
-			continue
-		}
-		for _, keyword := range keywords {
-			cmd := exec.Command(grepPath, "-a", keyword, logFile)
-			output, err := cmd.Output()
-			if err != nil {
-				var exitErr *exec.ExitError
-				if errors.As(err, &exitErr) {
-					if exitErr.ExitCode() == 1 {
-						continue
-					}
-				}
-				return nil, fmt.Errorf("read log file fail [%s]: %w", logFile, err)
-			}
-
-			lines := strings.Split(string(output), "\n")
-			for _, line := range lines {
-				line = strings.TrimSpace(line)
-				if line != "" {
-					if _, exists := seen[line]; !exists {
-						results = append(results, line)
-						seen[line] = struct{}{}
-					}
-				}
-			}
-		}
-	}
-
-	return results, nil
-}
-
-func parseLogTime(line string) (time.Time, error) {
-	if len(line) < 15 {
-		return time.Time{}, nil
-	}
-	timeStr := line[:15]
-	parsedTime, err := time.ParseInLocation("Jan 2 15:04:05", timeStr, time.Local)
-	if err != nil {
-		return time.Time{}, nil
-	}
-	return parsedTime.AddDate(time.Now().Year(), 0, 0), nil
 }
 
 func getNodeName(agentInfo *dto.AgentInfo) string {

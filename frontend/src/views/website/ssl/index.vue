@@ -3,22 +3,22 @@
         <RouterButton :buttons="routerButton" />
         <LayoutContent :title="$t('website.ssl', 2)">
             <template #leftToolBar>
-                <el-button type="primary" @click="openSSL()">
+                <el-button v-permission type="primary" @click="openSSL()">
                     {{ $t('ssl.create') }}
                 </el-button>
-                <el-button type="primary" @click="openUpload()">
+                <el-button v-permission type="primary" @click="openUpload()">
                     {{ $t('ssl.upload') }}
                 </el-button>
-                <el-button type="primary" plain @click="openCA()">
+                <el-button v-permission type="primary" plain @click="openCA()">
                     {{ $t('ssl.selfSigned') }}
                 </el-button>
-                <el-button type="primary" plain @click="openAcmeAccount()">
+                <el-button v-permission type="primary" plain @click="openAcmeAccount()">
                     {{ $t('website.acmeAccountManage') }}
                 </el-button>
-                <el-button type="primary" plain @click="openDnsAccount()">
+                <el-button v-permission type="primary" plain @click="openDnsAccount()">
                     {{ $t('website.dnsAccountManage') }}
                 </el-button>
-                <el-button plain @click="deletessl(null)" :disabled="selects.length === 0">
+                <el-button v-permission plain @click="deletessl(null)" :disabled="selects.length === 0">
                     {{ $t('commons.button.delete') }}
                 </el-button>
             </template>
@@ -52,14 +52,27 @@
                         show-overflow-tooltip
                         prop="primaryDomain"
                         min-width="150px"
-                    ></el-table-column>
+                    >
+                        <template #default="{ row }">
+                            <span>{{ row.primaryDomain }}</span>
+                            <el-tooltip
+                                v-if="row.dnsAccount && row.dnsAccount.type === 'DnsPod'"
+                                :content="$t('ssl.dnsPodRemovedSSLTip')"
+                                placement="top"
+                            >
+                                <el-tag type="danger" size="small" class="ml-2">
+                                    DnsPod {{ $t('ssl.dnsPodRemoved') }}
+                                </el-tag>
+                            </el-tooltip>
+                        </template>
+                    </el-table-column>
                     <el-table-column
                         :label="$t('website.otherDomains')"
                         show-overflow-tooltip
                         prop="domains"
                         min-width="90px"
                     ></el-table-column>
-                    <el-table-column :label="$t('ssl.applyType')" show-overflow-tooltip prop="provider" width="120px">
+                    <el-table-column :label="$t('ssl.applyType')" show-overflow-tooltip prop="provider" width="200px">
                         <template #default="{ row }">{{ getProvider(row.provider) }}</template>
                     </el-table-column>
                     <el-table-column
@@ -72,7 +85,7 @@
                         :label="$t('commons.table.status')"
                         show-overflow-tooltip
                         prop="status"
-                        width="100px"
+                        width="110px"
                     >
                         <template #default="{ row }">
                             <el-popover
@@ -97,7 +110,7 @@
                             </div>
                         </template>
                     </el-table-column>
-                    <el-table-column :label="$t('commons.button.log')" width="80px">
+                    <el-table-column :label="$t('commons.button.log')" prop="log" width="80px">
                         <template #default="{ row }">
                             <el-button
                                 @click="openSSLLog(row)"
@@ -117,7 +130,7 @@
                     ></el-table-column>
                     <el-table-column :label="$t('website.remark')" prop="description" width="100px">
                         <template #default="{ row }">
-                            <fu-read-write-switch>
+                            <fu-read-write-switch v-permission>
                                 <template #read>
                                     <MsgInfo :info="row.description" width="200" />
                                 </template>
@@ -127,9 +140,10 @@
                             </fu-read-write-switch>
                         </template>
                     </el-table-column>
-                    <el-table-column :label="$t('ssl.autoRenew')" width="100px">
+                    <el-table-column :label="$t('ssl.autoRenew')" prop="autoRenew" width="200px">
                         <template #default="{ row }">
                             <el-switch
+                                v-permission
                                 :disabled="
                                     row.provider === 'dnsManual' ||
                                     row.provider === 'manual' ||
@@ -152,8 +166,8 @@
                         :ellipsis="3"
                         :buttons="buttons"
                         :label="$t('commons.table.operate')"
-                        :fixed="mobile ? false : 'right'"
-                        width="300px"
+                        :fixed="isMobile ? false : 'right'"
+                        width="320px"
                         fix
                     />
                 </ComplexTable>
@@ -168,30 +182,81 @@
             <Log ref="logRef" @close="search()" :heightDiff="220" />
             <CA ref="caRef" @close="search()" />
             <Obtain ref="obtainRef" @close="search()" @submit="openLog" />
+            <DrawerPro v-model="pushOpen" :header="$t('commons.button.sync')" size="large" @close="handlePushClose">
+                <el-form
+                    ref="pushFormRef"
+                    label-position="top"
+                    :model="pushForm"
+                    :rules="pushRules"
+                    v-loading="pushLoading"
+                >
+                    <PushToNode
+                        v-if="isMaster && isXpackOrEE"
+                        :push-node="pushForm.pushNode"
+                        :nodes="pushForm.pushNodes"
+                        type="ssl"
+                        @update:push-node="pushForm.pushNode = $event"
+                        @update:nodes="pushForm.pushNodes = $event"
+                    />
+                </el-form>
+                <template #footer>
+                    <span class="dialog-footer">
+                        <el-button @click="handlePushClose" :disabled="pushLoading">
+                            {{ $t('commons.button.cancel') }}
+                        </el-button>
+                        <el-button
+                            v-permission="'website_cert_manage'"
+                            type="primary"
+                            @click="submitPush"
+                            :disabled="pushLoading"
+                        >
+                            {{ $t('commons.button.confirm') }}
+                        </el-button>
+                    </span>
+                </template>
+            </DrawerPro>
+            <TaskLog ref="taskLogRef" @close="search()" />
         </LayoutContent>
     </div>
 </template>
 
 <script lang="ts" setup>
-import { onMounted, reactive, ref, computed } from 'vue';
-import { deleteSSL, downloadFile, searchSSL, updateSSL } from '@/api/modules/website';
+import { defineAsyncComponent, onMounted, reactive, ref } from 'vue';
+import { deleteSSL, downloadFile, pushSSLToNode, searchSSL, updateSSL } from '@/api/modules/website';
 import DnsAccount from './dns-account/index.vue';
 import AcmeAccount from './acme-account/index.vue';
 import CA from './ca/index.vue';
 import Create from './create/index.vue';
 import Detail from './detail/index.vue';
-import { dateFormat, getProvider } from '@/utils/util';
+import { dateFormat } from '@/utils/date';
+import { getProvider } from '@/utils/ssl';
 import i18n from '@/lang';
 import { Website } from '@/api/interface/website';
 import { MsgError, MsgSuccess } from '@/utils/message';
-import { GlobalStore } from '@/store';
 import SSLUpload from './upload/index.vue';
 import Apply from './apply/index.vue';
 import Log from '@/components/log/file-drawer/index.vue';
 import Obtain from './obtain/index.vue';
 import MsgInfo from '@/components/msg-info/index.vue';
+import { useGlobalStore } from '@/composables/useGlobalStore';
+import { useOperateNodeContext } from '@/composables/useOperateNodeContext';
+import TaskLog from '@/components/log/task/index.vue';
+import { newUUID } from '@/utils/id';
+import { Rules } from '@/global/form-rules';
+import { FormInstance } from 'element-plus';
 
-const globalStore = GlobalStore();
+const { currentNode, isMobile, isMaster, isXpackOrEE } = useGlobalStore();
+useOperateNodeContext(currentNode);
+
+const PushToNode = defineAsyncComponent(async () => {
+    const modules = import.meta.glob('@/xpack/views/ssl/index.vue');
+    const loader = modules['/src/xpack/views/ssl/index.vue'];
+    if (loader) {
+        return ((await loader()) as any).default;
+    }
+    return { template: '<div></div>' };
+});
+
 const paginationConfig = reactive({
     cacheSizeKey: 'ssl-page-size',
     currentPage: 1,
@@ -208,14 +273,26 @@ const opRef = ref();
 const sslUploadRef = ref();
 const applyRef = ref();
 const logRef = ref();
+const taskLogRef = ref();
 const caRef = ref();
 const obtainRef = ref();
+const pushFormRef = ref<FormInstance>();
+const pushOpen = ref(false);
+const pushLoading = ref(false);
 let selects = ref<any>([]);
 const columns = ref([]);
 const req = reactive({
     domain: '',
-    orderBy: 'expire_date',
-    order: 'ascending',
+    orderBy: 'updated_at',
+    order: 'descending',
+});
+const pushForm = ref({
+    id: 0,
+    pushNode: true,
+    pushNodes: [] as string[],
+});
+const pushRules = ref({
+    pushNodes: [Rules.requiredSelect],
 });
 
 const routerButton = [
@@ -237,6 +314,7 @@ const buttons = [
     },
     {
         label: i18n.global.t('ssl.apply'),
+        permission: true,
         disabled: function (row: Website.SSLDTO) {
             return row.status === 'applying' || row.provider === 'manual' || row.provider === 'fromMaster';
         },
@@ -253,6 +331,7 @@ const buttons = [
     },
     {
         label: i18n.global.t('commons.button.update'),
+        permission: true,
         click: function (row: Website.SSLDTO) {
             sslUploadRef.value.acceptParams(row);
         },
@@ -262,6 +341,7 @@ const buttons = [
     },
     {
         label: i18n.global.t('commons.button.edit'),
+        permission: true,
         disabled: function (row: Website.SSLDTO) {
             return row.provider === 'fromMaster';
         },
@@ -273,6 +353,19 @@ const buttons = [
         },
     },
     {
+        label: i18n.global.t('commons.button.sync'),
+        permission: true,
+        disabled: function (row: Website.SSLDTO) {
+            return row.status !== 'ready';
+        },
+        click: function (row: Website.SSLDTO) {
+            openPush(row);
+        },
+        show: function (row: Website.SSLDTO) {
+            return isMaster.value && isXpackOrEE.value && row.provider !== 'fromMaster';
+        },
+    },
+    {
         label: i18n.global.t('commons.button.download'),
         click: function (row: Website.SSLDTO) {
             onDownload(row);
@@ -280,6 +373,7 @@ const buttons = [
     },
     {
         label: i18n.global.t('commons.button.delete'),
+        permission: true,
         click: function (row: Website.SSLDTO) {
             deletessl(row);
         },
@@ -303,12 +397,8 @@ const onDownload = (ssl: Website.SSLDTO) => {
         });
 };
 
-const mobile = computed(() => {
-    return globalStore.isMobile();
-});
-
 const changeSort = ({ order }) => {
-    req.orderBy = 'expire_date';
+    req.orderBy = order ? 'expire_date' : 'updated_at';
     req.order = order || 'descending';
     search();
 };
@@ -377,6 +467,58 @@ const openLog = (id: number) => {
 };
 const openSSLLog = (row: Website.SSL) => {
     logRef.value.acceptParams({ id: row.id, type: 'ssl', tail: row.status === 'applying' });
+};
+
+const parsePushNodes = (nodes: string) => {
+    return nodes
+        ? nodes
+              .split(',')
+              .map((item) => item.trim())
+              .filter((item) => item !== '')
+        : [];
+};
+
+const openPush = (row: Website.SSLDTO) => {
+    pushForm.value = {
+        id: row.id,
+        pushNode: true,
+        pushNodes: parsePushNodes(row.nodes),
+    };
+    pushOpen.value = true;
+};
+
+const handlePushClose = () => {
+    pushOpen.value = false;
+    pushFormRef.value?.resetFields();
+    pushForm.value = {
+        id: 0,
+        pushNode: true,
+        pushNodes: [],
+    };
+};
+
+const submitPush = async () => {
+    if (!pushForm.value.pushNode || pushForm.value.pushNodes.length === 0) {
+        MsgError(i18n.global.t('commons.rule.requiredSelect'));
+        return;
+    }
+    await pushFormRef.value?.validate();
+    const taskID = newUUID();
+    pushLoading.value = true;
+    pushSSLToNode({
+        id: pushForm.value.id,
+        pushNode: pushForm.value.pushNode,
+        nodes: pushForm.value.pushNodes.join(','),
+        taskID,
+    })
+        .then(() => {
+            handlePushClose();
+            taskLogRef.value.openWithTaskID(taskID);
+            search();
+        })
+        .finally(() => {
+            pushLoading.value = false;
+        });
 };
 
 const openCA = () => {

@@ -1,7 +1,6 @@
 package service
 
 import (
-	"bufio"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -10,7 +9,6 @@ import (
 	"math"
 	"net/http"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"reflect"
@@ -33,7 +31,6 @@ import (
 	"github.com/1Panel-dev/1Panel/agent/utils/common"
 	"github.com/1Panel-dev/1Panel/agent/utils/compose"
 	"github.com/1Panel-dev/1Panel/agent/utils/docker"
-	composeV2 "github.com/1Panel-dev/1Panel/agent/utils/docker"
 	"github.com/1Panel-dev/1Panel/agent/utils/env"
 	"github.com/1Panel-dev/1Panel/agent/utils/files"
 	"github.com/1Panel-dev/1Panel/agent/utils/nginx"
@@ -90,7 +87,15 @@ func checkPort(key string, params map[string]interface{}) (int, error) {
 	return 0, nil
 }
 
+func isPortInUse(port int, protocol string) bool {
+	return common.ScanPortWithProto(port, normalizeComposeProtocol(protocol))
+}
+
 func checkPortExist(port int) error {
+	return checkPortExistWithProtocol(port, "")
+}
+
+func checkPortExistWithProtocol(port int, protocol string) error {
 	errMap := make(map[string]interface{})
 	errMap["port"] = port
 	appInstall, _ := appInstallRepo.GetFirst(appInstallRepo.WithPort(port))
@@ -111,7 +116,7 @@ func checkPortExist(port int) error {
 		errMap["name"] = domain.Domain
 		return buserr.WithMap("ErrPortExist", errMap, nil)
 	}
-	if common.ScanPort(port) {
+	if isPortInUse(port, protocol) {
 		return buserr.WithDetail("ErrPortInUsed", port, nil)
 	}
 	return nil
@@ -292,8 +297,8 @@ func createLink(ctx context.Context, installTask *task.Task, app model.App, appI
 					}
 					resourceId = oldMysqlDb.ID
 					if oldMysqlDb.ID > 0 {
-						if oldMysqlDb.Username != dbConfig.DbUser || oldMysqlDb.Password != dbConfig.Password {
-							return buserr.New("ErrDbUserNotValid")
+						if err := ensureAppMysqlDBUser(database, dbConfig); err != nil {
+							return err
 						}
 					} else {
 						var createMysql dto.MysqlDBCreate
@@ -348,42 +353,28 @@ func deleteAppInstall(deleteReq request.AppInstallDelete) error {
 			logStr := i18n.GetMsgByKey("Stop") + i18n.GetMsgByKey("App")
 			t.Log(logStr)
 
-			out, err := compose.Down(install.GetComposePath())
-			if err != nil && !deleteReq.ForceDelete {
-				return handleErr(install, err, out)
+			if deleteReq.UseLifecycleScripts {
+				if err = runScript(t, &install, "uninstall"); err != nil {
+					return err
+				}
+			} else {
+				out, err := compose.Down(install.GetComposePath())
+				if err != nil && !deleteReq.ForceDelete {
+					return handleErr(install, err, out)
+				}
+				if err = runScript(t, &install, "uninstall"); err != nil {
+					_, _ = compose.Up(install.GetComposePath())
+					return err
+				}
 			}
 			t.LogSuccess(logStr)
-			if err = runScript(t, &install, "uninstall"); err != nil {
-				_, _ = compose.Up(install.GetComposePath())
-				return err
-			}
 			if deleteReq.DeleteImage {
-				delImageStr := i18n.GetMsgByKey("TaskDelete") + i18n.GetMsgByKey("Image")
 				content, err := op.GetContent(install.GetEnvPath())
 				if err != nil {
 					return err
 				}
-				images, err := composeV2.GetImagesFromDockerCompose(content, []byte(install.DockerCompose))
-				if err != nil {
+				if err = deleteAppImagesByCompose(t, content, []byte(install.DockerCompose), nil); err != nil {
 					return err
-				}
-				client, err := docker.NewClient()
-				if err != nil {
-					return err
-				}
-				defer client.Close()
-				for _, image := range images {
-					imageID, err := client.GetImageIDByName(image)
-					if err == nil {
-						imgStr := delImageStr + image
-						t.Log(imgStr)
-
-						if err = client.DeleteImage(imageID); err != nil {
-							t.LogFailedWithErr(imgStr, err)
-							continue
-						}
-						t.LogSuccess(delImageStr + image)
-					}
 				}
 			}
 		}
@@ -393,7 +384,7 @@ func deleteAppInstall(deleteReq request.AppInstallDelete) error {
 			return err
 		}
 		appKey := install.App.Key
-		if appKey == constant.AppOpenclaw {
+		if isAgentAppKey(appKey) {
 			_ = agentRepo.DeleteByAppInstallIDWithCtx(ctx, install.ID)
 		}
 
@@ -425,7 +416,23 @@ func deleteAppInstall(deleteReq request.AppInstallDelete) error {
 
 		switch install.App.Key {
 		case constant.AppMysql, constant.AppMariaDB, constant.AppMysqlCluster:
+			if err = databaseUserGrantRepo.DeleteBy(
+				ctx,
+				repo.WithByType(install.App.Key),
+				databaseUserGrantRepo.WithByDatabase(install.Name),
+			); err != nil {
+				return err
+			}
+			if err = databaseUserRepo.DeleteBy(
+				ctx,
+				repo.WithByType(install.App.Key),
+				databaseUserRepo.WithByDatabase(install.Name),
+			); err != nil {
+				return err
+			}
 			_ = mysqlRepo.Delete(ctx, mysqlRepo.WithByMysqlName(install.Name))
+		case constant.AppMongodb:
+			_ = mongodbRepo.Delete(ctx, mongodbRepo.WithByMongodbName(install.Name))
 		case constant.AppPostgresql, constant.AppPostgresqlCluster:
 			_ = postgresqlRepo.Delete(ctx, postgresqlRepo.WithByPostgresqlName(install.Name))
 		}
@@ -467,6 +474,107 @@ func deleteAppInstall(deleteReq request.AppInstallDelete) error {
 	return nil
 }
 
+type appImageID struct {
+	name string
+	id   string
+}
+
+func getAppImageIDsByCompose(client docker.Client, envContent, composeContent []byte) ([]appImageID, error) {
+	images, err := docker.GetImagesFromDockerCompose(envContent, composeContent)
+	if err != nil {
+		return nil, err
+	}
+	imageIDs := make([]appImageID, 0, len(images))
+	for _, image := range images {
+		imageID, err := client.GetImageIDByName(image)
+		if err == nil && imageID != "" {
+			imageIDs = append(imageIDs, appImageID{name: image, id: imageID})
+		}
+	}
+	return imageIDs, nil
+}
+
+func deleteAppImagesByCompose(t *task.Task, envContent, composeContent []byte, excludeImages []string) error {
+	client, err := docker.NewClient()
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+
+	imageIDs, err := getAppImageIDsByCompose(client, envContent, composeContent)
+	if err != nil {
+		return err
+	}
+	return deleteAppImagesByIDs(t, client, imageIDs, excludeImages)
+}
+
+func deleteAppImagesByIDs(t *task.Task, client docker.Client, imageIDs []appImageID, excludeImages []string) error {
+	delImageStr := i18n.GetMsgByKey("TaskDelete") + i18n.GetMsgByKey("Image")
+	excludeImageIDs := make(map[string]struct{}, len(excludeImages))
+	for _, image := range excludeImages {
+		imageID, err := client.GetImageIDByName(image)
+		if err == nil && imageID != "" {
+			excludeImageIDs[imageID] = struct{}{}
+		}
+	}
+	deletedImageIDs := make(map[string]struct{}, len(imageIDs))
+	for _, image := range imageIDs {
+		if _, ok := excludeImageIDs[image.id]; ok {
+			continue
+		}
+		if _, ok := deletedImageIDs[image.id]; ok {
+			continue
+		}
+		deletedImageIDs[image.id] = struct{}{}
+		imgStr := delImageStr + image.name
+		t.Log(imgStr)
+		if err := client.DeleteImage(image.id); err != nil {
+			t.LogFailedWithErr(imgStr, err)
+			continue
+		}
+		t.LogSuccess(imgStr)
+	}
+	return nil
+}
+
+func ensureAppMysqlDBUser(database model.Database, dbConfig dto.AppDatabase) error {
+	const host = "%"
+	mysqlService := NewIMysqlService()
+	users, err := mysqlService.ListUsers(dto.MysqlUserSearch{Database: database.Name})
+	if err != nil {
+		return err
+	}
+	userExists := false
+	passwordValid := false
+	for _, user := range users {
+		if user.Username != dbConfig.DbUser || user.Host != host || user.IsDelete {
+			continue
+		}
+		userExists = true
+		passwordValid = user.Password == dbConfig.Password
+		break
+	}
+	if !userExists || !passwordValid {
+		return buserr.New("ErrDbUserNotValid")
+	}
+
+	grants, err := mysqlService.ListGrants(dto.MysqlUserSearch{Database: database.Name})
+	if err != nil {
+		return err
+	}
+	for _, grant := range grants {
+		if grant.Database == dbConfig.DbName && grant.Username == dbConfig.DbUser && grant.Host == host {
+			return nil
+		}
+	}
+	return mysqlService.GrantUser(dto.MysqlGrantCreate{
+		Database: database.Name,
+		DB:       dbConfig.DbName,
+		Username: dbConfig.DbUser,
+		Host:     host,
+	})
+}
+
 func deleteLink(del dto.DelAppLink) error {
 	install := del.Install
 	resources, _ := appInstallResourceRepo.GetBy(appInstallResourceRepo.WithAppInstallId(install.ID))
@@ -476,19 +584,20 @@ func deleteLink(del dto.DelAppLink) error {
 	for _, re := range resources {
 		switch re.Key {
 		case constant.AppMysql, constant.AppMariaDB:
-			mysqlService := NewIMysqlService()
 			database, _ := mysqlRepo.Get(repo.WithByID(re.ResourceId))
 			if reflect.DeepEqual(database, model.DatabaseMysql{}) {
 				continue
 			}
-			if err := mysqlService.Delete(del.Ctx, dto.MysqlDBDelete{
+			if err := deleteMysqlDatabaseForResourceOwner(del.Ctx, dto.MysqlDBDelete{
 				ID:           database.ID,
 				ForceDelete:  del.ForceDelete,
 				DeleteBackup: true,
 				Type:         re.Key,
 				Database:     database.MysqlName,
-			}); err != nil && !del.ForceDelete {
-				return err
+			}, dto.DBResource{Type: constant.TypeApp, Name: install.Name}); err != nil {
+				if isMysqlDatabaseResourceInUseError(err) || !del.ForceDelete {
+					return err
+				}
 			}
 		case constant.AppPostgresql:
 			pgsqlService := NewIPostgresqlService()
@@ -563,9 +672,56 @@ func handleUpgradeCompose(install model.AppInstall, detail model.AppDetail) (map
 	if oldServiceValue["restart"] != nil {
 		serviceValue["restart"] = oldServiceValue["restart"]
 	}
+	if install.App.Key == constant.AppOpenresty {
+		mergeOpenrestyModuleVolumes(serviceValue, oldServiceValue)
+	}
 	servicesMap[install.ServiceName] = serviceValue
 	composeMap["services"] = servicesMap
 	return composeMap, nil
+}
+
+// mergeOpenrestyModuleVolumes carries the dynamic module mounts of the old
+// compose over to the upgraded one when it does not declare them, so built
+// module artifacts and their load configuration stay mounted across upgrades.
+func mergeOpenrestyModuleVolumes(serviceValue, oldServiceValue map[string]interface{}) {
+	oldVolumes, ok := oldServiceValue["volumes"].([]interface{})
+	if !ok {
+		return
+	}
+	newVolumes, _ := serviceValue["volumes"].([]interface{})
+	existing := make(map[string]struct{}, len(newVolumes))
+	for _, volume := range newVolumes {
+		if containerPath, ok := composeVolumeContainerPath(volume); ok {
+			existing[containerPath] = struct{}{}
+		}
+	}
+	for _, volume := range oldVolumes {
+		containerPath, ok := composeVolumeContainerPath(volume)
+		if !ok {
+			continue
+		}
+		if !strings.Contains(containerPath, nginxModuleEnabledConfDir) && !strings.Contains(containerPath, "nginx/modules/1panel") {
+			continue
+		}
+		if _, ok = existing[containerPath]; ok {
+			continue
+		}
+		newVolumes = append(newVolumes, volume)
+		existing[containerPath] = struct{}{}
+	}
+	serviceValue["volumes"] = newVolumes
+}
+
+func composeVolumeContainerPath(volume interface{}) (string, bool) {
+	volumeStr, ok := volume.(string)
+	if !ok {
+		return "", false
+	}
+	parts := strings.Split(volumeStr, ":")
+	if len(parts) < 2 {
+		return "", false
+	}
+	return parts[1], true
 }
 
 func getUpgradeCompose(install model.AppInstall, detail model.AppDetail) (string, error) {
@@ -601,300 +757,35 @@ func getUpgradeCompose(install model.AppInstall, detail model.AppDetail) (string
 	return string(composeByte), nil
 }
 
-func buildNginx(parentTask *task.Task) error {
-	nginxInstall, err := getAppInstallByKey(constant.AppOpenresty)
-	if err != nil {
-		return err
-	}
+func buildNginx(parentTask *task.Task, nginxInstall model.AppInstall, catalogPath string) error {
 	fileOp := files.NewFileOp()
-	buildPath := path.Join(nginxInstall.GetPath(), "build")
+	buildPath := path.Join(nginxInstall.GetPath(), nginxModuleBuildDir)
 	if !fileOp.Stat(buildPath) {
 		return buserr.New("ErrBuildDirNotFound")
 	}
-	moduleConfigPath := path.Join(buildPath, "module.json")
-	moduleContent, err := fileOp.GetContent(moduleConfigPath)
+	modules, err := loadNginxModulesWithCatalog(nginxInstall, catalogPath)
 	if err != nil {
 		return err
 	}
-	var (
-		modules         []dto.NginxModule
-		addModuleParams []string
-		addPackages     []string
-	)
-	if len(moduleContent) > 0 {
-		_ = json.Unmarshal(moduleContent, &modules)
-		bashFile, err := os.OpenFile(path.Join(buildPath, "tmp", "pre.sh"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, constant.DirPerm)
-		if err != nil {
-			return err
-		}
-		defer bashFile.Close()
-		bashFileWriter := bufio.NewWriter(bashFile)
-		for _, module := range modules {
-			if !module.Enable {
-				continue
-			}
-			_, err = bashFileWriter.WriteString(module.Script + "\n")
-			if err != nil {
-				return err
-			}
-			addModuleParams = append(addModuleParams, module.Params)
-			addPackages = append(addPackages, module.Packages...)
-		}
-		err = bashFileWriter.Flush()
-		if err != nil {
-			return err
-		}
+	previousModules := cloneNginxModules(modules)
+	staticBuild := hasEnabledStaticNginxModules(modules)
+	if err = configureStaticNginxModules(nginxInstall, modules, ""); err != nil {
+		return err
 	}
-	envs, err := gotenv.Read(nginxInstall.GetEnvPath())
+	if staticBuild {
+		logStr := fmt.Sprintf("%s %s", i18n.GetMsgByKey("TaskBuild"), i18n.GetMsgByKey("Image"))
+		parentTask.LogStart(logStr)
+		cmdMgr := cmd.NewCommandMgr(cmd.WithTask(*parentTask), cmd.WithTimeout(120*time.Minute))
+		if err = cmdMgr.Run("docker", "compose", "-f", nginxInstall.GetComposePath(), "build"); err != nil {
+			return err
+		}
+		parentTask.LogSuccess(logStr)
+	}
+	modules, err = buildDynamicNginxModules(nginxInstall, modules, nil, false, "", catalogPath, parentTask)
 	if err != nil {
 		return err
 	}
-	envs["RESTY_CONFIG_OPTIONS_MORE"] = ""
-	envs["RESTY_ADD_PACKAGE_BUILDDEPS"] = ""
-	if len(addModuleParams) > 0 {
-		envs["RESTY_CONFIG_OPTIONS_MORE"] = strings.Join(addModuleParams, " ")
-	}
-	if len(addPackages) > 0 {
-		envs["RESTY_ADD_PACKAGE_BUILDDEPS"] = strings.Join(addPackages, " ")
-	}
-	_ = gotenv.Write(envs, nginxInstall.GetEnvPath())
-	if len(addModuleParams) == 0 && len(addPackages) == 0 {
-		return nil
-	}
-	logStr := fmt.Sprintf("%s %s", i18n.GetMsgByKey("TaskBuild"), i18n.GetMsgByKey("Image"))
-	parentTask.LogStart(logStr)
-	cmdMgr := cmd.NewCommandMgr(cmd.WithTask(*parentTask), cmd.WithTimeout(60*time.Minute))
-	if err = cmdMgr.RunBashCf("docker compose -f %s build", nginxInstall.GetComposePath()); err != nil {
-		return err
-	}
-	parentTask.LogSuccess(logStr)
-	return nil
-}
-
-func upgradeInstall(req request.AppInstallUpgrade) error {
-	install, err := appInstallRepo.GetFirst(repo.WithByID(req.InstallID))
-	if err != nil {
-		return err
-	}
-	detail, err := appDetailRepo.GetFirst(repo.WithByID(req.DetailID))
-	if err != nil {
-		return err
-	}
-	if install.Version == detail.Version {
-		return errors.New("two version is same")
-	}
-
-	upgradeTask, err := task.NewTaskWithOps(install.Name, task.TaskUpgrade, task.TaskScopeApp, req.TaskID, install.ID)
-	if err != nil {
-		return err
-	}
-	install.Status = constant.StatusUpgrading
-
-	var (
-		upErr      error
-		backupFile string
-	)
-	backUpApp := func(t *task.Task) error {
-		backupService := NewIBackupService()
-		backupRecordService := NewIBackupRecordService()
-		fileName := fmt.Sprintf("upgrade_backup_%s_%s.tar.gz", install.Name, time.Now().Format(constant.DateTimeSlimLayout)+common.RandStrAndNum(5))
-		backupRecord, err := backupService.AppBackup(dto.CommonBackup{Name: install.App.Key, DetailName: install.Name, FileName: fileName})
-		if err == nil {
-			backups, _ := backupRecordService.ListAppRecords(install.App.Key, install.Name, "upgrade_backup")
-			if len(backups) > 3 {
-				backupsToDelete := backups[:len(backups)-3]
-				var deleteIDs []uint
-				for _, backup := range backupsToDelete {
-					deleteIDs = append(deleteIDs, backup.ID)
-				}
-				_ = backupRecordService.BatchDeleteRecord(deleteIDs)
-			}
-			backupFile = path.Join(global.Dir.LocalBackupDir, backupRecord.FileDir, backupRecord.FileName)
-		} else {
-			return buserr.WithNameAndErr("ErrAppBackup", install.Name, err)
-		}
-		return nil
-	}
-	if req.Backup {
-		upgradeTask.AddSubTask(task.GetTaskName(install.Name, task.TaskBackup, task.TaskScopeApp), backUpApp, nil)
-	}
-
-	upgradeApp := func(t *task.Task) error {
-		fileOp := files.NewFileOp()
-		detailDir := path.Join(global.Dir.ResourceDir, "apps", install.App.Resource, install.App.Key, detail.Version)
-		if install.App.Resource == constant.AppResourceRemote {
-			if err = downloadApp(install.App, detail, &install, t.Logger); err != nil {
-				return err
-			}
-			if detail.DockerCompose == "" {
-				composeDetail, err := fileOp.GetContent(path.Join(detailDir, "docker-compose.yml"))
-				if err != nil {
-					return err
-				}
-				detail.DockerCompose = string(composeDetail)
-				_ = appDetailRepo.Update(context.Background(), detail)
-			}
-			go func() {
-				RequestDownloadCallBack(detail.DownloadCallBackUrl)
-			}()
-		}
-		if install.App.Resource == constant.AppResourceLocal {
-			detailDir = path.Join(global.Dir.ResourceDir, "apps", "local", strings.TrimPrefix(install.App.Key, "local"), detail.Version)
-		}
-
-		content, err := fileOp.GetContent(install.GetEnvPath())
-		if err != nil {
-			return err
-		}
-		dockerCLi, _ := docker.NewClient()
-		if req.PullImage {
-			composeContent := []byte(detail.DockerCompose)
-			if req.DockerCompose != "" {
-				composeContent = []byte(req.DockerCompose)
-			}
-			images, err := composeV2.GetImagesFromDockerCompose(content, composeContent)
-			if err != nil {
-				return err
-			}
-			for _, image := range images {
-				t.Log(i18n.GetWithName("PullImageStart", image))
-				if err = dockerCLi.PullImageWithProcess(t, image); err != nil {
-					err = buserr.WithNameAndErr("ErrDockerPullImage", "", err)
-					return err
-				}
-				t.LogSuccess(i18n.GetMsgByKey("PullImage"))
-			}
-		}
-
-		command := exec.Command("/bin/bash", "-c", fmt.Sprintf("cp -rn %s/* %s || true", detailDir, install.GetPath()))
-		_, _ = command.CombinedOutput()
-		if install.App.Key == constant.AppOpenresty {
-			installBuildDir := path.Join(install.GetPath(), "build")
-			detailBuildDir := path.Join(detailDir, "build")
-			if !fileOp.Stat(installBuildDir) {
-				if err := fileOp.CreateDir(installBuildDir, constant.DirPerm); err != nil {
-					return err
-				}
-			}
-			if err := fileOp.DeleteDir(path.Join(installBuildDir, "tmp")); err != nil {
-				return err
-			}
-			if err := fileOp.CopyDir(path.Join(detailBuildDir, "tmp"), installBuildDir); err != nil {
-				return err
-			}
-			if err := fileOp.CopyFile(path.Join(detailBuildDir, "Dockerfile"), installBuildDir); err != nil {
-				return err
-			}
-			if err := fileOp.CopyFile(path.Join(detailBuildDir, "nginx.conf"), installBuildDir); err != nil {
-				return err
-			}
-			if err := fileOp.CopyFile(path.Join(detailBuildDir, "nginx.vh.default.conf"), installBuildDir); err != nil {
-				return err
-			}
-		}
-		sourceScripts := path.Join(detailDir, "scripts")
-		if fileOp.Stat(sourceScripts) {
-			dstScripts := path.Join(install.GetPath(), "scripts")
-			_ = fileOp.DeleteDir(dstScripts)
-			_ = fileOp.CreateDir(dstScripts, constant.DirPerm)
-			scriptCmd := exec.Command("cp", "-rf", sourceScripts+"/.", dstScripts+"/")
-			_, _ = scriptCmd.CombinedOutput()
-		}
-
-		var newCompose string
-		if req.DockerCompose == "" {
-			newCompose, err = getUpgradeCompose(install, detail)
-			if err != nil {
-				return err
-			}
-		} else {
-			newCompose = req.DockerCompose
-		}
-
-		install.DockerCompose = newCompose
-		install.Version = detail.Version
-		install.AppDetailId = req.DetailID
-
-		if out, err := compose.Down(install.GetComposePath()); err != nil {
-			if out != "" {
-				upErr = errors.New(out)
-				return upErr
-			}
-			return err
-		}
-		envs := make(map[string]interface{})
-		if err = json.Unmarshal([]byte(install.Env), &envs); err != nil {
-			return err
-		}
-		envParams := make(map[string]string, len(envs))
-		if install.App.Key == constant.AppOpenresty {
-			packageUrl, _ := env.GetEnvValueByKey(install.GetEnvPath(), "CONTAINER_PACKAGE_URL")
-			addPackage, _ := env.GetEnvValueByKey(install.GetEnvPath(), "RESTY_ADD_PACKAGE_BUILDDEPS")
-			options, _ := env.GetEnvValueByKey(install.GetEnvPath(), "RESTY_CONFIG_OPTIONS_MORE")
-			envParams["CONTAINER_PACKAGE_URL"] = packageUrl
-			envParams["RESTY_ADD_PACKAGE_BUILDDEPS"] = addPackage
-			envParams["RESTY_CONFIG_OPTIONS_MORE"] = options
-		}
-		handleMap(envs, envParams)
-		if err = env.Write(envParams, install.GetEnvPath()); err != nil {
-			return err
-		}
-
-		if err = runScript(t, &install, "upgrade"); err != nil {
-			return err
-		}
-
-		if err = fileOp.WriteFile(install.GetComposePath(), strings.NewReader(install.DockerCompose), constant.FilePerm); err != nil {
-			return err
-		}
-
-		if install.App.Key == constant.AppOpenresty {
-			if err = buildNginx(t); err != nil {
-				t.Log(err.Error())
-				return err
-			}
-		}
-
-		logStr := fmt.Sprintf("%s %s", i18n.GetMsgByKey("Run"), i18n.GetMsgByKey("App"))
-		t.Log(logStr)
-		if out, err := compose.Up(install.GetComposePath()); err != nil {
-			if out != "" {
-				return errors.New(out)
-			}
-			return err
-		}
-		t.LogSuccess(logStr)
-		install.Status = constant.StatusRunning
-		return appInstallRepo.Save(context.Background(), &install)
-	}
-
-	rollBackApp := func(t *task.Task) {
-		if req.Backup {
-			t.Log(i18n.GetWithName("AppRecover", install.Name))
-			if err := NewIBackupService().AppRecover(dto.CommonRecover{Name: install.App.Key, DetailName: install.Name, Type: "app", DownloadAccountID: 1, File: backupFile}); err != nil {
-				t.LogFailedWithErr(i18n.GetWithName("AppRecover", install.Name), err)
-				return
-			}
-			t.LogSuccess(i18n.GetWithName("AppRecover", install.Name))
-			return
-		}
-	}
-
-	upgradeTask.AddSubTaskWithOps(task.GetTaskName(install.Name, task.TaskScopeApp, task.TaskUpgrade), upgradeApp, rollBackApp, 0, 1*time.Hour)
-
-	go func() {
-		err = upgradeTask.Execute()
-		if err != nil {
-			existInstall, _ := appInstallRepo.GetFirst(repo.WithByID(req.InstallID))
-			if existInstall.ID > 0 && existInstall.Status != constant.StatusRunning {
-				existInstall.Status = constant.StatusUpgradeErr
-				existInstall.Message = err.Error()
-				_ = appInstallRepo.Save(context.Background(), &existInstall)
-			}
-		}
-	}()
-
-	return appInstallRepo.Save(context.Background(), &install)
+	return commitNginxModuleBuilds(nginxInstall, previousModules, modules, false, catalogPath)
 }
 
 func skipCheckStatus(service types.ServiceConfig) bool {
@@ -911,7 +802,7 @@ func getContainerNames(install model.AppInstall) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	project, err := composeV2.GetComposeProject(install.Name, install.GetPath(), []byte(install.DockerCompose), []byte(envStr), true)
+	project, err := docker.GetComposeProject(install.Name, install.GetPath(), []byte(install.DockerCompose), []byte(envStr), true)
 	if err != nil {
 		return nil, err
 	}
@@ -1029,7 +920,7 @@ func downloadApp(app model.App, appDetail model.AppDetail, appInstall *model.App
 		}
 		return
 	}
-	if err = fileOp.Decompress(filePath, appResourceDir, files.SdkTarGz, ""); err != nil {
+	if err = fileOp.Decompress(context.Background(), filePath, appResourceDir, files.SdkTarGz, ""); err != nil {
 		if logger == nil {
 			global.LOG.Errorf("decompress app[%s] error %v", app.Name, err)
 		} else {
@@ -1114,6 +1005,12 @@ func runScript(task *task.Task, appInstall *model.AppInstall, operate string) er
 		scriptPath = path.Join(workDir, "scripts", "upgrade.sh")
 	case "uninstall":
 		scriptPath = path.Join(workDir, "scripts", "uninstall.sh")
+	case "start":
+		scriptPath = path.Join(workDir, "scripts", "start.sh")
+	case "stop":
+		scriptPath = path.Join(workDir, "scripts", "stop.sh")
+	case "restart":
+		scriptPath = path.Join(workDir, "scripts", "restart.sh")
 	}
 	fileOp := files.NewFileOp()
 	if !fileOp.Stat(scriptPath) {
@@ -1123,8 +1020,12 @@ func runScript(task *task.Task, appInstall *model.AppInstall, operate string) er
 	logStr := i18n.GetWithName("ExecShell", operate)
 	task.LogStart(logStr)
 
-	cmdMgr := cmd.NewCommandMgr(cmd.WithTimeout(10*time.Minute), cmd.WithWorkDir(workDir))
-	if err := cmdMgr.RunBashC(scriptPath); err != nil {
+	timeout := 10 * time.Minute
+	if operate == "start" || operate == "restart" {
+		timeout = time.Hour
+	}
+	cmdMgr := cmd.NewCommandMgr(cmd.WithTimeout(timeout), cmd.WithWorkDir(workDir), cmd.WithTask(*task))
+	if err := cmdMgr.Run("bash", scriptPath); err != nil {
 		task.LogFailedWithErr(logStr, err)
 		return err
 	}
@@ -1133,7 +1034,7 @@ func runScript(task *task.Task, appInstall *model.AppInstall, operate string) er
 }
 
 func checkContainerNameIsExist(containerName, appDir string) (bool, error) {
-	client, err := composeV2.NewDockerClient()
+	client, err := docker.NewDockerClient()
 	if err != nil {
 		return false, err
 	}
@@ -1158,26 +1059,30 @@ func checkContainerNameIsExist(containerName, appDir string) (bool, error) {
 	return false, nil
 }
 
-func upApp(task *task.Task, appInstall *model.AppInstall, pullImages bool) error {
+func upApp(task *task.Task, appInstall *model.AppInstall, pullImages, useLifecycleScripts bool) error {
 	upProject := func(appInstall *model.AppInstall) (err error) {
 		var (
 			out    string
 			errMsg string
 		)
+		if useLifecycleScripts {
+			return runScript(task, appInstall, "start")
+		}
 		if pullImages && appInstall.App.Type != "php" {
 			envByte, err := files.NewFileOp().GetContent(appInstall.GetEnvPath())
 			if err != nil {
 				return err
 			}
-			images, err := composeV2.GetImagesFromDockerCompose(envByte, []byte(appInstall.DockerCompose))
+			images, err := docker.GetImagesFromDockerCompose(envByte, []byte(appInstall.DockerCompose))
 			if err != nil {
 				return err
 			}
-			imagePrefix := xpack.GetImagePrefix()
+			imagePrefix := xpack.MultiNodeProvider.GetImagePrefix()
 			dockerCLi, err := docker.NewClient()
 			if err != nil {
 				return err
 			}
+			defer dockerCLi.Close()
 			for _, image := range images {
 				if imagePrefix != "" {
 					lastSlashIndex := strings.LastIndex(image, "/")
@@ -1489,7 +1394,8 @@ func handleErr(install model.AppInstall, err error, out string) error {
 
 func doNotNeedSync(installed model.AppInstall) bool {
 	return installed.Status == constant.StatusInstalling || installed.Status == constant.StatusRebuilding || installed.Status == constant.StatusUpgrading ||
-		installed.Status == constant.StatusSyncing || installed.Status == constant.StatusUninstalling || installed.Status == constant.StatusInstallErr
+		installed.Status == constant.StatusSyncing || installed.Status == constant.StatusUninstalling || installed.Status == constant.StatusInstallErr ||
+		installed.Status == constant.StatusStarting || installed.Status == constant.StatusRestarting || installed.Status == constant.StatusWaiting
 }
 
 func synAppInstall(containers map[string]container.Summary, appInstall *model.AppInstall, force bool) {
@@ -1591,6 +1497,9 @@ func handleInstalled(appInstallList []model.AppInstall, updated, sync, checkUpda
 			synAppInstall(containersMap, &installed, false)
 		}
 
+		resourceKeys := getAppInstallResourceKeys(installed.ID)
+		envMap := make(map[string]interface{})
+		_ = json.Unmarshal([]byte(installed.Env), &envMap)
 		installDTO := response.AppInstallDTO{
 			ID:          installed.ID,
 			Name:        installed.Name,
@@ -1612,14 +1521,16 @@ func handleInstalled(appInstallList []model.AppInstall, updated, sync, checkUpda
 				Website:  installed.App.Website,
 				Document: installed.App.Document,
 			},
-			Favorite:    installed.Favorite,
-			SortOrder:   installed.SortOrder,
-			Container:   installed.ContainerName,
-			ServiceName: strings.ToLower(installed.ServiceName),
+			Favorite:     installed.Favorite,
+			SortOrder:    installed.SortOrder,
+			Container:    installed.ContainerName,
+			ServiceName:  strings.ToLower(installed.ServiceName),
+			ResourceKeys: resourceKeys,
+			Env:          envMap,
 		}
 
 		if !updated && !checkUpdate {
-			installDTO.LinkDB = hasLinkDB(installed.ID)
+			installDTO.LinkDB = hasLinkDBFromKeys(resourceKeys)
 			res = append(res, installDTO)
 			continue
 		}
@@ -1627,7 +1538,7 @@ func handleInstalled(appInstallList []model.AppInstall, updated, sync, checkUpda
 		if installed.Version == "latest" {
 			if checkUpdate {
 				installDTO.CanUpdate = false
-				installDTO.LinkDB = hasLinkDB(installed.ID)
+				installDTO.LinkDB = hasLinkDBFromKeys(resourceKeys)
 				res = append(res, installDTO)
 			}
 			continue
@@ -1656,7 +1567,7 @@ func handleInstalled(appInstallList []model.AppInstall, updated, sync, checkUpda
 		if len(versions) == 0 {
 			if checkUpdate {
 				installDTO.CanUpdate = false
-				installDTO.LinkDB = hasLinkDB(installed.ID)
+				installDTO.LinkDB = hasLinkDBFromKeys(resourceKeys)
 				res = append(res, installDTO)
 			}
 			continue
@@ -1688,7 +1599,7 @@ func handleInstalled(appInstallList []model.AppInstall, updated, sync, checkUpda
 				res = append(res, installDTO)
 			}
 		} else if checkUpdate {
-			installDTO.LinkDB = hasLinkDB(installed.ID)
+			installDTO.LinkDB = hasLinkDBFromKeys(resourceKeys)
 			res = append(res, installDTO)
 		}
 	}
@@ -1773,7 +1684,7 @@ func addDockerComposeCommonParam(composeMap map[string]interface{}, serviceName 
 	if !serviceValid {
 		return buserr.New("ErrFileParse")
 	}
-	imagePreFix := xpack.GetImagePrefix()
+	imagePreFix := xpack.MultiNodeProvider.GetImagePrefix()
 	if imagePreFix != "" {
 		for _, service := range services {
 			serviceValue := service.(map[string]interface{})
@@ -1928,6 +1839,46 @@ func isHostModel(dockerCompose string) bool {
 		}
 	}
 	return false
+}
+
+func copyAppDetailMissing(fileOp files.FileOp, srcDir, dstDir string) error {
+	return copyAppDetailMissingTracked(fileOp, srcDir, dstDir, nil)
+}
+
+func copyAppDetailMissingTracked(fileOp files.FileOp, srcDir, dstDir string, createdPaths *[]string) error {
+	entries, err := os.ReadDir(srcDir)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		srcPath := path.Join(srcDir, entry.Name())
+		dstPath := path.Join(dstDir, entry.Name())
+		if !fileOp.Stat(dstPath) {
+			if createdPaths != nil {
+				*createdPaths = append(*createdPaths, dstPath)
+			}
+			if entry.IsDir() {
+				if err := fileOp.CopyDir(srcPath, dstDir); err != nil {
+					return err
+				}
+				continue
+			}
+			if err := fileOp.CopyFile(srcPath, dstDir); err != nil {
+				return err
+			}
+			continue
+		}
+		if !entry.IsDir() {
+			continue
+		}
+		if err := copyAppDetailMissingTracked(fileOp, srcPath, dstPath, createdPaths); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func getRestartPolicy(yml string) string {
@@ -2086,7 +2037,7 @@ func handleOpenrestyFile(appInstall *model.AppInstall) error {
 
 func handleDefaultServer(appInstall *model.AppInstall) error {
 	installDir := appInstall.GetPath()
-	defaultConfigPath := path.Join(installDir, "conf", "default", "00.default.conf")
+	defaultConfigPath := path.Join(installDir, nginxModuleConfDir, "default", "00.default.conf")
 	fileOp := files.NewFileOp()
 	content, err := fileOp.GetContent(defaultConfigPath)
 	if err != nil {
@@ -2100,7 +2051,7 @@ func handleDefaultServer(appInstall *model.AppInstall) error {
 }
 
 func handleSSLConfig(appInstall *model.AppInstall, hasDefaultWebsite bool, sslRejectHandshake bool) error {
-	sslDir := path.Join(appInstall.GetPath(), "conf", "ssl")
+	sslDir := path.Join(appInstall.GetPath(), nginxModuleConfDir, "ssl")
 	fileOp := files.NewFileOp()
 	if !fileOp.Stat(sslDir) {
 		return errors.New("ssl dir not found")
@@ -2116,7 +2067,7 @@ func handleSSLConfig(appInstall *model.AppInstall, hasDefaultWebsite bool, sslRe
 		caRequest := request.WebsiteCAObtain{
 			ID:      ca.ID,
 			Domains: "localhost",
-			KeyType: "4096",
+			KeyType: "RSA4096",
 			Time:    99,
 			Unit:    "year",
 			Dir:     sslDir,
@@ -2130,7 +2081,7 @@ func handleSSLConfig(appInstall *model.AppInstall, hasDefaultWebsite bool, sslRe
 			_ = NewIWebsiteSSLService().Delete([]uint{websiteSSL.ID})
 		}()
 	}
-	defaultConfigPath := path.Join(appInstall.GetPath(), "conf", "default", "00.default.conf")
+	defaultConfigPath := path.Join(appInstall.GetPath(), nginxModuleConfDir, "default", "00.default.conf")
 	content, err := os.ReadFile(defaultConfigPath)
 	if err != nil {
 		return err
@@ -2222,13 +2173,25 @@ func needsUpdate(localTag *model.Tag, remoteTag dto.Tag, translations string) bo
 }
 
 func hasLinkDB(installID uint) bool {
+	return hasLinkDBFromKeys(getAppInstallResourceKeys(installID))
+}
+
+func getAppInstallResourceKeys(installID uint) []string {
 	resources, _ := appInstallResourceRepo.GetBy(appInstallResourceRepo.WithAppInstallId(installID))
+	keys := make([]string, 0, len(resources))
+	for _, resource := range resources {
+		keys = append(keys, resource.Key)
+	}
+	return keys
+}
+
+func hasLinkDBFromKeys(resourceKeys []string) bool {
 	hasDB := false
-	if len(resources) > 0 {
-		for _, resource := range resources {
-			if resource.Key == constant.AppPostgres || resource.Key == constant.AppMysql ||
-				resource.Key == constant.AppMariaDB || resource.Key == constant.AppMysqlCluster ||
-				resource.Key == constant.AppPostgresql || resource.Key == constant.AppPostgresqlCluster {
+	if len(resourceKeys) > 0 {
+		for _, resourceKey := range resourceKeys {
+			if resourceKey == constant.AppPostgres || resourceKey == constant.AppMysql ||
+				resourceKey == constant.AppMariaDB || resourceKey == constant.AppMysqlCluster ||
+				resourceKey == constant.AppPostgresql || resourceKey == constant.AppPostgresqlCluster {
 				hasDB = true
 				break
 			}
@@ -2243,10 +2206,39 @@ func isEditCompose(installed model.AppInstall) bool {
 	if rawCompose == "" || err != nil {
 		return false
 	}
-	if rawCompose != installed.DockerCompose {
-		return true
+	equal, err := composeEqualExceptImage(rawCompose, installed.DockerCompose)
+	if err != nil {
+		return false
 	}
-	return false
+	return !equal
+}
+
+func composeEqualExceptImage(expected, current string) (bool, error) {
+	expectedCompose := make(map[string]interface{})
+	if err := yaml.Unmarshal([]byte(expected), &expectedCompose); err != nil {
+		return false, err
+	}
+	currentCompose := make(map[string]interface{})
+	if err := yaml.Unmarshal([]byte(current), &currentCompose); err != nil {
+		return false, err
+	}
+	removeComposeServiceImages(expectedCompose)
+	removeComposeServiceImages(currentCompose)
+	return reflect.DeepEqual(expectedCompose, currentCompose), nil
+}
+
+func removeComposeServiceImages(composeMap map[string]interface{}) {
+	services, ok := composeMap["services"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	for _, service := range services {
+		serviceMap, ok := service.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		delete(serviceMap, "image")
+	}
 }
 
 func getAppVersions(key string, details []model.AppDetail) []string {
@@ -2257,6 +2249,9 @@ func getAppVersions(key string, details []model.AppDetail) []string {
 	hasLatest := false
 	latestVersion := ""
 	for _, detail := range details {
+		if !canAccessVllmVersion(key, detail.Version) {
+			continue
+		}
 		if key != "mssql" && strings.Contains(detail.Version, "latest") {
 			hasLatest = true
 			latestVersion = detail.Version

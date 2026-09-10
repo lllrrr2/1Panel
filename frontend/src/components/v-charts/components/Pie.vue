@@ -4,10 +4,13 @@
 <script lang="ts" setup>
 import { onMounted, nextTick, watch, onBeforeUnmount, ref } from 'vue';
 import echarts from '@/utils/echarts';
-import { GlobalStore } from '@/store';
-const globalStore = GlobalStore();
+import { useGlobalStore } from '@/composables/useGlobalStore';
+const { themeConfig } = useGlobalStore();
 const isDarkTheme = ref(false);
+const PieChartRef = ref<HTMLElement>();
 let mediaQuery: MediaQueryList;
+let resizeObserver: ResizeObserver | undefined;
+let resizeFrame: number | undefined;
 
 const props = defineProps({
     id: {
@@ -28,7 +31,20 @@ const props = defineProps({
     },
 });
 function changeChartSize() {
-    echarts.getInstanceByDom(document.getElementById(props.id) as HTMLElement)?.resize();
+    if (resizeFrame !== undefined) {
+        return;
+    }
+    resizeFrame = requestAnimationFrame(() => {
+        resizeFrame = undefined;
+        resizeChart();
+    });
+}
+
+function resizeChart() {
+    if (!PieChartRef.value) {
+        return;
+    }
+    echarts.getInstanceByDom(PieChartRef.value)?.resize();
 }
 function getThemeColors() {
     return {
@@ -45,14 +61,17 @@ function getThemeColors() {
 }
 
 function initChart() {
-    if (globalStore.themeConfig.theme === 'auto') {
+    if (!PieChartRef.value) {
+        return;
+    }
+    if (themeConfig.value.theme === 'auto') {
         isDarkTheme.value = window.matchMedia('(prefers-color-scheme: dark)').matches;
     } else {
-        isDarkTheme.value = globalStore.themeConfig.theme === 'dark';
+        isDarkTheme.value = themeConfig.value.theme === 'dark';
     }
-    let myChart = echarts?.getInstanceByDom(document.getElementById(props.id) as HTMLElement);
+    let myChart = echarts?.getInstanceByDom(PieChartRef.value);
     if (myChart === null || myChart === undefined) {
-        myChart = echarts.init(document.getElementById(props.id) as HTMLElement);
+        myChart = echarts.init(PieChartRef.value);
     }
     let percentText = String(props.option.data).split('.');
     const { primaryLight2, primaryLight1, pieBgColor, textColor, subtextColor, shadowColor, backgroundStyleColor } =
@@ -180,13 +199,24 @@ onMounted(() => {
         mediaQuery.addEventListener('change', handleThemeChange);
         initChart();
         window.addEventListener('resize', changeChartSize);
+        if (PieChartRef.value) {
+            resizeObserver = new ResizeObserver(changeChartSize);
+            resizeObserver.observe(PieChartRef.value);
+        }
     });
 });
 
 onBeforeUnmount(() => {
-    echarts.getInstanceByDom(document.getElementById(props.id) as HTMLElement).dispose();
+    if (resizeFrame !== undefined) {
+        cancelAnimationFrame(resizeFrame);
+        resizeFrame = undefined;
+    }
+    if (PieChartRef.value) {
+        echarts.getInstanceByDom(PieChartRef.value)?.dispose();
+    }
     window.removeEventListener('resize', changeChartSize);
-    mediaQuery.removeEventListener('change', handleThemeChange);
+    mediaQuery?.removeEventListener('change', handleThemeChange);
+    resizeObserver?.disconnect();
 });
 </script>
 <style lang="scss" scoped></style>

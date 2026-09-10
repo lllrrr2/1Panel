@@ -7,7 +7,7 @@
                         <el-popover
                             v-if="dialogData.rowData.name.length >= 15"
                             placement="top-start"
-                            trigger="hover"
+                            :trigger="hasFinePointer ? 'hover' : 'click'"
                             width="250"
                             :content="$t('cronjob.' + dialogData.rowData.type) + ' - ' + dialogData.rowData.name"
                         >
@@ -32,6 +32,8 @@
                     <div class="mt-0.5">
                         <el-button
                             type="primary"
+                            v-permission
+                            v-node-admin
                             :disabled="dialogData.rowData.status === 'Pending'"
                             @click="onHandle(dialogData.rowData)"
                             link
@@ -42,6 +44,8 @@
                         <el-button
                             type="primary"
                             v-if="dialogData.rowData.status === 'Enable'"
+                            v-permission
+                            v-node-admin
                             @click="onChangeStatus(dialogData.rowData.id, 'disable')"
                             link
                         >
@@ -50,13 +54,22 @@
                         <el-button
                             type="primary"
                             v-if="dialogData.rowData.status === 'Disable'"
+                            v-permission
+                            v-node-admin
                             @click="onChangeStatus(dialogData.rowData.id, 'enable')"
                             link
                         >
                             {{ $t('commons.button.enable') }}
                         </el-button>
                         <el-divider direction="vertical" />
-                        <el-button :disabled="!hasRecords" type="primary" @click="onClean" link>
+                        <el-button
+                            v-permission
+                            v-node-admin
+                            :disabled="!hasRecords"
+                            type="primary"
+                            @click="onClean"
+                            link
+                        >
                             {{ $t('commons.button.clean') }}
                         </el-button>
                     </div>
@@ -67,7 +80,7 @@
         <LayoutContent :title="$t('cronjob.record')" :reload="true">
             <template #rightToolBar>
                 <el-date-picker
-                    class="mr-2.5"
+                    class="mr-2.5 record-time-range"
                     @change="search(true)"
                     v-model="timeRangeLoad"
                     type="datetimerange"
@@ -101,7 +114,7 @@
                                         <el-table-column min-width="230px">
                                             <template #default="{ row }">
                                                 <span v-if="row.id === currentRecord.id" class="select-sign"></span>
-                                                <Status class="mr-2 ml-1 float-left w-20" :status="row.status" />
+                                                <Status class="mr-2 mt-1 ml-1 float-left w-20" :status="row.status" />
                                                 <div class="mt-0.5">
                                                     <span>
                                                         {{ row.startTime }}
@@ -164,14 +177,8 @@
                                                 v-if="currentRecord?.status === 'Waiting' && !currentRecord?.interval"
                                                 :loading="true"
                                             />
-                                            <span v-else>
-                                                <span class="status-count" v-if="currentRecord?.interval! <= 1000">
-                                                    {{ currentRecord?.interval === 0 ? '-' : currentRecord?.interval }}
-                                                    ms
-                                                </span>
-                                                <span class="status-count" v-if="currentRecord?.interval! > 1000">
-                                                    {{ currentRecord?.interval! / 1000 }} s
-                                                </span>
+                                            <span v-else class="status-count">
+                                                {{ formatInterval(currentRecord?.interval) }}
                                             </span>
                                         </el-form-item>
                                         <el-form-item class="description">
@@ -250,9 +257,10 @@
 
 <script lang="ts" setup>
 import { reactive, ref } from 'vue';
+import { useMediaQuery } from '@vueuse/core';
 import { Cronjob } from '@/api/interface/cronjob';
 import { searchRecords, handleOnce, updateStatus, cleanRecords, stopCronjob } from '@/api/modules/cronjob';
-import { dateFormat } from '@/utils/util';
+import { dateFormat } from '@/utils/date';
 import LogFile from '@/components/log/file/index.vue';
 import i18n from '@/lang';
 import { ElMessageBox } from 'element-plus';
@@ -261,6 +269,8 @@ import { listDbItems } from '@/api/modules/database';
 import { listAppInstalled } from '@/api/modules/app';
 import { shortcuts } from '@/utils/shortcuts';
 import { hasBackup } from '../helper';
+
+const hasFinePointer = useMediaQuery('(hover: hover) and (pointer: fine)');
 
 const loading = ref();
 const hasRecords = ref();
@@ -278,6 +288,26 @@ const delLoading = ref();
 const cleanData = ref();
 const cleanRemoteData = ref();
 
+const formatInterval = (interval?: number) => {
+    if (!interval || interval < 0) {
+        return '-';
+    }
+
+    const totalMilliseconds = Math.floor(interval);
+    const hours = Math.floor(totalMilliseconds / 3600000);
+    const minutes = Math.floor((totalMilliseconds % 3600000) / 60000);
+    const seconds = Math.floor((totalMilliseconds % 60000) / 1000);
+    const milliseconds = totalMilliseconds % 1000;
+    return [
+        hours ? `${hours}h` : '',
+        minutes ? `${minutes}min` : '',
+        seconds ? `${seconds}s` : '',
+        milliseconds ? `${milliseconds}ms` : '',
+    ]
+        .filter(Boolean)
+        .join(' ');
+};
+
 const acceptParams = async (params: DialogProps): Promise<void> => {
     let itemSize = Number(localStorage.getItem(searchInfo.cacheSizeKey));
     if (itemSize) {
@@ -287,7 +317,7 @@ const acceptParams = async (params: DialogProps): Promise<void> => {
     recordShow.value = true;
     dialogData.value = params;
     if (dialogData.value.rowData.type === 'database') {
-        const data = await listDbItems('mysql,mariadb,postgresql');
+        const data = await listDbItems('mysql,mariadb,mysql-cluster,postgresql,postgresql-cluster,mongodb');
         let itemDBs = data.data || [];
         for (const item of itemDBs) {
             if (item.id == dialogData.value.rowData.dbName) {
@@ -453,6 +483,7 @@ defineExpose({
 <style lang="scss" scoped>
 .infinite-list {
     height: calc(100vh - 320px);
+    height: calc(100dvh - 320px);
     .select-sign {
         &::before {
             float: left;
@@ -489,6 +520,48 @@ defineExpose({
     }
     .mainRowClass {
         min-width: 1200px;
+    }
+}
+
+@media only screen and (max-width: 1024px) {
+    .mainClass {
+        overflow: visible;
+    }
+
+    .mainRowClass {
+        min-width: 0;
+        flex-direction: column;
+
+        > .el-col {
+            flex: 0 0 100%;
+            width: 100%;
+            max-width: 100%;
+        }
+    }
+}
+
+@media only screen and (max-width: 767px) {
+    .infinite-list {
+        height: 320px;
+        height: clamp(220px, 38dvh, 360px);
+    }
+
+    .descriptionWide,
+    .description {
+        width: 100%;
+        min-width: 0;
+    }
+
+    .page-item {
+        float: none;
+        max-width: 100%;
+        overflow-x: auto;
+    }
+
+    :global(.record-time-range.el-date-editor) {
+        width: 100%;
+        max-width: 100%;
+        margin-right: 0;
     }
 }
 </style>

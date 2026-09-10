@@ -9,18 +9,24 @@
 
         <LayoutContent v-if="isExist" :title="$t('container.composeTemplate', 2)" :class="{ mask: !isActive }">
             <template #leftToolBar>
-                <el-button type="primary" @click="onOpenDialog('create')">
-                    {{ $t('container.createComposeTemplate') }}
+                <el-button v-permission type="primary" @click="onOpenDialog('create')">
+                    {{ $t('commons.button.create') }}
                 </el-button>
-                <el-button type="primary" plain :disabled="selects.length === 0" @click="onBatchDelete(null)">
+                <el-button
+                    v-permission
+                    type="primary"
+                    plain
+                    :disabled="selects.length === 0"
+                    @click="onBatchDelete(null)"
+                >
                     {{ $t('commons.button.delete') }}
                 </el-button>
 
                 <el-button-group>
-                    <el-button @click="onImport">
+                    <el-button v-permission @click="onImport">
                         {{ $t('commons.button.import') }}
                     </el-button>
-                    <el-button :disabled="selects.length === 0" @click="onExport">
+                    <el-button v-permission :disabled="selects.length === 0" @click="onExport">
                         {{ $t('commons.button.export') }}
                     </el-button>
                 </el-button-group>
@@ -74,7 +80,8 @@
 
 <script lang="ts" setup>
 import { reactive, ref } from 'vue';
-import { dateFormat, downloadWithContent, getCurrentDateFormatted } from '@/utils/util';
+import { dateFormat, getCurrentDateFormatted } from '@/utils/date';
+import { downloadWithContent } from '@/utils/file';
 import { Container } from '@/api/interface/container';
 import DetailDialog from '@/views/container/template/detail/index.vue';
 import ImportDialog from '@/views/container/template/import/index.vue';
@@ -193,6 +200,7 @@ const onBatchDelete = async (row: Container.RepoInfo | null) => {
 const buttons = [
     {
         label: i18n.global.t('commons.button.edit'),
+        permission: true,
         disabled: (row: Container.RepoInfo) => {
             return row.downloadUrl === 'docker.io';
         },
@@ -202,6 +210,7 @@ const buttons = [
     },
     {
         label: i18n.global.t('commons.button.delete'),
+        permission: true,
         disabled: (row: Container.RepoInfo) => {
             return row.downloadUrl === 'docker.io';
         },

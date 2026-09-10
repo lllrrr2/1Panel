@@ -10,19 +10,19 @@
 
         <LayoutContent v-if="isExist" :title="$t('container.image', 2)" :class="{ mask: !isActive }">
             <template #leftToolBar>
-                <el-button type="primary" plain @click="onOpenPull">
+                <el-button v-permission type="primary" plain @click="onOpenPull">
                     {{ $t('container.imagePull') }}
                 </el-button>
-                <el-button type="primary" plain @click="onOpenload">
+                <el-button v-permission type="primary" plain @click="onOpenLoad">
                     {{ $t('container.importImage') }}
                 </el-button>
-                <el-button type="primary" plain @click="onOpenBuild">
+                <el-button v-permission type="primary" plain @click="onOpenBuild">
                     {{ $t('container.imageBuild') }}
                 </el-button>
-                <el-button type="primary" plain @click="onOpenBuildCache()">
+                <el-button v-permission type="primary" plain @click="onOpenBuildCache()">
                     {{ $t('container.cleanBuildCache') }}
                 </el-button>
-                <el-button type="primary" plain @click="onOpenPrune()">
+                <el-button v-permission type="primary" plain @click="onOpenPrune()">
                     {{ $t('container.imagePrune') }}
                 </el-button>
             </template>
@@ -36,29 +36,30 @@
                     :pagination-config="paginationConfig"
                     :data="data"
                     @sort-change="search"
-                    @cell-mouse-enter="showFavorite"
-                    @cell-mouse-leave="hideFavorite"
                     :columns="columns"
                     @search="search"
                     :heightDiff="300"
                 >
                     <el-table-column label="ID" prop="id" width="180">
-                        <template #default="{ row, $index }">
+                        <template #default="{ row }">
                             <el-text type="primary" class="cursor-pointer" @click="onInspect(row.id)">
                                 {{ row.id.replaceAll('sha256:', '').substring(0, 12) }}
                             </el-text>
                             <div class="float-right">
                                 <el-tooltip
-                                    :content="row.isPinned ? $t('website.cancelFavorite') : $t('website.favorite')"
-                                    v-if="row.isPinned || hoveredRowIndex === $index"
+                                    :content="row.isPinned ? $t('commons.table.unpin') : $t('commons.table.pin')"
                                 >
                                     <el-button
+                                        class="image-pin-button"
+                                        :class="{ 'is-pinned': row.isPinned }"
                                         link
                                         size="large"
-                                        :icon="row.isPinned ? 'StarFilled' : 'Star'"
-                                        type="warning"
+                                        :type="row.isPinned ? 'warning' : 'info'"
+                                        v-permission
                                         @click="changePinned(row, true)"
-                                    />
+                                    >
+                                        <svg-icon iconName="p-pushpin" className="image-pin-icon" />
+                                    </el-button>
                                 </el-tooltip>
                             </div>
                         </template>
@@ -73,7 +74,7 @@
                         prop="tags"
                         sortable="custom"
                         min-width="160"
-                        :width="mobile ? 400 : 'auto'"
+                        :width="isMobile ? 400 : 'auto'"
                         fix
                     >
                         <template #default="{ row }">
@@ -102,7 +103,7 @@
                     />
                     <fu-table-operations
                         width="250px"
-                        :ellipsis="10"
+                        :ellipsis="2"
                         :buttons="buttons"
                         :label="$t('commons.table.operate')"
                     />
@@ -111,8 +112,38 @@
         </LayoutContent>
 
         <CodemirrorDrawer ref="myDetail" />
+        <DialogPro v-model="updateDialogVisible" :title="$t('commons.button.update')" @close="handleUpdateDialogClose">
+            <el-form label-position="top">
+                <el-form-item :label="$t('container.tag')">
+                    <el-checkbox
+                        class="w-full"
+                        :model-value="updateCheckAll"
+                        :indeterminate="updateIndeterminate"
+                        @change="onUpdateCheckAllChange"
+                    >
+                        {{ $t('commons.table.all') }}
+                    </el-checkbox>
+                    <el-checkbox-group v-model="updateSelectedTags">
+                        <el-checkbox v-for="tag in updateTagOptions" :key="tag" :label="tag">
+                            {{ tag }}
+                        </el-checkbox>
+                    </el-checkbox-group>
+                    <span class="input-help">{{ $t('container.imageUpdateHelper') }}</span>
+                </el-form-item>
+            </el-form>
+            <template #footer>
+                <span class="dialog-footer">
+                    <el-button @click="handleUpdateDialogClose">
+                        {{ $t('commons.button.cancel') }}
+                    </el-button>
+                    <el-button v-permission type="primary" @click="submitUpdateSelection">
+                        {{ $t('commons.button.confirm') }}
+                    </el-button>
+                </span>
+            </template>
+        </DialogPro>
 
-        <OpDialog ref="opRef" @search="search" />
+        <OpDialog ref="opRef" @submit="onSubmitDelete" />
         <Pull ref="dialogPullRef" @search="search" />
         <Tag ref="dialogTagRef" @search="search" />
         <Push ref="dialogPushRef" @search="search" />
@@ -121,13 +152,15 @@
         <Build ref="dialogBuildRef" @search="search" />
         <Delete ref="dialogDeleteRef" @search="search" />
         <Prune ref="dialogPruneRef" @search="search" />
-        <TaskLog ref="taskLogRef" width="70%" />
+        <TaskLog ref="taskLogRef" width="70%" @close="search" />
     </div>
 </template>
 
 <script lang="ts" setup>
 import { reactive, ref, computed } from 'vue';
-import { dateFormat, newUUID, computeSize2 } from '@/utils/util';
+import { dateFormat } from '@/utils/date';
+import { newUUID } from '@/utils/id';
+import { computeSize2 } from '@/utils/size';
 import { Container } from '@/api/interface/container';
 import Pull from '@/views/container/image/pull/index.vue';
 import Tag from '@/views/container/image/tag/index.vue';
@@ -140,24 +173,22 @@ import Prune from '@/views/container/image/prune/index.vue';
 import DockerStatus from '@/views/container/docker-status/index.vue';
 import CodemirrorDrawer from '@/components/codemirror-pro/drawer.vue';
 import TaskLog from '@/components/log/task/index.vue';
-import { searchImage, listImageRepo, imageRemove, inspect, containerPrune } from '@/api/modules/container';
+import { searchImage, listImageRepo, imageRemove, inspect, containerPrune, imagePull } from '@/api/modules/container';
 import i18n from '@/lang';
-import { GlobalStore } from '@/store';
 import { ElMessageBox } from 'element-plus';
 import { updateCommonDescription } from '@/api/modules/setting';
-import { MsgSuccess } from '@/utils/message';
-const globalStore = GlobalStore();
+import { MsgError, MsgSuccess } from '@/utils/message';
+import { useGlobalStore } from '@/composables/useGlobalStore';
 
+const { isMobile } = useGlobalStore();
 const taskLogRef = ref();
-const mobile = computed(() => {
-    return globalStore.isMobile();
-});
 
 const loading = ref(false);
 
 const opRef = ref();
 
 const data = ref();
+const names = ref();
 const repos = ref();
 const paginationConfig = reactive({
     cacheSizeKey: 'container-image-page-size',
@@ -173,8 +204,6 @@ const columns = ref([]);
 const isActive = ref(false);
 const isExist = ref(false);
 
-const hoveredRowIndex = ref(-1);
-
 const myDetail = ref();
 const dialogPullRef = ref();
 const dialogTagRef = ref();
@@ -184,6 +213,15 @@ const dialogSaveRef = ref();
 const dialogBuildRef = ref();
 const dialogDeleteRef = ref();
 const dialogPruneRef = ref();
+const updateDialogVisible = ref(false);
+const updateTagOptions = ref<Array<string>>([]);
+const updateSelectedTags = ref<Array<string>>([]);
+const updateCheckAll = computed(
+    () => updateTagOptions.value.length > 0 && updateSelectedTags.value.length === updateTagOptions.value.length,
+);
+const updateIndeterminate = computed(
+    () => updateSelectedTags.value.length > 0 && updateSelectedTags.value.length < updateTagOptions.value.length,
+);
 
 const search = async (column?: any) => {
     if (!isActive.value || !isExist.value) {
@@ -215,25 +253,33 @@ const loadRepos = async () => {
 };
 
 const onDelete = (row: Container.ImageInfo) => {
-    let names = [row.id.replaceAll('sha256:', '').substring(0, 12)];
+    names.value = [row.id.replaceAll('sha256:', '').substring(0, 12)];
     opRef.value.acceptParams({
         title: i18n.global.t('commons.button.delete'),
-        names: names,
+        names: names.value,
         msg: i18n.global.t('commons.msg.operatorHelper', [
             i18n.global.t('container.image'),
             i18n.global.t('commons.button.delete'),
         ]),
-        api: imageRemove,
-        params: { names: names },
+        api: null,
+        params: null,
     });
 };
 
-const showFavorite = (row: any) => {
-    hoveredRowIndex.value = data.value.findIndex((item) => item === row);
+const onSubmitDelete = async () => {
+    loading.value = true;
+    let taskID = newUUID();
+    await imageRemove({ names: names.value, taskID: taskID })
+        .then(() => {
+            loading.value = false;
+            openTaskLog(taskID);
+            MsgSuccess(i18n.global.t('commons.msg.operationSuccess'));
+        })
+        .catch(() => {
+            loading.value = false;
+        });
 };
-const hideFavorite = () => {
-    hoveredRowIndex.value = -1;
-};
+
 const changePinned = (row: any, isPinned: boolean) => {
     let params = {
         id: row.id.replaceAll('sha256:', ''),
@@ -304,24 +350,85 @@ const openTaskLog = (taskID: string) => {
     taskLogRef.value.openWithTaskID(taskID);
 };
 
-const onOpenload = () => {
+const onOpenLoad = () => {
     dialogLoadRef.value!.acceptParams();
+};
+
+const normalizeImageTags = (tags: string[]) => {
+    return (tags || []).filter((tag) => tag && !tag.includes('<none>'));
+};
+
+const pullImageTags = async (tags: string[]) => {
+    const taskID = newUUID();
+    await imagePull({
+        taskID: taskID,
+        repoID: 0,
+        imageName: tags,
+    });
+    openTaskLog(taskID);
+};
+
+const runUpdate = async (tags: string[]) => {
+    const validTags = normalizeImageTags(tags);
+    if (validTags.length === 0) {
+        MsgError(i18n.global.t('container.imageUpdateTagEmpty'));
+        return;
+    }
+    try {
+        await ElMessageBox.confirm(
+            i18n.global.t('container.imageUpdateHelper'),
+            i18n.global.t('commons.button.update'),
+            {
+                confirmButtonText: i18n.global.t('commons.button.confirm'),
+                cancelButtonText: i18n.global.t('commons.button.cancel'),
+                type: 'info',
+            },
+        );
+    } catch {
+        return;
+    }
+    await pullImageTags(validTags);
+};
+
+const onUpdate = async (row: Container.ImageInfo) => {
+    const tags = normalizeImageTags(row.tags || []);
+    if (tags.length === 0) {
+        MsgError(i18n.global.t('container.imageUpdateTagEmpty'));
+        return;
+    }
+    if (tags.length === 1) {
+        await runUpdate(tags);
+        return;
+    }
+    updateTagOptions.value = tags;
+    updateSelectedTags.value = [...tags];
+    updateDialogVisible.value = true;
+};
+
+const onUpdateCheckAllChange = (checked: boolean) => {
+    updateSelectedTags.value = checked ? [...updateTagOptions.value] : [];
+};
+
+const handleUpdateDialogClose = () => {
+    updateDialogVisible.value = false;
+    updateTagOptions.value = [];
+    updateSelectedTags.value = [];
+};
+
+const submitUpdateSelection = async () => {
+    if (updateSelectedTags.value.length === 0) {
+        MsgError(i18n.global.t('commons.msg.confirmNoNull', [i18n.global.t('container.tag')]));
+        return;
+    }
+    const selected = [...updateSelectedTags.value];
+    handleUpdateDialogClose();
+    await runUpdate(selected);
 };
 
 const buttons = [
     {
-        label: i18n.global.t('container.tag'),
-        click: (row: Container.ImageInfo) => {
-            let params = {
-                repos: repos.value,
-                imageID: row.id,
-                tags: row.tags,
-            };
-            dialogTagRef.value!.acceptParams(params);
-        },
-    },
-    {
         label: i18n.global.t('container.push'),
+        permission: true,
         click: (row: Container.ImageInfo) => {
             let params = {
                 repos: repos.value,
@@ -332,6 +439,7 @@ const buttons = [
     },
     {
         label: i18n.global.t('container.export'),
+        permission: true,
         click: (row: Container.ImageInfo) => {
             let params = {
                 repos: repos.value,
@@ -341,7 +449,27 @@ const buttons = [
         },
     },
     {
+        label: i18n.global.t('commons.button.update'),
+        permission: true,
+        click: (row: Container.ImageInfo) => {
+            onUpdate(row);
+        },
+    },
+    {
+        label: i18n.global.t('container.tag'),
+        permission: true,
+        click: (row: Container.ImageInfo) => {
+            let params = {
+                repos: repos.value,
+                imageID: row.id,
+                tags: row.tags,
+            };
+            dialogTagRef.value!.acceptParams(params);
+        },
+    },
+    {
         label: i18n.global.t('commons.button.delete'),
+        permission: true,
         click: async (row: Container.ImageInfo) => {
             if (row.tags && row.tags.length > 1) {
                 let params = {
@@ -357,3 +485,23 @@ const buttons = [
     },
 ];
 </script>
+
+<style scoped lang="scss">
+.image-pin-button {
+    opacity: 0.72;
+    transition: opacity 0.2s;
+
+    &:hover,
+    &:focus-visible,
+    &.is-pinned {
+        opacity: 1;
+    }
+
+    :deep(.image-pin-icon) {
+        width: 1em;
+        height: 1em;
+        padding: 0;
+        vertical-align: middle;
+    }
+}
+</style>

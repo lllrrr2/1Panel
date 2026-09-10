@@ -3,7 +3,7 @@
         <FireRouter />
         <LayoutContent :title="$t('menu.network', 2)" v-loading="processStore.netLoading">
             <template #rightToolBar>
-                <div class="w-full flex justify-end items-center gap-5">
+                <div class="network-toolbar w-full flex justify-end items-center gap-5">
                     <el-select
                         v-model="filters"
                         :placeholder="$t('commons.table.status')"
@@ -13,7 +13,7 @@
                         collapse-tags-tooltip
                         :max-collapse-tags="2"
                         @change="search()"
-                        class="p-w-300"
+                        class="network-toolbar__filter"
                     >
                         <el-option
                             v-for="item in statusOptions"
@@ -23,16 +23,19 @@
                         />
                     </el-select>
                     <TableSearch
+                        class="network-toolbar__field"
                         @search="search()"
                         :placeholder="$t('process.pid')"
                         v-model:searchName="processStore.netSearch.processID"
                     />
                     <TableSearch
+                        class="network-toolbar__field"
                         @search="search()"
                         :placeholder="$t('process.processName')"
                         v-model:searchName="processStore.netSearch.processName"
                     />
                     <TableSearch
+                        class="network-toolbar__field"
                         @search="search()"
                         :placeholder="$t('commons.table.port')"
                         v-model:searchName="processStore.netSearch.port"
@@ -41,14 +44,16 @@
             </template>
 
             <template #main>
-                <div class="!h-[900px]">
+                <div class="network-table">
                     <el-auto-resizer>
                         <template #default="{ height, width }">
                             <el-table-v2
+                                :fixed="isCompactTable"
                                 :columns="columns"
                                 :data="data"
                                 :width="width"
                                 :height="height"
+                                :scrollbar-always-on="isCompactTable"
                                 :sort-by="sortState"
                                 @column-sort="changeSort"
                             />
@@ -63,10 +68,12 @@
 <script setup lang="ts">
 import FireRouter from '@/views/host/process/index.vue';
 import { ref, onMounted, onUnmounted, watch, h } from 'vue';
-import { GlobalStore, ProcessStore } from '@/store';
+import { ProcessStore } from '@/store';
 import { SortBy, TableV2SortOrder, ElIcon } from 'element-plus';
 import { Filter } from '@element-plus/icons-vue';
 import i18n from '@/lang';
+import { useGlobalStore } from '@/composables/useGlobalStore';
+import { useMediaQuery } from '@vueuse/core';
 
 const statusOptions = [
     { text: 'LISTEN', value: 'LISTEN' },
@@ -76,7 +83,8 @@ const statusOptions = [
     { text: 'NONE', value: 'NONE' },
 ];
 
-const globalStore = GlobalStore();
+const { currentNode } = useGlobalStore();
+const isCompactTable = useMediaQuery('(max-width: 1024px)');
 const processStore = ProcessStore();
 
 const quickSearchName = (name: string) => {
@@ -154,8 +162,8 @@ const columns = ref([
             const addr = rowData.localaddr;
             const addrStr = addr?.ip ? `${addr.ip}${addr.port > 0 ? ':' + addr.port : ''}` : '';
             const hasPort = addr?.port > 0;
-            return h('div', { class: 'flex items-center gap-1' }, [
-                h('span', {}, addrStr),
+            return h('div', { class: 'flex items-center gap-1 min-w-0' }, [
+                h('span', { class: 'truncate', title: addrStr }, addrStr),
                 hasPort
                     ? h(
                           ElIcon,
@@ -180,7 +188,8 @@ const columns = ref([
         width: 350,
         cellRenderer: ({ rowData }) => {
             const addr = rowData.remoteaddr;
-            return addr?.ip ? `${addr.ip}${addr.port > 0 ? ':' + addr.port : ''}` : '';
+            const addrStr = addr?.ip ? `${addr.ip}${addr.port > 0 ? ':' + addr.port : ''}` : '';
+            return h('span', { class: 'truncate', title: addrStr }, addrStr);
         },
     },
     {
@@ -236,7 +245,7 @@ const search = () => {
 };
 
 onMounted(() => {
-    processStore.connect(globalStore.currentNode);
+    processStore.connect(currentNode.value);
     const initialDelay = processStore.netData.length > 0 ? 500 : 0;
     processStore.startPolling('net', 3000, initialDelay);
 });
@@ -246,3 +255,56 @@ onUnmounted(() => {
     processStore.disconnect();
 });
 </script>
+
+<style scoped lang="scss">
+.network-toolbar {
+    min-width: 0;
+}
+
+.network-toolbar__filter {
+    width: 300px;
+}
+
+.network-table {
+    width: 100%;
+    min-width: 0;
+    height: 900px;
+    overflow: hidden;
+}
+
+@media only screen and (max-width: 1024px) {
+    .network-toolbar {
+        flex-wrap: wrap;
+        justify-content: flex-start;
+        gap: 12px;
+    }
+
+    .network-toolbar__filter,
+    .network-toolbar__field {
+        width: auto;
+        min-width: 0;
+        max-width: 300px;
+        flex: 1 1 220px;
+    }
+
+    .network-toolbar__field {
+        :deep(.search-button) {
+            width: 100%;
+        }
+    }
+
+    .network-table {
+        height: clamp(420px, calc(100vh - 260px), 900px);
+        height: clamp(420px, calc(100dvh - 260px), 900px);
+    }
+}
+
+@media only screen and (max-width: 767px) {
+    .network-toolbar__filter,
+    .network-toolbar__field {
+        width: 100%;
+        max-width: none;
+        flex-basis: 100%;
+    }
+}
+</style>

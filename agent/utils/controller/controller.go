@@ -150,7 +150,7 @@ func LoadServiceName(keyword string) (string, error) {
 	}
 
 	processedName := loadProcessedName(client.Name(), keyword)
-	exist, err := client.IsExist(processedName)
+	exist, _ := client.IsExist(processedName)
 	if exist {
 		return processedName, nil
 	}
@@ -178,15 +178,16 @@ func loadProcessedName(mgr, keyword string) string {
 
 func loadFromPredefined(mgr Controller, keyword string) string {
 	predefinedMap := map[string][]string{
-		"clam":         {"clamav-daemon.service", "clamd@scan.service", "clamd"},
-		"freshclam":    {"clamav-freshclam.service", "freshclam.service"},
-		"fail2ban":     {"fail2ban.service", "fail2ban"},
-		"supervisor":   {"supervisord.service", "supervisor.service", "supervisord", "supervisor"},
-		"ssh":          {"sshd.service", "ssh.service", "sshd", "ssh"},
-		"1panel-core":  {"1panel-core.service"},
-		"1panel-agent": {"1panel-agent.service"},
-		"docker":       {"docker.service", "dockerd"},
-		"iptables":     {"iptables", "iptables-services"},
+		"clam":            {"clamav-daemon.service", "clamd@scan.service", "clamd"},
+		"freshclam":       {"clamav-freshclam.service", "freshclam.service"},
+		"fail2ban":        {"fail2ban.service", "fail2ban"},
+		"supervisor":      {"supervisord.service", "supervisor.service", "supervisord", "supervisor"},
+		"ssh":             {"sshd.service", "ssh.service", "sshd", "ssh"},
+		"1panel-core":     {"1panel-core.service"},
+		"1panel-agent":    {"1panel-agent.service"},
+		"1panel-ai-proxy": {"1panel-ai-proxy.service"},
+		"docker":          {"docker.service", "dockerd"},
+		"iptables":        {"iptables", "iptables-services"},
 	}
 	if val, ok := predefinedMap[keyword]; ok {
 		for _, item := range val {
@@ -260,7 +261,7 @@ func SelectInitScript(keyword string) (string, error) {
 		keyword = strings.TrimSuffix(keyword, ".service") + ".openrc"
 	case "sysvinit":
 		if _, err := os.Stat("/etc/rc.common"); err == nil {
-			keyword = strings.TrimSuffix(keyword, ".service") + ".prod"
+			keyword = strings.TrimSuffix(keyword, ".service") + ".procd"
 		} else {
 			keyword = strings.TrimSuffix(keyword, ".service") + ".init"
 		}

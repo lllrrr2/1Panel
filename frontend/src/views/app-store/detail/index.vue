@@ -33,6 +33,7 @@
                         <el-button
                             round
                             v-if="appDetail.enable && operate === 'install'"
+                            v-permission
                             @click="openInstall"
                             type="primary"
                             class="brief-button"
@@ -78,7 +79,7 @@ import MarkDownEditor from '@/components/mkdown-editor/index.vue';
 import { getAppByKey, getAppDetail, getAppIconUrl } from '@/api/modules/app';
 import { ref } from 'vue';
 import Install from './install/index.vue';
-import { computeSizeFromMB } from '@/utils/util';
+import { computeSizeFromMB } from '@/utils/size';
 import { jumpToInstall } from '@/utils/app';
 import { useGlobalStore } from '@/composables/useGlobalStore';
 const { currentNode } = useGlobalStore();
@@ -168,6 +169,7 @@ defineExpose({
     }
 
     .icon {
+        flex-shrink: 0;
         width: 180px;
         height: 180px;
         background-color: #ffffff;

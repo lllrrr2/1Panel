@@ -4,15 +4,15 @@
         <DockerStatus v-model:isActive="isActive" v-model:isExist="isExist" />
         <LayoutContent v-loading="loading" v-if="isExist" :class="{ mask: !isActive }">
             <template #leftToolBar>
-                <el-button type="primary" @click="openCreate">
-                    {{ $t('runtime.create') }}
+                <el-button v-permission type="primary" @click="openCreate">
+                    {{ $t('commons.button.create') }}
                 </el-button>
 
                 <el-button type="primary" plain @click="openExtensions">
                     {{ $t('php.extensions') }}
                 </el-button>
 
-                <el-button type="primary" plain @click="onOpenBuildCache()">
+                <el-button v-permission type="primary" plain @click="onOpenBuildCache()">
                     {{ $t('container.cleanBuildCache') }}
                 </el-button>
             </template>
@@ -43,9 +43,14 @@
                             </el-text>
                         </template>
                     </el-table-column>
-                    <el-table-column :label="$t('home.dir')" prop="codeDir" width="80px">
+                    <el-table-column :label="$t('home.dir')" prop="codeDir" width="100px">
                         <template #default="{ row }">
-                            <el-button type="primary" link @click="routerToFileWithPath(row.path)">
+                            <el-button
+                                v-permission:view="'host_file_view'"
+                                type="primary"
+                                link
+                                @click="routerToFileWithPath(row.path)"
+                            >
                                 <el-icon>
                                     <FolderOpened />
                                 </el-icon>
@@ -85,7 +90,7 @@
                     </el-table-column>
                     <el-table-column :label="$t('website.remark')" prop="remark" min-width="150px">
                         <template #default="{ row }">
-                            <fu-read-write-switch>
+                            <fu-read-write-switch v-permission>
                                 <template #read>
                                     <MsgInfo :info="row.remark" :width="'150'" />
                                 </template>
@@ -104,8 +109,8 @@
                         fix
                     />
                     <fu-table-operations
-                        :ellipsis="mobile ? 0 : 3"
-                        :width="mobile ? 'auto' : 200"
+                        :ellipsis="isMobile ? 0 : 3"
+                        :width="isMobile ? 'auto' : 300"
                         :buttons="buttons"
                         fixed="right"
                         :label="$t('commons.table.operate')"
@@ -116,10 +121,10 @@
         </LayoutContent>
 
         <CreateRuntime ref="createRef" @close="search" @submit="openCreateLog" />
-        <OpDialog ref="opRef" @search="search" />
+        <Delete ref="deleteRef" @close="search" @task="openCreateLog" />
         <Log ref="logRef" @close="search" :heightDiff="200" />
         <Extensions ref="extensionsRef" @close="search" />
-        <AppResources ref="checkRef" @close="search" />
+        <AppResources ref="checkRef" @close="search" @task="openCreateLog" />
         <ExtManagement ref="extManagementRef" />
         <ComposeLogs ref="composeLogRef" :highlightDiff="200" />
         <Config ref="configRef" />
@@ -132,8 +137,9 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue';
 import { Runtime } from '@/api/interface/runtime';
-import { DeleteRuntime, RuntimeDeleteCheck, SearchRuntimes } from '@/api/modules/runtime';
-import { dateFormat, newUUID } from '@/utils/util';
+import { RuntimeDeleteCheck, SearchRuntimes } from '@/api/modules/runtime';
+import { dateFormat } from '@/utils/date';
+import { newUUID } from '@/utils/id';
 import { ElMessageBox } from 'element-plus';
 import { containerPrune } from '@/api/modules/container';
 import TaskLog from '@/components/log/task/index.vue';
@@ -142,6 +148,7 @@ import ExtManagement from './extension-management/index.vue';
 import Extensions from './extension-template/index.vue';
 import AppResources from '@/views/website/runtime/php/check/index.vue';
 import CreateRuntime from '@/views/website/runtime/php/create/index.vue';
+import Delete from '@/views/website/runtime/delete/index.vue';
 import RouterMenu from '../index.vue';
 import Log from '@/components/log/file-drawer/index.vue';
 import ComposeLogs from '@/components/log/compose/index.vue';
@@ -154,11 +161,7 @@ import DockerStatus from '@/views/container/docker-status/index.vue';
 import { operateRuntime, updateRuntimeRemark } from '../common/utils';
 import { routerToFileWithPath } from '@/utils/router';
 import { useGlobalStore } from '@/composables/useGlobalStore';
-const { globalStore } = useGlobalStore();
-
-const mobile = computed(() => {
-    return globalStore.isMobile();
-});
+const { isMobile } = useGlobalStore();
 
 const taskLogRef = ref();
 const paginationConfig = reactive({
@@ -173,11 +176,11 @@ let req = reactive<Runtime.RuntimeReq>({
     pageSize: 40,
     type: 'php',
 });
-const opRef = ref();
 const logRef = ref();
 const extensionsRef = ref();
 const extManagementRef = ref();
 const checkRef = ref();
+const deleteRef = ref();
 const createRef = ref();
 const loading = ref(false);
 const items = ref<Runtime.RuntimeDTO[]>([]);
@@ -191,6 +194,7 @@ const isExist = ref(false);
 const buttons = [
     {
         label: i18n.global.t('commons.button.edit'),
+        permission: true,
         click: function (row: Runtime.Runtime) {
             openDetail(row);
         },
@@ -200,6 +204,7 @@ const buttons = [
     },
     {
         label: i18n.global.t('runtime.extension'),
+        permission: true,
         click: function (row: Runtime.Runtime) {
             openExtensionsManagement(row);
         },
@@ -209,6 +214,7 @@ const buttons = [
     },
     {
         label: i18n.global.t('menu.terminal'),
+        permission: true,
         click: function (row: Runtime.Runtime) {
             openTerminal(row);
         },
@@ -218,6 +224,7 @@ const buttons = [
     },
     {
         label: i18n.global.t('commons.operate.stop'),
+        permission: true,
         click: function (row: Runtime.Runtime) {
             operateRuntime('down', row.id, loading, search);
         },
@@ -227,6 +234,7 @@ const buttons = [
     },
     {
         label: i18n.global.t('commons.operate.start'),
+        permission: true,
         click: function (row: Runtime.Runtime) {
             operateRuntime('up', row.id, loading, search);
         },
@@ -236,6 +244,7 @@ const buttons = [
     },
     {
         label: i18n.global.t('commons.button.restart'),
+        permission: true,
         click: function (row: Runtime.Runtime) {
             operateRuntime('restart', row.id, loading, search);
         },
@@ -245,6 +254,7 @@ const buttons = [
     },
     {
         label: i18n.global.t('menu.config'),
+        permission: true,
         click: function (row: Runtime.Runtime) {
             openConfig(row);
         },
@@ -254,6 +264,7 @@ const buttons = [
     },
     {
         label: i18n.global.t('menu.supervisor'),
+        permission: true,
         click: function (row: Runtime.Runtime) {
             openSupervisor(row);
         },
@@ -264,6 +275,7 @@ const buttons = [
 
     {
         label: i18n.global.t('commons.button.delete'),
+        permission: true,
         click: function (row: Runtime.Runtime) {
             openDelete(row);
         },
@@ -317,8 +329,8 @@ const openLog = (row: Runtime.RuntimeDTO) => {
     }
 };
 
-const openCreateLog = (id: number) => {
-    logRef.value.acceptParams({ id: id, type: 'php', tail: true });
+const openCreateLog = (taskID: string) => {
+    taskLogRef.value.openWithTaskID(taskID, true);
 };
 
 const openExtensions = () => {
@@ -335,16 +347,7 @@ const openDelete = async (row: Runtime.Runtime) => {
         if (res.data && res.data.length > 0) {
             checkRef.value.acceptParams({ items: items, key: 'website', installID: row.id });
         } else {
-            opRef.value.acceptParams({
-                title: i18n.global.t('commons.button.delete'),
-                names: [row.name],
-                msg: i18n.global.t('commons.msg.operatorHelper', [
-                    i18n.global.t('website.runtime'),
-                    i18n.global.t('commons.button.delete'),
-                ]),
-                api: DeleteRuntime,
-                params: { id: row.id, forceDelete: true },
-            });
+            deleteRef.value.acceptParams(row.id, row.name);
         }
     });
 };

@@ -9,7 +9,7 @@ export const searchCronjobPage = (params: Cronjob.Search, node?: string) => {
 };
 
 export const loadNextHandle = (spec: string) => {
-    return http.post<Array<String>>(`/cronjobs/next`, { spec: spec });
+    return http.post<Array<string>>(`/cronjobs/next`, { spec: spec });
 };
 
 export const editCronjobGroup = (id: number, groupID: number) => {
@@ -47,8 +47,13 @@ export const deleteCronjob = (params: Cronjob.CronjobDelete) => {
     return http.post(`/cronjobs/del`, params);
 };
 
-export const searchRecords = (params: Cronjob.SearchRecord) => {
-    return http.post<ResPage<Cronjob.Record>>(`cronjobs/search/records`, params);
+export const searchRecords = (params: Cronjob.SearchRecord, timeout?: TimeoutEnum, currentNode?: string) => {
+    return http.post<ResPage<Cronjob.Record>>(
+        `cronjobs/search/records`,
+        params,
+        timeout,
+        currentNode ? { CurrentNode: currentNode } : undefined,
+    );
 };
 
 export const stopCronjob = (id: number) => {

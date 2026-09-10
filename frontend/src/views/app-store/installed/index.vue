@@ -9,6 +9,7 @@
             </el-button>
             <el-button
                 @click="enterSortMode"
+                v-permission
                 type="primary"
                 plain
                 v-if="mode === 'installed' && !sortMode && data != null"
@@ -31,12 +32,17 @@
         <template #main>
             <div>
                 <MainDiv :heightDiff="mode === 'upgrade' ? 280 : 300">
-                    <el-alert type="info" :closable="false" v-if="mode === 'installed'">
+                    <el-alert
+                        class="app-install-alert"
+                        type="info"
+                        :closable="false"
+                        v-if="mode === 'installed' && !isIntl"
+                    >
                         <template #title>
-                            <span class="flx-align-center">
-                                {{ $t('app.installHelper') }}
+                            <span class="flx-align-center app-install-helper">
+                                <span class="app-install-helper-text">{{ $t('app.installHelper') }}</span>
                                 <el-link
-                                    class="ml-5"
+                                    class="app-install-helper-link"
                                     icon="Position"
                                     @click="jumpToPath(router, '/containers/setting')"
                                     type="primary"
@@ -68,6 +74,7 @@
                                 :mode="mode"
                                 :defaultLink="defaultLink"
                                 :currentNode="currentNode"
+                                :sortMode="sortMode"
                                 @open-detail="openDetail(installed.appKey)"
                                 @open-backups="openBackups(installed)"
                                 @open-log="openLog(installed)"
@@ -85,19 +92,20 @@
                                         class="d-button flex flex-wrap items-center justify-start gap-1.5"
                                         v-if="mode === 'installed' && installed.status != 'Installing'"
                                     >
-                                        <el-button
-                                            class="app-button"
-                                            v-for="(button, key) in buttons"
-                                            :key="key"
-                                            :type="button.disabled && button.disabled(installed) ? 'info' : ''"
-                                            plain
-                                            round
-                                            size="small"
-                                            @click="button.click(installed)"
-                                            :disabled="button.disabled && button.disabled(installed)"
-                                        >
-                                            {{ button.label }}
-                                        </el-button>
+                                        <template v-for="(button, key) in buttons" :key="key">
+                                            <el-button
+                                                v-permission
+                                                class="app-button"
+                                                :type="button.disabled && button.disabled(installed) ? 'info' : ''"
+                                                plain
+                                                round
+                                                size="small"
+                                                @click="button.click(installed)"
+                                                :disabled="button.disabled && button.disabled(installed)"
+                                            >
+                                                {{ button.label }}
+                                            </el-button>
+                                        </template>
                                     </div>
                                 </template>
                             </AppCard>
@@ -153,13 +161,16 @@ import Sortable from 'sortablejs';
 import i18n from '@/lang';
 import { ElMessageBox } from 'element-plus';
 import { App } from '@/api/interface/app';
-import { jumpToPath } from '@/utils/util';
+import { jumpToPath } from '@/utils/router';
 import { useRouter } from 'vue-router';
 import { MsgSuccess } from '@/utils/message';
-import { getAgentSettingByKey } from '@/api/modules/setting';
+import { getAgentSettingInfo } from '@/api/modules/setting';
 import { routerToFileWithPath, routerToNameWithQuery } from '@/utils/router';
 import { useGlobalStore } from '@/composables/useGlobalStore';
-const { currentNode, isMaster, currentNodeAddr } = useGlobalStore();
+import { useOperateNodeContext } from '@/composables/useOperateNodeContext';
+
+const { currentNode, isMaster, currentNodeAddr, isIntl } = useGlobalStore();
+useOperateNodeContext(currentNode);
 
 const data = ref<any>();
 const loading = ref(false);
@@ -318,6 +329,7 @@ const buttons = [
         click: (row: any) => {
             openOperate(row, 'rebuild');
         },
+        permission: true,
         disabled: (row: any) => {
             return (
                 row.status === 'DownloadErr' ||
@@ -332,6 +344,7 @@ const buttons = [
         click: (row: any) => {
             openOperate(row, 'restart');
         },
+        permission: true,
         disabled: (row: any) => {
             return (
                 row.status === 'DownloadErr' ||
@@ -346,6 +359,7 @@ const buttons = [
         click: (row: any) => {
             openOperate(row, 'start');
         },
+        permission: true,
         disabled: (row: any) => {
             return (
                 row.status === 'Running' ||
@@ -362,6 +376,7 @@ const buttons = [
         click: (row: any) => {
             openOperate(row, 'stop');
         },
+        permission: true,
         disabled: (row: any) => {
             return (
                 row.status !== 'Running' ||
@@ -377,6 +392,7 @@ const buttons = [
         click: (row: any) => {
             openOperate(row, 'delete');
         },
+        permission: true,
     },
     {
         label: i18n.global.t('app.params'),
@@ -469,6 +485,10 @@ const enterSortMode = async () => {
                 return fromFav === toFav;
             },
             onEnd: (evt: any) => {
+                const el = evt.from;
+                el.removeChild(evt.item);
+                el.insertBefore(evt.item, el.children[evt.oldIndex] || null);
+
                 const list = [...data.value];
                 const [moved] = list.splice(evt.oldIndex, 1);
                 list.splice(evt.newIndex, 0, moved);
@@ -505,9 +525,9 @@ const exitSortMode = () => {
 
 const getConfig = async () => {
     try {
-        const res = await getAgentSettingByKey('SystemIP');
-        if (res.data != '') {
-            defaultLink.value = res.data;
+        const res = await getAgentSettingInfo();
+        if (res.data?.systemIP) {
+            defaultLink.value = res.data.systemIP;
             return;
         }
         if (!isMaster.value || currentNodeAddr.value != '127.0.0.1') {
@@ -548,6 +568,42 @@ onUnmounted(() => {
 .d-button {
     .el-button + .el-button {
         margin-left: 0;
+    }
+}
+
+.app-install-helper {
+    min-width: 0;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+}
+
+.app-install-helper-text {
+    min-width: 0;
+    overflow-wrap: break-word;
+}
+
+.app-install-helper-link {
+    flex: 0 0 auto;
+}
+
+@media only screen and (max-width: 767px) {
+    .app-install-alert {
+        :deep(.el-alert__content),
+        :deep(.el-alert__title) {
+            width: 100%;
+            min-width: 0;
+        }
+    }
+
+    .app-install-helper {
+        width: 100%;
+        align-items: flex-start;
+    }
+
+    .app-install-helper-text {
+        flex: 0 0 100%;
+        width: 100%;
+        text-wrap: balance;
     }
 }
 </style>

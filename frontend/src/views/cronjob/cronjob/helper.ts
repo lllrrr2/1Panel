@@ -1,7 +1,6 @@
 import { Cronjob } from '@/api/interface/cronjob';
 import i18n from '@/lang';
-import { loadZero } from '@/utils/util';
-
+import { loadZero } from '@/utils/date';
 export const specOptions = [
     { label: i18n.global.t('cronjob.perMonth'), value: 'perMonth' },
     { label: i18n.global.t('cronjob.perWeek'), value: 'perWeek' },
@@ -25,7 +24,15 @@ export const mysqlArgs = [
     { arg: '--single-transaction', description: i18n.global.t('cronjob.singleTransaction') },
     { arg: '--quick', description: i18n.global.t('cronjob.quick') },
     { arg: '--skip-lock-tables', description: i18n.global.t('cronjob.skipLockTables') },
+    {
+        arg: '--set-gtid-purged=OFF',
+        description: i18n.global.t('cronjob.setGtidPurgedOff'),
+        supportedTypes: ['mysql', 'mysql-cluster'],
+    },
 ];
+export const loadMysqlArgs = (dbType: string) => {
+    return mysqlArgs.filter((item) => !item.supportedTypes || item.supportedTypes.includes(dbType));
+};
 function loadWeek(i: number) {
     for (const week of weekOptions) {
         if (week.value === i) {

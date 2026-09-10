@@ -1,13 +1,13 @@
 <template>
     <div>
         <RouterMenu />
-        <LayoutContent :title="'Servers'" v-loading="loading">
+        <LayoutContent :title="$t('menu.mcp')" v-loading="loading">
             <template #leftToolBar>
                 <div class="flex flex-wrap gap-3">
-                    <el-button type="primary" @click="openCreate">
-                        {{ $t('aiTools.mcp.create') }}
+                    <el-button v-permission type="primary" @click="openCreate">
+                        {{ $t('commons.button.create') }}
                     </el-button>
-                    <el-button type="primary" plain @click="openDomain">
+                    <el-button v-permission type="primary" plain @click="openDomain">
                         {{ $t('aiTools.mcp.bindDomain') }}
                     </el-button>
                 </div>
@@ -78,8 +78,8 @@
                         fix
                     />
                     <fu-table-operations
-                        :ellipsis="mobile ? 0 : 2"
-                        :min-width="mobile ? 'auto' : 200"
+                        :ellipsis="isMobile ? 0 : 2"
+                        :min-width="isMobile ? 'auto' : 200"
                         :buttons="buttons"
                         :label="$t('commons.table.operate')"
                         fixed="right"
@@ -88,33 +88,43 @@
                 </ComplexTable>
             </template>
         </LayoutContent>
-        <McpServerOperate ref="createRef" @close="searchWithTimeOut" />
+        <McpServerOperate ref="createRef" @close="searchWithTimeOut" @task="openTaskLog" />
         <OpDialog ref="opRef" @search="search" />
         <ComposeLogs ref="composeLogRef" />
         <BindDomain ref="bindDomainRef" @close="searchWithTimeOut" />
         <Config ref="configRef" />
+        <TaskLog ref="taskLogRef" width="70%" @close="search" />
     </div>
 </template>
 
 <script lang="ts" setup>
 import { AI } from '@/api/interface/ai';
-import { deleteMcpServer, operateMcpServer, pageMcpServer } from '@/api/modules/ai';
+import {
+    deleteMcpServer,
+    loadMcpServerDetail,
+    operateMcpServer,
+    pageMcpServer,
+    syncMcpServerStatus,
+    testMcpServerConnection,
+} from '@/api/modules/ai';
 import RouterMenu from '@/views/ai/mcp/index.vue';
-import { computed, onMounted, reactive, ref } from 'vue';
-import { dateFormat } from '@/utils/util';
+import { onMounted, reactive, ref } from 'vue';
+import { dateFormat } from '@/utils/date';
 import McpServerOperate from './operate/index.vue';
 import ComposeLogs from '@/components/log/compose/index.vue';
-import { GlobalStore } from '@/store';
+import TaskLog from '@/components/log/task/index.vue';
 import i18n from '@/lang';
-import { MsgSuccess } from '@/utils/message';
+import { MsgError, MsgSuccess } from '@/utils/message';
 import BindDomain from './bind/index.vue';
 import Config from './config/index.vue';
-const globalStore = GlobalStore();
+import { useGlobalStore } from '@/composables/useGlobalStore';
 
+const { isMobile } = useGlobalStore();
 const loading = ref(false);
 const createRef = ref();
 const opRef = ref();
 const composeLogRef = ref();
+const taskLogRef = ref();
 const bindDomainRef = ref();
 const configRef = ref();
 const items = ref<AI.McpServer[]>([]);
@@ -123,9 +133,6 @@ const paginationConfig = reactive({
     currentPage: 1,
     pageSize: Number(localStorage.getItem('mcp-server-page-size')) || 20,
     total: 0,
-});
-const mobile = computed(() => {
-    return globalStore.isMobile();
 });
 
 const getUrl = (row: AI.McpServer) => {
@@ -139,18 +146,21 @@ const getUrl = (row: AI.McpServer) => {
 const buttons = [
     {
         label: i18n.global.t('menu.config'),
+        permission: true,
         click: (row: AI.McpServer) => {
             openConfig(row);
         },
     },
     {
         label: i18n.global.t('commons.button.edit'),
+        permission: true,
         click: (row: AI.McpServer) => {
             openDetail(row);
         },
     },
     {
         label: i18n.global.t('commons.button.start'),
+        permission: true,
         click: (row: AI.McpServer) => {
             opServer(row, 'start');
         },
@@ -160,6 +170,7 @@ const buttons = [
     },
     {
         label: i18n.global.t('commons.button.stop'),
+        permission: true,
         click: (row: AI.McpServer) => {
             opServer(row, 'stop');
         },
@@ -169,12 +180,21 @@ const buttons = [
     },
     {
         label: i18n.global.t('commons.button.restart'),
+        permission: true,
         click: (row: AI.McpServer) => {
             opServer(row, 'restart');
         },
     },
     {
+        label: i18n.global.t('aiTools.mcp.testConnection'),
+        permission: true,
+        click: (row: AI.McpServer) => {
+            testConnection(row);
+        },
+    },
+    {
         label: i18n.global.t('commons.button.delete'),
+        permission: true,
         click: (row: AI.McpServer) => {
             deleteServer(row);
         },
@@ -198,11 +218,36 @@ const search = () => {
         items.value = res.data.items;
         paginationConfig.total = res.data.total;
         loading.value = false;
+        syncStatus();
     });
 };
 
-const openDetail = (row: AI.McpServer) => {
-    createRef.value.acceptParams(row);
+const syncStatus = async () => {
+    const ids = items.value.map((item) => item.id).filter(Boolean);
+    if (ids.length === 0) {
+        return;
+    }
+    try {
+        const res = await syncMcpServerStatus({ ids });
+        const statusMap = new Map(res.data.map((item) => [item.id, item]));
+        for (const item of items.value) {
+            const status = statusMap.get(item.id);
+            if (status) {
+                item.status = status.status;
+                item.message = status.message;
+            }
+        }
+    } catch (error) {}
+};
+
+const openDetail = async (row: AI.McpServer) => {
+    loading.value = true;
+    try {
+        const res = await loadMcpServerDetail({ id: row.id });
+        createRef.value.acceptParams(res.data);
+    } finally {
+        loading.value = false;
+    }
 };
 
 const openCreate = () => {
@@ -219,6 +264,10 @@ const openLog = (row: AI.McpServer) => {
         resource: row.name,
         container: row.containerName,
     });
+};
+
+const openTaskLog = (taskID: string) => {
+    taskLogRef.value.openWithTaskID(taskID);
 };
 
 const deleteServer = async (row: AI.McpServer) => {
@@ -255,6 +304,20 @@ const opServer = async (row: AI.McpServer, operate: string) => {
             search();
         } catch (error) {}
     });
+};
+
+const testConnection = async (row: AI.McpServer) => {
+    loading.value = true;
+    try {
+        const res = await testMcpServerConnection({ id: row.id });
+        if (res.data.success) {
+            MsgSuccess(res.data.message || i18n.global.t('aiTools.mcp.connectionSuccess'));
+            return;
+        }
+        MsgError(res.data.message || i18n.global.t('aiTools.mcp.connectionFailed'));
+    } finally {
+        loading.value = false;
+    }
 };
 
 const openDomain = () => {

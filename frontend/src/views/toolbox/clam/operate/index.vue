@@ -19,7 +19,12 @@
                     <el-form-item :label="$t('toolbox.clam.scanDir')" prop="path">
                         <el-input v-model="dialogData.rowData!.path">
                             <template #prepend>
-                                <el-button icon="Folder" @click="scanDirRef.acceptParams({ dir: true })" />
+                                <el-button
+                                    icon="Folder"
+                                    v-permission
+                                    v-node-admin
+                                    @click="scanDirRef.acceptParams({ dir: true })"
+                                />
                             </template>
                         </el-input>
                     </el-form-item>
@@ -38,7 +43,12 @@
                     <el-form-item v-if="hasInfectedDir()" :label="$t('toolbox.clam.infectedDir')" prop="infectedDir">
                         <el-input v-model="dialogData.rowData!.infectedDir">
                             <template #prepend>
-                                <el-button icon="Folder" @click="infectedDirRef.acceptParams({ dir: true })" />
+                                <el-button
+                                    icon="Folder"
+                                    v-permission
+                                    v-node-admin
+                                    @click="infectedDirRef.acceptParams({ dir: true })"
+                                />
                             </template>
                         </el-input>
                     </el-form-item>
@@ -117,17 +127,7 @@
                             </el-input>
                         </div>
                     </el-form-item>
-                    <div v-if="globalStore.isIntl">
-                        <el-form-item v-if="(dialogData.rowData!.hasSpec) && !isProductPro">
-                            <span class="input-help logText">
-                                {{ $t('toolbox.clam.alertHelper') }}
-                                <el-link class="link" type="primary" @click="toUpload">
-                                    {{ $t('license.levelUpPro') }}
-                                </el-link>
-                            </span>
-                        </el-form-item>
-                    </div>
-                    <div v-if="!globalStore.isIntl">
+                    <div>
                         <el-form-item prop="hasAlert">
                             <el-checkbox v-model="dialogData.rowData!.hasAlert" :label="$t('xpack.alert.isAlert')" />
                             <span class="input-help">{{ $t('xpack.alert.clamHelper') }}</span>
@@ -149,35 +149,37 @@
                         >
                             <el-select
                                 class="selectClass"
+                                popper-class="alert-config-method-dropdown"
                                 v-model="dialogData.rowData!.alertMethodItems"
                                 multiple
                                 cleanable
+                                collapse-tags
+                                collapse-tags-tooltip
+                                :max-collapse-tags="3"
                             >
-                                <el-option value="mail" :label="$t('xpack.alert.mail')" />
-                                <el-option
-                                    value="weCom"
-                                    v-if="!globalStore.isIntl"
-                                    :disabled="!dialogData.rowData!.hasAlert || !isProductPro"
-                                    :label="$t('xpack.alert.weCom')"
-                                />
-                                <el-option
-                                    value="dingTalk"
-                                    v-if="!globalStore.isIntl"
-                                    :disabled="!dialogData.rowData!.hasAlert || !isProductPro"
-                                    :label="$t('xpack.alert.dingTalk')"
-                                />
-                                <el-option
-                                    value="feiShu"
-                                    v-if="!globalStore.isIntl"
-                                    :disabled="!dialogData.rowData!.hasAlert || !isProductPro"
-                                    :label="$t('xpack.alert.feiShu')"
-                                />
-                                <el-option
-                                    value="sms"
-                                    v-if="!globalStore.isIntl"
-                                    :disabled="!dialogData.rowData!.hasAlert || !isProductPro"
-                                    :label="$t('xpack.alert.sms')"
-                                />
+                                <el-option-group
+                                    v-for="group in groupedAlertConfigOptions"
+                                    :key="group.type"
+                                    :label="
+                                        i18n.global.t('xpack.alert.' + (group.type === 'email' ? 'mail' : group.type))
+                                    "
+                                >
+                                    <el-option
+                                        v-for="opt in group.options"
+                                        :key="opt.value"
+                                        :value="opt.value"
+                                        :label="opt.label"
+                                    >
+                                        <div class="alert-config-option">
+                                            <span class="alert-config-option__name" :title="opt.label">
+                                                {{ opt.label }}
+                                            </span>
+                                            <el-tag class="alert-config-option__tag" effect="light" size="small" round>
+                                                {{ opt.typeLabel }}
+                                            </el-tag>
+                                        </div>
+                                    </el-option>
+                                </el-option-group>
                             </el-select>
                         </el-form-item>
                         <el-form-item
@@ -215,7 +217,7 @@
         <template #footer>
             <span class="dialog-footer">
                 <el-button @click="drawerVisible = false">{{ $t('commons.button.cancel') }}</el-button>
-                <el-button :disabled="loading" type="primary" @click="onSubmit(formRef)">
+                <el-button v-permission v-node-admin :disabled="loading" type="primary" @click="onSubmit(formRef)">
                     {{ $t('commons.button.confirm') }}
                 </el-button>
             </span>
@@ -227,7 +229,7 @@
 </template>
 
 <script lang="ts" setup>
-import { reactive, ref } from 'vue';
+import { reactive, ref, computed, onMounted } from 'vue';
 import { Rules } from '@/global/form-rules';
 import FileList from '@/components/file-list/index.vue';
 import i18n from '@/lang';
@@ -236,16 +238,109 @@ import LicenseImport from '@/components/license-import/index.vue';
 import { MsgError, MsgSuccess } from '@/utils/message';
 import { Toolbox } from '@/api/interface/toolbox';
 import { createClam, updateClam } from '@/api/modules/toolbox';
-import { storeToRefs } from 'pinia';
-import { GlobalStore } from '@/store';
+import { useGlobalStore } from '@/composables/useGlobalStore';
+import { Alert } from '@/api/interface/alert';
+import { ListAlertConfigs } from '@/api/modules/alert';
 import { specOptions, transObjToSpec, transSpecToObj, weekOptions } from '@/views/cronjob/cronjob/helper';
-import { splitTimeFromSecond, transferTimeToSecond } from '@/utils/util';
+import { splitTimeFromSecond, transferTimeToSecond } from '@/utils/validate';
+import { getAlertConfigDisplayName } from '@/views/setting/alert/setting/drawer/secret-field';
+const { isProductPro } = useGlobalStore();
 
-const globalStore = GlobalStore();
+const alertConfigs = ref<Alert.AlertConfigInfo[]>([]);
+const loadAlertConfigs = async () => {
+    try {
+        const res = await ListAlertConfigs();
+        alertConfigs.value = res.data?.filter((item: Alert.AlertConfigInfo) => item.type !== 'common') || [];
+    } catch {}
+};
+onMounted(() => {
+    loadAlertConfigs();
+});
+
+const alertConfigOptions = computed(() => {
+    return alertConfigs.value
+        .filter((c) => c.status === 'Enable' && c.type !== 'common')
+        .map((c) => ({
+            value: String(c.id),
+            label: getAlertConfigOptionLabel(c),
+            type: c.type,
+        }));
+});
+
+const legacyAlertMethodTypeMap: Record<string, string> = {
+    mail: 'email',
+    email: 'email',
+    sms: 'sms',
+    bark: 'bark',
+    weCom: 'weCom',
+    dingTalk: 'dingTalk',
+    feiShu: 'feiShu',
+    webhook: 'custom',
+    custom: 'custom',
+};
+
+const normalizeAlertMethodItems = (methods: string[]) => {
+    return methods.map((method) => {
+        if (/^\d+$/.test(method)) return method;
+        const configType = legacyAlertMethodTypeMap[method];
+        const matched = alertConfigOptions.value.find((item) => item.type === configType);
+        return matched?.value || method;
+    });
+};
+
+const groupedAlertConfigOptions = computed(() => {
+    const typeMap = new Map<string, { value: string; label: string }[]>();
+    for (const opt of alertConfigOptions.value) {
+        if (!typeMap.has(opt.type)) typeMap.set(opt.type, []);
+        typeMap.get(opt.type)!.push({ value: opt.value, label: opt.label });
+    }
+    const groups: {
+        type: string;
+        options: { value: string; label: string; typeLabel: string }[];
+    }[] = [];
+    const typeOrder = ['email', 'sms', 'weCom', 'dingTalk', 'feiShu', 'bark', 'custom'];
+    for (const t of typeOrder) {
+        if (typeMap.has(t)) {
+            const typeLabel = getConfigTypeLabel(t);
+            groups.push({
+                type: t,
+                options: typeMap.get(t)!.map((item) => ({
+                    ...item,
+                    typeLabel,
+                })),
+            });
+        }
+    }
+    for (const [type, options] of typeMap) {
+        if (typeOrder.includes(type)) continue;
+        const typeLabel = getConfigTypeLabel(type);
+        groups.push({
+            type,
+            options: options.map((item) => ({ ...item, typeLabel })),
+        });
+    }
+    return groups;
+});
+
+const getConfigTypeLabel = (type: string): string => {
+    return i18n.global.t(`xpack.alert.${type === 'email' ? 'mail' : type}`);
+};
+
+const getAlertConfigOptionLabel = (c: Alert.AlertConfigInfo): string => {
+    try {
+        const cfg = JSON.parse(c.config || '{}') as Record<string, unknown>;
+        return (
+            getAlertConfigDisplayName(c.type, cfg) ||
+            i18n.global.t(`xpack.alert.${c.type === 'email' ? 'mail' : c.type}`)
+        );
+    } catch {
+        return i18n.global.t(`xpack.alert.${c.type === 'email' ? 'mail' : c.type}`);
+    }
+};
+
 const licenseRef = ref();
 const scanDirRef = ref();
 const infectedDirRef = ref();
-const { isProductPro } = storeToRefs(globalStore);
 interface DialogProps {
     title: string;
     rowData?: Toolbox.ClamInfo;
@@ -281,7 +376,9 @@ const acceptParams = (params: DialogProps): void => {
     dialogData.value.rowData.hasAlert = dialogData.value.rowData!.alertCount > 0;
     dialogData.value.rowData!.alertCount = dialogData.value.rowData!.alertCount || 3;
     if (dialogData.value.rowData!.alertMethod) {
-        dialogData.value.rowData!.alertMethodItems = dialogData.value.rowData!.alertMethod.split(',') || [];
+        dialogData.value.rowData!.alertMethodItems = normalizeAlertMethodItems(
+            dialogData.value.rowData!.alertMethod.split(',') || [],
+        );
     } else {
         dialogData.value.rowData!.alertMethodItems = [];
     }
@@ -303,7 +400,7 @@ const verifySpec = (rule: any, value: any, callback: any) => {
         !Number.isInteger(item.second) ||
         !Number.isInteger(item.week)
     ) {
-        callback(new Error(i18n.global.t('cronjob.specErr')));
+        callback(new Error(i18n.global.t('toolbox.clam.specErr')));
         return;
     }
     switch (item.specType) {
@@ -316,7 +413,7 @@ const verifySpec = (rule: any, value: any, callback: any) => {
                 item.minute < 0 ||
                 item.minute > 59
             ) {
-                callback(new Error(i18n.global.t('cronjob.specErr')));
+                callback(new Error(i18n.global.t('toolbox.clam.specErr')));
                 return;
             }
             break;
@@ -329,7 +426,7 @@ const verifySpec = (rule: any, value: any, callback: any) => {
                 item.minute < 0 ||
                 item.minute > 59
             ) {
-                callback(new Error(i18n.global.t('cronjob.specErr')));
+                callback(new Error(i18n.global.t('toolbox.clam.specErr')));
                 return;
             }
             break;
@@ -342,36 +439,36 @@ const verifySpec = (rule: any, value: any, callback: any) => {
                 item.minute < 0 ||
                 item.minute > 59
             ) {
-                callback(new Error(i18n.global.t('cronjob.specErr')));
+                callback(new Error(i18n.global.t('toolbox.clam.specErr')));
                 return;
             }
             break;
         case 'perDay':
             if (item.hour < 0 || item.hour > 23 || item.minute < 0 || item.minute > 59) {
-                callback(new Error(i18n.global.t('cronjob.specErr')));
+                callback(new Error(i18n.global.t('toolbox.clam.specErr')));
                 return;
             }
             break;
         case 'perNHour':
             if (item.hour < 0 || item.hour > 8784 || item.minute < 0 || item.minute > 59) {
-                callback(new Error(i18n.global.t('cronjob.specErr')));
+                callback(new Error(i18n.global.t('toolbox.clam.specErr')));
                 return;
             }
             break;
         case 'perHour':
             if (item.minute < 0 || item.minute > 59) {
-                callback(new Error(i18n.global.t('cronjob.specErr')));
+                callback(new Error(i18n.global.t('toolbox.clam.specErr')));
                 return;
             }
         case 'perNMinute':
             if (item.minute < 0 || item.minute > 527040) {
-                callback(new Error(i18n.global.t('cronjob.specErr')));
+                callback(new Error(i18n.global.t('toolbox.clam.specErr')));
                 return;
             }
             break;
         case 'perNSecond':
             if (item.second < 0 || item.second > 31622400) {
-                callback(new Error(i18n.global.t('cronjob.specErr')));
+                callback(new Error(i18n.global.t('toolbox.clam.specErr')));
                 return;
             }
             break;
@@ -521,6 +618,35 @@ defineExpose({
 });
 </script>
 <style scoped lang="scss">
+.alert-config-option {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    width: 100%;
+    min-width: 0;
+}
+
+.alert-config-option__name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.alert-config-option__tag {
+    flex: 0 0 auto;
+}
+
+:global(.alert-config-method-dropdown .el-select-dropdown__item) {
+    padding-right: 52px;
+}
+
+:global(.alert-config-method-dropdown .el-select-dropdown__item.is-selected::after) {
+    right: 16px;
+}
+
 .logText {
     line-height: 22px;
     font-size: 12px;

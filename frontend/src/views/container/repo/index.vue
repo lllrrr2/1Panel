@@ -9,8 +9,8 @@
 
         <LayoutContent v-if="isExist" :title="$t('container.repo', 2)" :class="{ mask: !isActive }">
             <template #leftToolBar>
-                <el-button type="primary" @click="onOpenDialog('add')">
-                    {{ $t('container.createRepo') }}
+                <el-button v-permission type="primary" @click="onOpenDialog('add')">
+                    {{ $t('commons.button.add') }}
                 </el-button>
             </template>
             <template #rightToolBar>
@@ -61,7 +61,7 @@
 <script lang="ts" setup>
 import OperatorDialog from '@/views/container/repo/operator/index.vue';
 import { reactive, ref } from 'vue';
-import { dateFormat } from '@/utils/util';
+import { dateFormat } from '@/utils/date';
 import { Container } from '@/api/interface/container';
 import { checkRepoStatus, deleteImageRepo, searchImageRepo } from '@/api/modules/container';
 import DockerStatus from '@/views/container/docker-status/index.vue';
@@ -170,6 +170,7 @@ const onCheckConn = async (row: Container.RepoInfo) => {
 const buttons = [
     {
         label: i18n.global.t('commons.button.sync'),
+        permission: true,
         disabled: (row: Container.RepoInfo) => {
             return row.id === 1;
         },
@@ -179,6 +180,7 @@ const buttons = [
     },
     {
         label: i18n.global.t('commons.button.edit'),
+        permission: true,
         disabled: (row: Container.RepoInfo) => {
             return row.id === 1;
         },
@@ -188,6 +190,7 @@ const buttons = [
     },
     {
         label: i18n.global.t('commons.button.delete'),
+        permission: true,
         disabled: (row: Container.RepoInfo) => {
             return row.id === 1;
         },

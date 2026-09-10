@@ -9,6 +9,29 @@ type FileOption struct {
 	files.FileOption
 }
 
+type FileAISearch struct {
+	Path             string   `json:"path" validate:"required"`
+	Query            string   `json:"query" validate:"required"`
+	ResponseLanguage string   `json:"responseLanguage,omitempty"`
+	ContainSub       *bool    `json:"containSub,omitempty"`
+	MaxItems         int      `json:"maxItems" validate:"omitempty,min=1,max=2000"`
+	MatchCase        bool     `json:"matchCase"`
+	WholeWord        bool     `json:"wholeWord"`
+	UseRegex         bool     `json:"useRegex"`
+	Extensions       []string `json:"extensions,omitempty"`
+	MinSize          int64    `json:"minSize"`
+	MaxSize          int64    `json:"maxSize"`
+	ModifiedAfter    string   `json:"modifiedAfter,omitempty"`
+	ModifiedBefore   string   `json:"modifiedBefore,omitempty"`
+
+	MaxScanFiles              int   `json:"maxScanFiles"`
+	MaxFileBytes              int64 `json:"maxFileBytes"`
+	MaxHitsPerFile            int   `json:"maxHitsPerFile"`
+	MaxTotalHits              int   `json:"maxTotalHits"`
+	ContentHitsPromptMaxBytes int   `json:"contentHitsPromptMaxBytes"`
+	LlmMaxOutputTokens        int   `json:"llmMaxOutputTokens"`
+}
+
 type FileContentReq struct {
 	Path     string `json:"path" validate:"required"`
 	IsDetail bool   `json:"isDetail"`
@@ -55,6 +78,11 @@ type FileCompress struct {
 	Name    string   `json:"name" validate:"required"`
 	Replace bool     `json:"replace"`
 	Secret  string   `json:"secret"`
+	TaskID  string   `json:"taskID"`
+}
+
+type FileCompressStopReq struct {
+	TaskID string `json:"taskID" validate:"required"`
 }
 
 type FileDeCompress struct {
@@ -62,6 +90,11 @@ type FileDeCompress struct {
 	Type   string `json:"type"  validate:"required"`
 	Path   string `json:"path" validate:"required"`
 	Secret string `json:"secret"`
+	TaskID string `json:"taskID"`
+}
+
+type FileDeCompressStopReq struct {
+	TaskID string `json:"taskID" validate:"required"`
 }
 
 type FileEdit struct {
@@ -88,6 +121,7 @@ type FileWget struct {
 	Path              string `json:"path" validate:"required"`
 	Name              string `json:"name" validate:"required"`
 	IgnoreCertificate bool   `json:"ignoreCertificate"`
+	UseProxy          bool   `json:"useProxy"`
 }
 
 type FileMove struct {
@@ -97,6 +131,11 @@ type FileMove struct {
 	Name       string   `json:"name"`
 	Cover      bool     `json:"cover"`
 	CoverPaths []string `json:"coverPaths"`
+	TaskID     string   `json:"taskID"`
+}
+
+type FileMoveStopReq struct {
+	TaskID string `json:"taskID" validate:"required"`
 }
 
 type FileDownload struct {
@@ -119,6 +158,10 @@ type FileProcessReq struct {
 	Key string `json:"key"`
 }
 
+type FileProcessRemoveReq struct {
+	Keys []string `json:"keys" validate:"required,min=1,max=1000"`
+}
+
 type FileRoleUpdate struct {
 	Path  string `json:"path" validate:"required"`
 	User  string `json:"user" validate:"required"`
@@ -129,10 +172,17 @@ type FileRoleUpdate struct {
 type FileReadByLineReq struct {
 	Page     int    `json:"page" validate:"required"`
 	PageSize int    `json:"pageSize" validate:"required"`
-	Type     string `json:"type" validate:"required"`
+	Type     string `json:"type"`
 	ID       uint   `json:"ID"`
 	Name     string `json:"name"`
 	Latest   bool   `json:"latest"`
+	TaskReq
+}
+
+type TaskLogReadReq struct {
+	Page     int  `json:"page" validate:"required,min=1"`
+	PageSize int  `json:"pageSize" validate:"required,min=1"`
+	Latest   bool `json:"latest"`
 	TaskReq
 }
 
@@ -171,4 +221,10 @@ type FileRemarkBatch struct {
 type FileRemarkUpdate struct {
 	Path   string `json:"path" validate:"required"`
 	Remark string `json:"remark"`
+}
+
+type FileShareCreate struct {
+	Path          string  `json:"path" validate:"required"`
+	ExpireMinutes int     `json:"expireMinutes" validate:"min=0,max=10080"`
+	Password      *string `json:"password"`
 }

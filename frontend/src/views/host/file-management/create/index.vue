@@ -1,7 +1,14 @@
 <template>
     <DrawerPro v-model="open" :header="$t('commons.button.create')" @close="handleClose" size="normal">
+        <el-alert
+            v-if="addForm.isAppendOnly"
+            type="warning"
+            :title="$t('xpack.tamper.tamperCreateHint')"
+            :closable="false"
+        />
         <el-form
             ref="fileForm"
+            class="mt-2"
             label-position="top"
             :model="addForm"
             label-width="100px"
@@ -60,13 +67,22 @@ let setRole = ref(false);
 const fileRef = ref();
 
 interface CreateProps {
-    file: Object;
+    file: object;
 }
 const propData = ref<CreateProps>({
     file: {},
 });
 
-let addForm = reactive({ path: '', name: '', isDir: false, mode: 0o755, isLink: false, isSymlink: true, linkPath: '' });
+let addForm = reactive({
+    path: '',
+    name: '',
+    isDir: false,
+    mode: 0o755,
+    isLink: false,
+    isSymlink: true,
+    linkPath: '',
+    isAppendOnly: false,
+});
 let open = ref(false);
 const em = defineEmits(['close']);
 const handleClose = () => {
@@ -74,7 +90,7 @@ const handleClose = () => {
     if (fileForm.value) {
         fileForm.value.resetFields();
     }
-    em('close', open);
+    em('close', open.value);
 };
 
 const rules = reactive<FormRules>({
@@ -107,7 +123,7 @@ const submit = async (formEl: FormInstance | undefined) => {
             return;
         }
         if (getPath.value.indexOf('.1panel_clash') > -1) {
-            MsgWarning(i18n.global.t('file.clashDitNotSupport'));
+            MsgWarning(i18n.global.t('file.clashDidNotSupport'));
             return;
         }
 
@@ -137,6 +153,7 @@ const acceptParams = (create: File.FileCreate) => {
     addForm.path = create.path;
     addForm.name = '';
     addForm.isLink = false;
+    addForm.isAppendOnly = Boolean(create.isAppendOnly);
 
     init();
 };

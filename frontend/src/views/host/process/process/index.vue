@@ -3,13 +3,13 @@
         <FireRouter />
         <LayoutContent :title="$t('menu.process', 2)" v-loading="processStore.psLoading">
             <template #rightToolBar>
-                <div class="w-full flex justify-end items-center gap-5">
+                <div class="process-toolbar w-full flex justify-end items-center gap-5">
                     <el-select
                         v-model="filters"
                         :placeholder="$t('commons.table.status')"
                         clearable
                         @change="search()"
-                        class="p-w-300"
+                        class="process-toolbar__filter"
                         multiple
                         collapse-tags
                         collapse-tags-tooltip
@@ -23,16 +23,19 @@
                         />
                     </el-select>
                     <TableSearch
+                        class="process-toolbar__field"
                         @search="search()"
                         :placeholder="$t('process.pid')"
                         v-model:searchName="processStore.psSearch.pid"
                     />
                     <TableSearch
+                        class="process-toolbar__field"
                         @search="search()"
                         :placeholder="$t('commons.table.name')"
                         v-model:searchName="processStore.psSearch.name"
                     />
                     <TableSearch
+                        class="process-toolbar__field"
                         @search="search()"
                         :placeholder="$t('commons.table.user')"
                         v-model:searchName="processStore.psSearch.username"
@@ -40,15 +43,17 @@
                 </div>
             </template>
             <template #main>
-                <div class="!h-[900px]">
+                <div class="process-table">
                     <el-auto-resizer>
                         <template #default="{ height, width }">
                             <el-table-v2
+                                :fixed="isCompactTable"
                                 @column-sort="changeSort"
                                 :columns="columns"
                                 :data="data"
                                 :width="width"
                                 :height="height"
+                                :scrollbar-always-on="isCompactTable"
                                 :sort-by="sortState"
                             ></el-table-v2>
                         </template>
@@ -59,20 +64,26 @@
 
         <OpDialog ref="opRef" @search="search" />
         <ProcessDetail ref="detailRef" />
+        <RuntimeDiagnostics ref="runtimeDiagnosticsRef" />
     </div>
 </template>
 
 <script setup lang="ts">
 import FireRouter from '@/views/host/process/index.vue';
-import { ref, onMounted, onUnmounted, computed, watch, h } from 'vue';
+import { ref, onMounted, onUnmounted, computed, watch, h, resolveDirective, withDirectives } from 'vue';
 import ProcessDetail from './detail/index.vue';
 import i18n from '@/lang';
 import { stopProcess } from '@/api/modules/process';
-import { GlobalStore, ProcessStore } from '@/store';
+import { ProcessStore } from '@/store';
 import { SortBy, TableV2SortOrder, ElButton } from 'element-plus';
+import { useGlobalStore } from '@/composables/useGlobalStore';
+import RuntimeDiagnostics from './diagnostics/index.vue';
+import { useMediaQuery } from '@vueuse/core';
 
-const globalStore = GlobalStore();
+const { currentNode } = useGlobalStore();
+const isCompactTable = useMediaQuery('(max-width: 1024px)');
 const processStore = ProcessStore();
+const permissionDirective = resolveDirective('permission');
 
 const statusOptions = computed(() => [
     { text: i18n.global.t('process.running'), value: 'running' },
@@ -92,6 +103,7 @@ const sortState = ref<SortBy>({
 
 const data = ref<any[]>([]);
 const detailRef = ref();
+const runtimeDiagnosticsRef = ref<InstanceType<typeof RuntimeDiagnostics>>();
 const filters = ref<string[]>([]);
 
 const sortByNum = (a: any, b: any, prop: string): number => {
@@ -184,9 +196,18 @@ const columns = ref([
         key: 'actions',
         title: i18n.global.t('commons.table.operate'),
         dataKey: 'actions',
-        width: 300,
+        width: 420,
         cellRenderer: ({ rowData }) => {
-            return h('div', { class: 'action-buttons' }, [
+            const stopButton = h(
+                ElButton,
+                {
+                    type: 'text',
+                    onClick: () => stop(rowData),
+                },
+                () => i18n.global.t('process.stopProcess'),
+            );
+
+            const buttons = [
                 h(
                     ElButton,
                     {
@@ -195,15 +216,23 @@ const columns = ref([
                     },
                     () => i18n.global.t('process.viewDetails'),
                 ),
-                h(
-                    ElButton,
-                    {
-                        type: 'text',
-                        onClick: () => stop(rowData),
-                    },
-                    () => i18n.global.t('process.stopProcess'),
-                ),
-            ]);
+            ];
+
+            if (rowData.name === '1panel-agent') {
+                buttons.push(
+                    h(
+                        ElButton,
+                        {
+                            type: 'text',
+                            onClick: openRuntimeDiagnostics,
+                        },
+                        () => i18n.global.t('monitor.runtimeDiagnostics'),
+                    ),
+                );
+            }
+
+            buttons.push(permissionDirective ? withDirectives(stopButton, [[permissionDirective]]) : stopButton);
+            return h('div', { class: 'action-buttons' }, buttons);
         },
     },
 ]);
@@ -246,6 +275,10 @@ const openDetail = (row: any) => {
     detailRef.value.acceptParams(row.PID);
 };
 
+const openRuntimeDiagnostics = () => {
+    runtimeDiagnosticsRef.value?.acceptParams();
+};
+
 const changeSort = ({ key, order }) => {
     if (!order) order = TableV2SortOrder.ASC;
     sortState.value = { key, order };
@@ -270,7 +303,7 @@ const stop = async (row: any) => {
 };
 
 onMounted(() => {
-    processStore.connect(globalStore.currentNode);
+    processStore.connect(currentNode.value);
     const initialDelay = processStore.psData.length > 0 ? 500 : 0;
     processStore.startPolling('ps', 3000, initialDelay);
 });
@@ -280,3 +313,56 @@ onUnmounted(() => {
     processStore.disconnect();
 });
 </script>
+
+<style scoped lang="scss">
+.process-toolbar {
+    min-width: 0;
+}
+
+.process-toolbar__filter {
+    width: 300px;
+}
+
+.process-table {
+    width: 100%;
+    min-width: 0;
+    height: 900px;
+    overflow: hidden;
+}
+
+@media only screen and (max-width: 1024px) {
+    .process-toolbar {
+        flex-wrap: wrap;
+        justify-content: flex-start;
+        gap: 12px;
+    }
+
+    .process-toolbar__filter,
+    .process-toolbar__field {
+        width: auto;
+        min-width: 0;
+        max-width: 300px;
+        flex: 1 1 220px;
+    }
+
+    .process-toolbar__field {
+        :deep(.search-button) {
+            width: 100%;
+        }
+    }
+
+    .process-table {
+        height: clamp(420px, calc(100vh - 260px), 900px);
+        height: clamp(420px, calc(100dvh - 260px), 900px);
+    }
+}
+
+@media only screen and (max-width: 767px) {
+    .process-toolbar__filter,
+    .process-toolbar__field {
+        width: 100%;
+        max-width: none;
+        flex-basis: 100%;
+    }
+}
+</style>

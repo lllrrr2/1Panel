@@ -14,18 +14,21 @@ import (
 	"github.com/1Panel-dev/1Panel/agent/app/dto"
 	"github.com/1Panel-dev/1Panel/agent/app/dto/request"
 	"github.com/1Panel-dev/1Panel/agent/app/model"
+	providercatalog "github.com/1Panel-dev/1Panel/agent/app/provider"
 	"github.com/1Panel-dev/1Panel/agent/app/service"
 	"github.com/1Panel-dev/1Panel/agent/constant"
 	"github.com/1Panel-dev/1Panel/agent/global"
 	migrationutils "github.com/1Panel-dev/1Panel/agent/init/migration/migrations/utils"
+	alertwebhook "github.com/1Panel-dev/1Panel/agent/utils/alert_webhook"
 	"github.com/1Panel-dev/1Panel/agent/utils/common"
 	"github.com/1Panel-dev/1Panel/agent/utils/copier"
 	"github.com/1Panel-dev/1Panel/agent/utils/encrypt"
-	"github.com/1Panel-dev/1Panel/agent/utils/firewall"
+	"github.com/1Panel-dev/1Panel/agent/utils/firewall/ping"
 	"github.com/1Panel-dev/1Panel/agent/utils/ssh"
 	"github.com/1Panel-dev/1Panel/agent/utils/xpack"
 
 	"github.com/go-gormigrate/gormigrate/v2"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -49,9 +52,14 @@ var AddTable = &gormigrate.Migration{
 			&model.Cronjob{},
 			&model.Database{},
 			&model.DatabaseMysql{},
+			&model.DatabaseUser{},
+			&model.DatabaseUserGrant{},
+			&model.DatabaseMongodb{},
 			&model.DatabasePostgresql{},
 			&model.Favorite{},
-			&model.Firewall{},
+			&model.FileShare{},
+			&model.Host{},
+			&model.FirewallRule{},
 			&model.Ftp{},
 			&model.ImageRepo{},
 			&model.ScriptLibrary{},
@@ -67,6 +75,8 @@ var AddTable = &gormigrate.Migration{
 			&model.Website{},
 			&model.WebsiteAcmeAccount{},
 			&model.WebsiteCA{},
+			&model.WebsiteTemplate{},
+			&model.WebsiteTemplateOutput{},
 			&model.WebsiteDnsAccount{},
 			&model.WebsiteDomain{},
 			&model.WebsiteSSL{},
@@ -94,7 +104,7 @@ var InitSetting = &gormigrate.Migration{
 	ID: "20240722-init-setting",
 	Migrate: func(tx *gorm.DB) error {
 		global.CONF.Base.EncryptKey = common.RandStr(16)
-		nodeInfo, err := xpack.LoadNodeInfo(true)
+		nodeInfo, err := xpack.MultiNodeProvider.LoadNodeInfo(true)
 		if err != nil {
 			return err
 		}
@@ -128,7 +138,8 @@ var InitSetting = &gormigrate.Migration{
 		if err := tx.Create(&model.Setting{Key: "SystemStatus", Value: "Free"}).Error; err != nil {
 			return err
 		}
-		if err := tx.Create(&model.Setting{Key: "Language", Value: "zh"}).Error; err != nil {
+		lang := common.LoadParamsWithoutPanic("LANGUAGE")
+		if err := tx.Create(&model.Setting{Key: "Language", Value: lang}).Error; err != nil {
 			return err
 		}
 		if err := tx.Create(&model.Setting{Key: "SystemIP", Value: ""}).Error; err != nil {
@@ -229,7 +240,7 @@ var InitDefaultCA = &gormigrate.Migration{
 		if _, err := caService.Create(request.WebsiteCACreate{
 			CommonName:       "1Panel-CA",
 			Country:          "CN",
-			KeyType:          "P256",
+			KeyType:          "EC256",
 			Name:             "1Panel",
 			Organization:     "FIT2CLOUD",
 			OrganizationUint: "1Panel",
@@ -385,16 +396,20 @@ var InitAlertConfig = &gormigrate.Migration{
 	Migrate: func(tx *gorm.DB) error {
 		records := []model.AlertConfig{
 			{
-				Type:   "sms",
-				Title:  "xpack.alert.smsConfig",
-				Status: "Enable",
-				Config: `{"alertDailyNum":50}`,
+				Type:       "sms",
+				Title:      "xpack.alert.smsConfig",
+				Status:     "Enable",
+				Config:     `{"alertDailyNum":50}`,
+				CreateUser: "system",
+				UpdateUser: "system",
 			},
 			{
-				Type:   "common",
-				Title:  "xpack.alert.commonConfig",
-				Status: "Enable",
-				Config: `{"isOffline":"Disable","alertSendTimeRange":{"noticeAlert":{"sendTimeRange":"08:00:00 - 23:59:59","type":["ssl","siteEndTime","panelPwdEndTime","panelUpdate"]},"resourceAlert":{"sendTimeRange":"00:00:00 - 23:59:59","type":["clams","cronJob","cpu","memory","load","disk"]}}}`,
+				Type:       "common",
+				Title:      "xpack.alert.commonConfig",
+				Status:     "Enable",
+				Config:     `{"isOffline":"Disable","alertSendTimeRange":{"noticeAlert":{"sendTimeRange":"08:00:00 - 23:59:59","type":["ssl","siteEndTime","panelPwdEndTime","panelUpdate"]},"resourceAlert":{"sendTimeRange":"00:00:00 - 23:59:59","type":["clams","cronJob","cpu","memory","load","disk"]}}}`,
+				CreateUser: "system",
+				UpdateUser: "system",
 			},
 		}
 		for _, r := range records {
@@ -473,6 +488,257 @@ var AddColumnToAlert = &gormigrate.Migration{
 	},
 }
 
+var MigrateAlertMethodConfigIDs = &gormigrate.Migration{
+	ID: "20251001-migrate-alert-method-config-ids",
+	Migrate: func(tx *gorm.DB) error {
+		if err := tx.AutoMigrate(&model.Alert{}, &model.AlertLog{}, &model.AlertTask{}, &model.AlertConfig{}); err != nil {
+			return err
+		}
+		if err := migrateAlertMethodConfigIDs(tx); err != nil {
+			return err
+		}
+		return nil
+	},
+}
+
+var MigrateAlertLogTaskMethodConfigIDs = &gormigrate.Migration{
+	ID: "20260608-migrate-alert-log-task-method-config-ids",
+	Migrate: func(tx *gorm.DB) error {
+		if err := tx.AutoMigrate(&model.AlertLog{}, &model.AlertTask{}, &model.AlertConfig{}); err != nil {
+			return err
+		}
+		if err := migrateAlertMethodRecords(tx, &model.AlertLog{}); err != nil {
+			return err
+		}
+		if err := migrateAlertMethodRecords(tx, &model.AlertTask{}); err != nil {
+			return err
+		}
+		return nil
+	},
+}
+
+var AddAlertAuditUser = &gormigrate.Migration{
+	ID: "20260602-add-alert-audit-user",
+	Migrate: func(tx *gorm.DB) error {
+		return tx.AutoMigrate(&model.Alert{}, &model.AlertConfig{})
+	},
+}
+
+var AddAlertConfigUIDAndSecret = &gormigrate.Migration{
+	ID: "20260826-add-alert-config-uid-secret",
+	Migrate: func(tx *gorm.DB) error {
+		return migrateAlertConfigUIDAndSecret(tx)
+	},
+}
+
+var AddAlertTaskDeliveryLogID = &gormigrate.Migration{
+	ID: "20260826-add-alert-task-delivery-log-id",
+	Migrate: func(tx *gorm.DB) error {
+		return tx.AutoMigrate(&model.AlertTask{})
+	},
+}
+
+func migrateAlertConfigUIDAndSecret(tx *gorm.DB) error {
+	if !tx.Migrator().HasTable(&model.AlertConfig{}) {
+		return tx.AutoMigrate(&model.AlertConfig{})
+	}
+
+	if !tx.Migrator().HasColumn(&model.AlertConfig{}, "UID") {
+		if err := tx.Exec("ALTER TABLE alert_configs ADD COLUMN uid varchar(64)").Error; err != nil {
+			return err
+		}
+	}
+	if !tx.Migrator().HasColumn(&model.AlertConfig{}, "SecretConfig") {
+		if err := tx.Exec("ALTER TABLE alert_configs ADD COLUMN secret_config text NOT NULL DEFAULT ''").Error; err != nil {
+			return err
+		}
+	}
+
+	var configs []struct {
+		ID  uint
+		UID string
+	}
+	if err := tx.Table("alert_configs").Select("id", "uid").Find(&configs).Error; err != nil {
+		return err
+	}
+	for _, config := range configs {
+		if strings.TrimSpace(config.UID) != "" {
+			continue
+		}
+		if err := tx.Table("alert_configs").Where("id = ?", config.ID).Update("uid", uuid.NewString()).Error; err != nil {
+			return err
+		}
+	}
+
+	if err := tx.AutoMigrate(&model.AlertConfig{}); err != nil {
+		return err
+	}
+
+	var customConfigs []model.AlertConfig
+	if err := tx.Where("type = ?", constant.Custom).Find(&customConfigs).Error; err != nil {
+		return err
+	}
+	for _, config := range customConfigs {
+		prepared, status, legacy, err := alertwebhook.NormalizeLegacy(config.Config, config.Status, config.Title)
+		if err != nil {
+			return fmt.Errorf("normalize legacy custom webhook %d: %w", config.ID, err)
+		}
+		if !legacy {
+			if err := alertwebhook.ValidateStored(config); err != nil && config.Status != constant.AlertDisable {
+				if updateErr := tx.Model(&model.AlertConfig{}).Where("id = ?", config.ID).Update("status", constant.AlertDisable).Error; updateErr != nil {
+					return updateErr
+				}
+			}
+			continue
+		}
+		if err := tx.Model(&model.AlertConfig{}).Where("id = ?", config.ID).Updates(map[string]interface{}{
+			"config":        prepared.Config,
+			"secret_config": prepared.SecretConfig,
+			"status":        status,
+		}).Error; err != nil {
+			return err
+		}
+	}
+
+	if tx.Migrator().HasTable(&model.Alert{}) {
+		if err := migrateAlertMethodConfigIDs(tx); err != nil {
+			return err
+		}
+	}
+	if tx.Migrator().HasTable(&model.AlertLog{}) {
+		if err := migrateAlertMethodRecords(tx, &model.AlertLog{}); err != nil {
+			return err
+		}
+	}
+	if tx.Migrator().HasTable(&model.AlertTask{}) {
+		if err := migrateAlertMethodRecords(tx, &model.AlertTask{}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func migrateAlertMethodConfigIDs(tx *gorm.DB) error {
+	if err := tx.Model(&model.AlertConfig{}).Where("type = ?", "mail").Update("type", constant.EmailConfig).Error; err != nil {
+		return err
+	}
+
+	configIDs, err := loadAlertConfigIDs(tx)
+	if err != nil {
+		return err
+	}
+
+	var alerts []model.Alert
+	if err := tx.Find(&alerts).Error; err != nil {
+		return err
+	}
+	for _, alert := range alerts {
+		method := migrateAlertMethodValue(alert.Method, alertLegacyMethodTypeMap(), configIDs)
+		if method == alert.Method {
+			continue
+		}
+		if err := tx.Model(&model.Alert{}).Where("id = ?", alert.ID).Update("method", method).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func migrateAlertMethodRecords(tx *gorm.DB, modelValue interface{}) error {
+	configIDs, err := loadAlertConfigIDs(tx)
+	if err != nil {
+		return err
+	}
+
+	switch modelValue.(type) {
+	case *model.AlertLog:
+		var logs []model.AlertLog
+		if err := tx.Find(&logs).Error; err != nil {
+			return err
+		}
+		for _, item := range logs {
+			method := migrateAlertMethodValue(item.Method, alertLegacyMethodTypeMap(), configIDs)
+			if method == item.Method {
+				continue
+			}
+			if err := tx.Model(&model.AlertLog{}).Where("id = ?", item.ID).Update("method", method).Error; err != nil {
+				return err
+			}
+		}
+	case *model.AlertTask:
+		var tasks []model.AlertTask
+		if err := tx.Find(&tasks).Error; err != nil {
+			return err
+		}
+		for _, item := range tasks {
+			method := migrateAlertMethodValue(item.Method, alertLegacyMethodTypeMap(), configIDs)
+			if method == item.Method {
+				continue
+			}
+			if err := tx.Model(&model.AlertTask{}).Where("id = ?", item.ID).Update("method", method).Error; err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func loadAlertConfigIDs(tx *gorm.DB) (map[string]string, error) {
+	configIDs := map[string]string{}
+	for _, configType := range alertLegacyMethodTypeMap() {
+		if _, ok := configIDs[configType]; ok {
+			continue
+		}
+		var config model.AlertConfig
+		if err := tx.Where("type = ?", configType).Order("id ASC").First(&config).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				continue
+			}
+			return nil, err
+		}
+		configIDs[configType] = strconv.Itoa(int(config.ID))
+	}
+	return configIDs, nil
+}
+
+func alertLegacyMethodTypeMap() map[string]string {
+	return map[string]string{
+		"mail":            constant.Email,
+		constant.Email:    constant.Email,
+		constant.SMS:      constant.SMS,
+		constant.Bark:     constant.Bark,
+		constant.WeChat:   constant.WeCom,
+		constant.WeCom:    constant.WeCom,
+		constant.DingTalk: constant.DingTalk,
+		constant.FeiShu:   constant.FeiShu,
+		constant.Custom:   constant.Custom,
+	}
+}
+
+func migrateAlertMethodValue(method string, typeMap map[string]string, configIDs map[string]string) string {
+	items := strings.Split(method, ",")
+	next := make([]string, 0, len(items))
+	seen := map[string]struct{}{}
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		configType, ok := typeMap[item]
+		if ok {
+			if id, exists := configIDs[configType]; exists {
+				item = id
+			}
+		}
+		if _, exists := seen[item]; exists {
+			continue
+		}
+		seen[item] = struct{}{}
+		next = append(next, item)
+	}
+	return strings.Join(next, ",")
+}
+
 var UpdateWebsiteSSL = &gormigrate.Migration{
 	ID: "20250819-update-website-ssl",
 	Migrate: func(tx *gorm.DB) error {
@@ -515,6 +781,25 @@ var UpdateMcpServerAddType = &gormigrate.Migration{
 			return err
 		}
 		if err := tx.Model(&model.McpServer{}).Where("1=1").Update("type", "npx").Error; err != nil {
+			return err
+		}
+		return nil
+	},
+}
+
+var UpdateMcpServerGatewayConfig = &gormigrate.Migration{
+	ID: "20260615-update-mcp-server-gateway-config",
+	Migrate: func(tx *gorm.DB) error {
+		if err := tx.AutoMigrate(&model.McpServer{}); err != nil {
+			return err
+		}
+		if err := tx.Model(&model.McpServer{}).Where("gateway_image IS NULL OR gateway_image = ''").Where("type = ?", "uvx").Update("gateway_image", "supercorp/supergateway:uvx").Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&model.McpServer{}).Where("gateway_image IS NULL OR gateway_image = ''").Where("type <> ? OR type IS NULL OR type = ''", "uvx").Update("gateway_image", "supercorp/supergateway:3.4.3").Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&model.McpServer{}).Where("protocol_version IS NULL OR protocol_version = ''").Update("protocol_version", "2025-06-18").Error; err != nil {
 			return err
 		}
 		return nil
@@ -585,6 +870,67 @@ var AddShowNameForQuickJump = &gormigrate.Migration{
 	ID: "20250918-add-show-name-for-quick-jump",
 	Migrate: func(tx *gorm.DB) error {
 		return tx.AutoMigrate(&model.QuickJump{})
+	},
+}
+
+var AddAgentQuickJump = &gormigrate.Migration{
+	ID: "20260312-add-agent-quick-jump",
+	Migrate: func(tx *gorm.DB) error {
+		if err := tx.AutoMigrate(&model.QuickJump{}); err != nil {
+			return err
+		}
+
+		var quicks []model.QuickJump
+		if err := tx.Find(&quicks).Error; err != nil {
+			return err
+		}
+
+		var (
+			cronjob  *model.QuickJump
+			database *model.QuickJump
+			showList []*model.QuickJump
+		)
+		for i := range quicks {
+			switch quicks[i].Name {
+			case "Cronjob":
+				cronjob = &quicks[i]
+			case "Database":
+				database = &quicks[i]
+			}
+			if quicks[i].IsShow {
+				showList = append(showList, &quicks[i])
+			}
+		}
+
+		showCount := len(showList)
+		updatedIDs := make(map[uint]struct{})
+		kickedCronjob := false
+		if showCount >= 4 && cronjob != nil && cronjob.IsShow {
+			cronjob.IsShow = false
+			updatedIDs[cronjob.ID] = struct{}{}
+			kickedCronjob = true
+		}
+		if !kickedCronjob && showCount >= 4 && database != nil && database.IsShow {
+			database.IsShow = false
+			updatedIDs[database.ID] = struct{}{}
+		}
+
+		for _, item := range quicks {
+			if _, ok := updatedIDs[item.ID]; !ok {
+				continue
+			}
+			if err := tx.Model(&model.QuickJump{}).Where("id = ?", item.ID).Update("is_show", item.IsShow).Error; err != nil {
+				return err
+			}
+		}
+
+		return tx.Create(&model.QuickJump{
+			Name:      "Agent",
+			Title:     "aiTools.agents.agent",
+			Recommend: 1,
+			IsShow:    true,
+			Router:    "/ai/agents/agent",
+		}).Error
 	},
 }
 
@@ -662,31 +1008,6 @@ var UpdateMonitorInterval = &gormigrate.Migration{
 	},
 }
 
-var AddIptablesFilterRuleTable = &gormigrate.Migration{
-	ID: "20251106-add-iptables-filter-rule-table",
-	Migrate: func(tx *gorm.DB) error {
-		if err := tx.AutoMigrate(&model.Firewall{}); err != nil {
-			return err
-		}
-		var firewalls []model.Firewall
-		_ = tx.Where("1 = 1").Find(&firewalls).Error
-
-		firewallType := ""
-		client, err := firewall.NewFirewallClient()
-		if err == nil {
-			firewallType = client.Name()
-		}
-		for _, item := range firewalls {
-			if err := tx.Model(&model.Firewall{}).
-				Where("id = ?", item.ID).
-				Updates(map[string]interface{}{"dst_port": item.Port, "src_ip": item.Address, "firewall_type": firewallType}); err != nil {
-				global.LOG.Errorf("update firewall failed, err: %v", err)
-			}
-		}
-		return nil
-	},
-}
-
 var AddMonitorProcess = &gormigrate.Migration{
 	ID: "20251030-add-monitor-process",
 	Migrate: func(tx *gorm.DB) error {
@@ -759,6 +1080,13 @@ var UpdateDatabaseMysql = &gormigrate.Migration{
 	},
 }
 
+var AddDatabaseMongodb = &gormigrate.Migration{
+	ID: "20260413-add-database-mongodb",
+	Migrate: func(tx *gorm.DB) error {
+		return tx.AutoMigrate(&model.DatabaseMongodb{})
+	},
+}
+
 var InitIptablesStatus = &gormigrate.Migration{
 	ID: "20251201-init-iptables-status",
 	Migrate: func(tx *gorm.DB) error {
@@ -768,10 +1096,18 @@ var InitIptablesStatus = &gormigrate.Migration{
 		if err := tx.Create(&model.Setting{Key: "IptablesForwardStatus", Value: constant.StatusDisable}).Error; err != nil {
 			return err
 		}
-		if err := tx.Create(&model.Setting{Key: "IptablesInputStatus", Value: constant.StatusDisable}).Error; err != nil {
-			return err
-		}
-		if err := tx.Create(&model.Setting{Key: "IptablesOutputStatus", Value: constant.StatusDisable}).Error; err != nil {
+		return nil
+	},
+}
+
+var InitFirewallPortWhiteList = &gormigrate.Migration{
+	ID: "20260601-init-firewall-port-whitelist",
+	Migrate: func(tx *gorm.DB) error {
+		var setting model.Setting
+		if err := tx.Where("key = ?", constant.FirewallPortWhiteList).First(&setting).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return tx.Create(&model.Setting{Key: constant.FirewallPortWhiteList, Value: constant.FirewallPortWhiteListValue}).Error
+			}
 			return err
 		}
 		return nil
@@ -795,7 +1131,7 @@ var AddisIPtoWebsiteSSL = &gormigrate.Migration{
 var InitPingStatus = &gormigrate.Migration{
 	ID: "20251201-init-ping-status",
 	Migrate: func(tx *gorm.DB) error {
-		status := firewall.LoadPingStatus()
+		status := ping.LoadStatus()
 		if err := tx.Create(&model.Setting{Key: "BanPing", Value: status}).Error; err != nil {
 			return err
 		}
@@ -834,114 +1170,6 @@ var AddAgentTables = &gormigrate.Migration{
 	},
 }
 
-var MigrateOpenclawAgents = &gormigrate.Migration{
-	ID: "20260207-migrate-openclaw-agents",
-	Migrate: func(tx *gorm.DB) error {
-		var installs []model.AppInstall
-		if err := tx.Preload("App").Find(&installs).Error; err != nil {
-			return err
-		}
-		for _, install := range installs {
-			appKey := install.App.Key
-			if appKey == "" || install.App.Resource == "" {
-				var app model.App
-				if err := tx.First(&app, install.AppId).Error; err == nil {
-					install.App = app
-					appKey = app.Key
-				}
-			}
-			if appKey != constant.AppOpenclaw {
-				continue
-			}
-			var count int64
-			if err := tx.Model(&model.Agent{}).Where("app_install_id = ?", install.ID).Count(&count).Error; err != nil {
-				return err
-			}
-			if count > 0 {
-				continue
-			}
-			envMap := map[string]interface{}{}
-			if strings.TrimSpace(install.Env) != "" {
-				_ = json.Unmarshal([]byte(install.Env), &envMap)
-			}
-			configPath := path.Join(install.GetPath(), "data", "conf", "openclaw.json")
-			cfgMeta := migrationutils.OpenclawMeta{}
-			if fileData, err := os.ReadFile(configPath); err == nil {
-				cfgMeta = migrationutils.ParseOpenclawMeta(fileData)
-			}
-			provider := strings.ToLower(migrationutils.GetEnvStr(envMap, "PROVIDER"))
-			if provider == "" {
-				provider = strings.ToLower(cfgMeta.Provider)
-			}
-			if provider == "" {
-				continue
-			}
-			provider = migrationutils.NormalizeOpenclawProvider(provider, cfgMeta.BaseURL)
-			modelName := migrationutils.GetEnvStr(envMap, "MODEL")
-			if modelName == "" {
-				modelName = cfgMeta.Model
-			}
-			baseURL := migrationutils.GetEnvStr(envMap, "BASE_URL")
-			if baseURL == "" {
-				baseURL = cfgMeta.BaseURL
-			}
-			apiKey := migrationutils.GetEnvStr(envMap, "API_KEY")
-			if apiKey == "" {
-				apiKey = cfgMeta.APIKey
-			}
-			token := migrationutils.GetEnvStr(envMap, "OPENCLAW_GATEWAY_TOKEN")
-			if token == "" {
-				token = cfgMeta.Token
-			}
-			if provider != "ollama" {
-				if baseURL == "" {
-					if defaultURL, ok := migrationutils.DefaultBaseURL(provider); ok {
-						baseURL = defaultURL
-					}
-				}
-			}
-			if provider == "ollama" && baseURL == "" {
-				continue
-			}
-			var account model.AgentAccount
-			err := tx.Where("provider = ? AND api_key = ? AND base_url = ?", provider, apiKey, baseURL).First(&account).Error
-			if err != nil {
-				if errors.Is(err, gorm.ErrRecordNotFound) {
-					account = model.AgentAccount{
-						Provider: provider,
-						Name:     install.Name,
-						APIKey:   apiKey,
-						BaseURL:  baseURL,
-						Verified: apiKey != "" || provider == "ollama",
-					}
-					if err := tx.Create(&account).Error; err != nil {
-						return err
-					}
-				} else {
-					return err
-				}
-			}
-			agent := model.Agent{
-				Name:         install.Name,
-				Provider:     provider,
-				Model:        modelName,
-				BaseURL:      baseURL,
-				APIKey:       apiKey,
-				Token:        token,
-				Status:       install.Status,
-				Message:      install.Message,
-				AppInstallID: install.ID,
-				AccountID:    account.ID,
-				ConfigPath:   configPath,
-			}
-			if err := tx.Create(&agent).Error; err != nil {
-				return err
-			}
-		}
-		return nil
-	},
-}
-
 var AddAgentCustomModelFields = &gormigrate.Migration{
 	ID: "20260224-add-agent-custom-model-fields",
 	Migrate: func(tx *gorm.DB) error {
@@ -972,5 +1200,711 @@ var AddAgentAccountRememberAPIKey = &gormigrate.Migration{
 			return err
 		}
 		return tx.Model(&model.AgentAccount{}).Where("remember_api_key IS NULL").Update("remember_api_key", true).Error
+	},
+}
+
+var AddEditionSetting = &gormigrate.Migration{
+	ID: "20260224-add-edition-setting",
+	Migrate: func(tx *gorm.DB) error {
+		var setting model.Setting
+		edition := common.LoadParamsWithoutPanic("PANEL_EDITION")
+		if err := tx.Where("key = ?", "Edition").First(&setting).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return tx.Create(&model.Setting{Key: "Edition", Value: edition}).Error
+			}
+			return err
+		}
+		if setting.Value == "" {
+			return tx.Model(&model.Setting{}).Where("key = ?", "Edition").Update("value", edition).Error
+		}
+		return nil
+	},
+}
+
+var AddAgentTypeForAgents = &gormigrate.Migration{
+	ID: "20260302-add-agent-type-for-agents",
+	Migrate: func(tx *gorm.DB) error {
+		if err := tx.AutoMigrate(&model.Agent{}); err != nil {
+			return err
+		}
+		if err := tx.Model(&model.Agent{}).Where("agent_type = '' OR agent_type IS NULL").Update("agent_type", constant.AppOpenclaw).Error; err != nil {
+			return err
+		}
+		return tx.Exec(
+			"UPDATE agents SET agent_type = ? WHERE app_install_id IN (SELECT ai.id FROM app_installs ai JOIN apps a ON ai.app_id = a.id WHERE a.key = ?)",
+			constant.AppCopaw,
+			constant.AppCopaw,
+		).Error
+	},
+}
+
+var NormalizeAgentAccountVerifiedStatus = &gormigrate.Migration{
+	ID: "20260303-normalize-agent-account-verified-status",
+	Migrate: func(tx *gorm.DB) error {
+		if err := tx.AutoMigrate(&model.AgentAccount{}); err != nil {
+			return err
+		}
+		return tx.Model(&model.AgentAccount{}).
+			Where("provider IN ?", []string{"custom", "ollama", "kimi-coding"}).
+			Update("verified", false).Error
+	},
+}
+
+var NormalizeOllamaAccountAPIType = &gormigrate.Migration{
+	ID: "20260304-normalize-ollama-account-api-type",
+	Migrate: func(tx *gorm.DB) error {
+		if err := tx.AutoMigrate(&model.AgentAccount{}); err != nil {
+			return err
+		}
+		return tx.Model(&model.AgentAccount{}).
+			Where("provider = ?", "ollama").
+			Update("api_type", "openai-responses").Error
+	},
+}
+
+var InitAgentAccountModelPool = &gormigrate.Migration{
+	ID: "20260319-init-agent-account-model-pool",
+	Migrate: func(tx *gorm.DB) error {
+		if err := tx.AutoMigrate(&model.AgentAccountModel{}); err != nil {
+			return err
+		}
+		return migrationutils.MigrateAgentAccountModelPool(tx)
+	},
+}
+
+var AddAgentAccountMasterID = &gormigrate.Migration{
+	ID: "20260401-add-agent-account-master-id",
+	Migrate: func(tx *gorm.DB) error {
+		return tx.AutoMigrate(&model.AgentAccount{})
+	},
+}
+
+var NormalizeAgentAccountModelIDs = &gormigrate.Migration{
+	ID: "20260716-normalize-agent-account-model-ids",
+	Migrate: func(tx *gorm.DB) error {
+		return migrationutils.NormalizeAgentAccountModelIDs(tx)
+	},
+}
+
+var AddAgentAccountVerifyModel = &gormigrate.Migration{
+	ID: "20260716-add-agent-account-verify-model",
+	Migrate: func(tx *gorm.DB) error {
+		if err := tx.AutoMigrate(&model.AgentAccount{}); err != nil {
+			return err
+		}
+		var accounts []model.AgentAccount
+		if err := tx.Where("verify_model = '' OR verify_model IS NULL").Find(&accounts).Error; err != nil {
+			return err
+		}
+		for _, account := range accounts {
+			var accountModel model.AgentAccountModel
+			err := tx.Where("account_id = ?", account.ID).Order("sort_order ASC, id ASC").First(&accountModel).Error
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			if err := tx.Model(&model.AgentAccount{}).Where("id = ?", account.ID).Update("verify_model", accountModel.Model).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	},
+}
+
+var AddAgentAccountAuthMode = &gormigrate.Migration{
+	ID: "20260716-add-agent-account-auth-mode",
+	Migrate: func(tx *gorm.DB) error {
+		if err := tx.AutoMigrate(&model.AgentAccount{}); err != nil {
+			return err
+		}
+		if err := tx.Model(&model.AgentAccount{}).
+			Where("api_type = ? AND (auth_mode IS NULL OR auth_mode = '') AND provider IN ?", "anthropic-messages", []string{"bailian-coding-plan", "ark-coding-plan", "xiaomi"}).
+			Update("auth_mode", providercatalog.AuthModeBearer).Error; err != nil {
+			return err
+		}
+		return tx.Model(&model.AgentAccount{}).
+			Where("api_type = ? AND (auth_mode IS NULL OR auth_mode = '')", "anthropic-messages").
+			Update("auth_mode", providercatalog.AuthModeXAPIKey).Error
+	},
+}
+
+var AddHostTable = &gormigrate.Migration{
+	ID: "20260318-add-host-table",
+	Migrate: func(tx *gorm.DB) error {
+		if err := tx.AutoMigrate(&model.Host{}); err != nil {
+			return err
+		}
+		if global.CoreDB == nil || !global.CoreDB.Migrator().HasTable("hosts") {
+			if err := tx.Create(&model.Group{Name: "Default", Type: "host", IsDefault: true}).Error; err != nil {
+				return err
+			}
+			return nil
+		}
+
+		var encryptSetting model.Setting
+		if err := global.CoreDB.Where("key = ?", "EncryptKey").First(&encryptSetting).Error; err != nil {
+			global.LOG.Errorf("failed to get encrypt key from core db, err: %v", err)
+			return nil
+		}
+		coreEncryptKey := strings.TrimSpace(encryptSetting.Value)
+		if coreEncryptKey == "" {
+			global.LOG.Error("encrypt key from core db is empty")
+			return nil
+		}
+
+		groupIDMap := make(map[uint]uint)
+		defaultGroupID := uint(0)
+		var coreGroups []model.Group
+		if err := global.CoreDB.Where("type = ?", "host").Order("id asc").Find(&coreGroups).Error; err != nil {
+			return err
+		}
+		for _, coreGroup := range coreGroups {
+			agentGroup := model.Group{
+				Name:      coreGroup.Name,
+				Type:      "host",
+				IsDefault: coreGroup.IsDefault,
+			}
+			if agentGroup.IsDefault {
+				defaultGroupID = coreGroup.ID
+			}
+			if err := tx.Create(&agentGroup).Error; err != nil {
+				global.LOG.Errorf("failed to create group, group id: %v, err: %v", coreGroup.ID, err)
+				continue
+			}
+			groupIDMap[coreGroup.ID] = agentGroup.ID
+		}
+
+		var coreHosts []model.Host
+		if err := global.CoreDB.Order("id asc").Find(&coreHosts).Error; err != nil {
+			return err
+		}
+		for _, coreHost := range coreHosts {
+			password, err := encrypt.StringDecryptWithKey(coreHost.Password, coreEncryptKey)
+			if err != nil {
+				global.LOG.Errorf("failed to decrypt host password, host id: %v, err: %v", coreHost.ID, err)
+				continue
+			}
+			privateKey, err := encrypt.StringDecryptWithKey(coreHost.PrivateKey, coreEncryptKey)
+			if err != nil {
+				global.LOG.Errorf("failed to decrypt host private key, host id: %v, err: %v", coreHost.ID, err)
+				continue
+			}
+			passPhrase, err := encrypt.StringDecryptWithKey(coreHost.PassPhrase, coreEncryptKey)
+			if err != nil {
+				global.LOG.Errorf("failed to decrypt host pass phrase, host id: %v, err: %v", coreHost.ID, err)
+				continue
+			}
+
+			encryptedPassword, err := encrypt.StringEncrypt(password)
+			if err != nil {
+				global.LOG.Errorf("failed to encrypt host password, host id: %v, err: %v", coreHost.ID, err)
+				continue
+			}
+			encryptedPrivateKey, err := encrypt.StringEncrypt(privateKey)
+			if err != nil {
+				global.LOG.Errorf("failed to encrypt host private key, host id: %v, err: %v", coreHost.ID, err)
+				continue
+			}
+			encryptedPassPhrase, err := encrypt.StringEncrypt(passPhrase)
+			if err != nil {
+				global.LOG.Errorf("failed to encrypt host pass phrase, host id: %v, err: %v", coreHost.ID, err)
+				continue
+			}
+
+			groupID := defaultGroupID
+			if mappedGroupID, ok := groupIDMap[coreHost.GroupID]; ok && mappedGroupID != 0 {
+				groupID = mappedGroupID
+			}
+			host := model.Host{
+				GroupID:          groupID,
+				Name:             coreHost.Name,
+				Addr:             coreHost.Addr,
+				Port:             coreHost.Port,
+				User:             coreHost.User,
+				AuthMode:         coreHost.AuthMode,
+				Password:         encryptedPassword,
+				PrivateKey:       encryptedPrivateKey,
+				PassPhrase:       encryptedPassPhrase,
+				RememberPassword: coreHost.RememberPassword,
+				Description:      coreHost.Description,
+			}
+			if err := tx.Create(&host).Error; err != nil {
+				global.LOG.Errorf("failed to create host, host id: %v, err: %v", coreHost.ID, err)
+				continue
+			}
+		}
+		return nil
+	},
+}
+
+var AddAITerminalSettings = &gormigrate.Migration{
+	ID: "20260318-add-ai-terminal-settings",
+	Migrate: func(tx *gorm.DB) error {
+		if err := tx.Create(&model.Setting{Key: "AIStatus", Value: constant.StatusDisable}).Error; err != nil {
+			return err
+		}
+		if err := tx.Create(&model.Setting{Key: "AIAccountID", Value: ""}).Error; err != nil {
+			return err
+		}
+		if err := tx.Create(&model.Setting{Key: "AIPrefix", Value: constant.DefaultTerminalAIPrefix}).Error; err != nil {
+			return err
+		}
+		return tx.Create(&model.Setting{
+			Key:   "AIRiskCommands",
+			Value: constant.DefaultTerminalAIRiskCommands,
+		}).Error
+	},
+}
+
+var UpdateAgentQuickJumpTitle = &gormigrate.Migration{
+	ID: "20260324-update-agent-quick-jump-title",
+	Migrate: func(tx *gorm.DB) error {
+		return tx.Model(&model.QuickJump{}).
+			Where("title = ?", "aiTools.agents.agents").
+			Update("title", "aiTools.agents.agent").Error
+	},
+}
+
+var FixOpenclaw20260323HTTPPort = &gormigrate.Migration{
+	ID: "20260325-fix-openclaw-20260323-http-port",
+	Migrate: func(tx *gorm.DB) error {
+		return tx.Exec(
+			`UPDATE app_installs
+SET http_port = https_port,
+    https_port = 0
+WHERE version = ?
+  AND https_port > 0
+  AND app_id IN (SELECT id FROM apps WHERE key = ?)`,
+			"2026.3.24",
+			constant.AppOpenclaw,
+		).Error
+	},
+}
+
+var AddAgentRemarkColumn = &gormigrate.Migration{
+	ID: "20260330-add-agent-remark-column",
+	Migrate: func(tx *gorm.DB) error {
+		return tx.AutoMigrate(&model.Agent{})
+	},
+}
+
+var AddAgentWebsiteBinding = &gormigrate.Migration{
+	ID: "20260403-add-agent-website-binding",
+	Migrate: func(tx *gorm.DB) error {
+		if err := tx.AutoMigrate(&model.Agent{}); err != nil {
+			return err
+		}
+
+		var agents []model.Agent
+		if err := tx.Find(&agents).Error; err != nil {
+			return err
+		}
+		if len(agents) == 0 {
+			return nil
+		}
+
+		var websites []model.Website
+		if err := tx.Where("type = ? AND app_install_id > 0", constant.Deployment).Find(&websites).Error; err != nil {
+			return err
+		}
+		websiteMap := service.UniqueDeploymentWebsiteMapByAppInstall(websites)
+		for _, agent := range agents {
+			if agent.WebsiteID != 0 || agent.AppInstallID == 0 {
+				continue
+			}
+			website, ok := websiteMap[agent.AppInstallID]
+			if !ok {
+				continue
+			}
+			if err := tx.Model(&model.Agent{}).Where("id = ?", agent.ID).Update("website_id", website.ID).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	},
+}
+
+var AddFileManageAISettings = &gormigrate.Migration{
+	ID: "20260330-add-file-manage-ai-settings",
+	Migrate: func(tx *gorm.DB) error {
+		rows := []model.Setting{
+			{Key: "FileAIStatus", Value: constant.StatusDisable},
+			{Key: "FileAIAccountID", Value: ""},
+		}
+		for i := range rows {
+			var exist model.Setting
+			if err := tx.Where("`key` = ?", rows[i].Key).First(&exist).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					if err := tx.Create(&rows[i]).Error; err != nil {
+						return err
+					}
+				} else {
+					return err
+				}
+			}
+		}
+		return nil
+	},
+}
+
+var AddFileShareTable = &gormigrate.Migration{
+	ID: "20260410-add-file-share-table",
+	Migrate: func(tx *gorm.DB) error {
+		return tx.AutoMigrate(&model.FileShare{})
+	},
+}
+
+var AddFileHistoryTable = &gormigrate.Migration{
+	ID: "20260414-add-file-history-table",
+	Migrate: func(tx *gorm.DB) error {
+		if err := tx.AutoMigrate(&model.FileHistory{}); err != nil {
+			return err
+		}
+		defaultRows := []model.Setting{
+			{Key: "FileHistoryStatus", Value: constant.StatusEnable},
+			{Key: "FileHistoryMaxPerPath", Value: "20"},
+			{Key: "FileHistoryDiskQuotaMB", Value: "1024"},
+		}
+		for i := range defaultRows {
+			var exist model.Setting
+			if err := tx.Where("`key` = ?", defaultRows[i].Key).First(&exist).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					if err := tx.Create(&defaultRows[i]).Error; err != nil {
+						return err
+					}
+				} else {
+					return err
+				}
+			}
+		}
+		return nil
+	},
+}
+
+func loadDatabaseUserTypesForMigration(tx *gorm.DB, mysqlName string) []string {
+	var database model.Database
+	if err := tx.Where("name = ?", mysqlName).First(&database).Error; err == nil && len(database.Type) != 0 {
+		return []string{database.Type}
+	}
+
+	var appKey string
+	_ = tx.Table("app_installs").
+		Select("apps.`key`").
+		Joins("JOIN apps ON apps.id = app_installs.app_id").
+		Where("app_installs.name = ?", mysqlName).
+		Scan(&appKey).Error
+	switch appKey {
+	case constant.AppMariaDB, constant.AppMysqlCluster:
+		return []string{appKey}
+	case constant.AppMysql:
+		return []string{constant.AppMysql}
+	default:
+		return []string{constant.AppMysql, constant.AppMariaDB}
+	}
+}
+
+func normalizeDatabaseUserHostsForMigration(permission string) []string {
+	hostSet := make(map[string]struct{})
+	for _, host := range strings.Split(permission, ",") {
+		host = strings.TrimSpace(host)
+		if len(host) == 0 {
+			continue
+		}
+		hostSet[host] = struct{}{}
+	}
+	if len(hostSet) == 0 {
+		return []string{"%"}
+	}
+	hosts := make([]string, 0, len(hostSet))
+	for host := range hostSet {
+		hosts = append(hosts, host)
+	}
+	return hosts
+}
+
+func isDatabaseSystemUserForMigration(username string) bool {
+	switch strings.ToLower(username) {
+	case "root",
+		"mysql.session", "mysql.sys", "mysql.infoschema", "mysqlxsys",
+		"mariadb.sys", "mariadb-sys",
+		"debian-sys-maint":
+		return true
+	default:
+		return false
+	}
+}
+
+var AddDatabaseUserTable = &gormigrate.Migration{
+	ID: "20260703-add-database-user-table",
+	Migrate: func(tx *gorm.DB) error {
+		if err := tx.AutoMigrate(&model.DatabaseUser{}, &model.DatabaseUserGrant{}); err != nil {
+			return err
+		}
+		var mysqls []model.DatabaseMysql
+		if err := tx.Find(&mysqls).Error; err != nil {
+			return err
+		}
+		for _, item := range mysqls {
+			if len(item.Username) == 0 || isDatabaseSystemUserForMigration(item.Username) {
+				continue
+			}
+			for _, dbType := range loadDatabaseUserTypesForMigration(tx, item.MysqlName) {
+				if len(dbType) == 0 {
+					continue
+				}
+				for _, host := range normalizeDatabaseUserHostsForMigration(item.Permission) {
+					user := model.DatabaseUser{
+						Type:     dbType,
+						Database: item.MysqlName,
+						Username: item.Username,
+						Host:     host,
+						Password: item.Password,
+					}
+					if err := tx.Where("`type` = ? AND database = ? AND username = ? AND host = ?", dbType, item.MysqlName, item.Username, host).FirstOrCreate(&user).Error; err != nil {
+						return err
+					}
+					grant := model.DatabaseUserGrant{
+						Type:     dbType,
+						Database: item.MysqlName,
+						DBName:   item.Name,
+						Username: item.Username,
+						Host:     host,
+					}
+					if err := tx.Where("`type` = ? AND database = ? AND db_name = ? AND username = ? AND host = ?", dbType, item.MysqlName, item.Name, item.Username, host).FirstOrCreate(&grant).Error; err != nil {
+						return err
+					}
+				}
+			}
+		}
+		return nil
+	},
+}
+
+// MigrateLegoV5 normalizes data persisted under lego v4 so that lego v5 can read it.
+//
+// Two things changed in lego v5 that affect existing rows:
+//
+//  1. certcrypto.KeyType string values were renamed:
+//     "P256"->"EC256", "P384"->"EC384",
+//     "2048"->"RSA2048", "3072"->"RSA3072", "4096"->"RSA4096", "8192"->"RSA8192".
+//     We update every key_type column we own to the new form.
+//
+//  2. DnsPod provider was removed from upstream lego v5; the frontend already
+//     marked it deprecated. Existing DnsPod website_dns_accounts rows are kept
+//     so the user can decide what to do, but any website_ssls still pointing
+//     at a DnsPod account would fail to renew. We log a warning row count and
+//     leave deletion to the operator.
+var MigrateLegoV5 = &gormigrate.Migration{
+	ID: "20260523-migrate-lego-v5",
+	Migrate: func(tx *gorm.DB) error {
+		keyTypeMap := map[string]string{
+			"P256": "EC256",
+			"P384": "EC384",
+			"2048": "RSA2048",
+			"3072": "RSA3072",
+			"4096": "RSA4096",
+			"8192": "RSA8192",
+		}
+		for old, neu := range keyTypeMap {
+			if err := tx.Model(&model.WebsiteAcmeAccount{}).
+				Where("key_type = ?", old).
+				Update("key_type", neu).Error; err != nil {
+				return fmt.Errorf("migrate WebsiteAcmeAccount.key_type %s->%s: %w", old, neu, err)
+			}
+			if err := tx.Model(&model.WebsiteSSL{}).
+				Where("key_type = ?", old).
+				Update("key_type", neu).Error; err != nil {
+				return fmt.Errorf("migrate WebsiteSSL.key_type %s->%s: %w", old, neu, err)
+			}
+			if err := tx.Model(&model.WebsiteCA{}).
+				Where("key_type = ?", old).
+				Update("key_type", neu).Error; err != nil {
+				return fmt.Errorf("migrate WebsiteCA.key_type %s->%s: %w", old, neu, err)
+			}
+		}
+
+		var dnsPodCount int64
+		_ = tx.Model(&model.WebsiteDnsAccount{}).Where("type = ?", "DnsPod").Count(&dnsPodCount).Error
+		if dnsPodCount > 0 {
+			global.LOG.Warnf("lego v5 removed the DnsPod provider; %d existing DnsPod DNS account(s) will not be usable for renewal -- please switch them to TencentCloud", dnsPodCount)
+		}
+
+		return nil
+	},
+}
+
+var AddMcpServerGatewayArgs = &gormigrate.Migration{
+	ID: "20260714-add-mcp-server-gateway-args",
+	Migrate: func(tx *gorm.DB) error {
+		return tx.AutoMigrate(&model.McpServer{})
+	},
+}
+
+var AddBackupRecordArgs = &gormigrate.Migration{
+	ID: "20260729-add-backup-record-args",
+	Migrate: func(tx *gorm.DB) error {
+		return tx.AutoMigrate(&model.BackupRecord{})
+	},
+}
+
+var AddFtpIdentity = &gormigrate.Migration{
+	ID: "20260729-add-ftp-identity",
+	Migrate: func(tx *gorm.DB) error {
+		if err := tx.AutoMigrate(&model.Ftp{}); err != nil {
+			return err
+		}
+		return tx.Model(&model.Ftp{}).
+			Where("1 = 1").
+			Updates(map[string]interface{}{
+				"uid": constant.WebsiteUID,
+				"gid": constant.WebsiteGID,
+			}).Error
+	},
+}
+
+var AddWebsiteTemplateTable = &gormigrate.Migration{
+	ID: "20260728-add-website-template-table",
+	Migrate: func(tx *gorm.DB) error {
+		return tx.AutoMigrate(
+			&model.WebsiteTemplate{},
+			&model.WebsiteTemplateOutput{},
+		)
+	},
+}
+
+var AddComposePinned = &gormigrate.Migration{
+	ID: "20260729-add-compose-pinned",
+	Migrate: func(tx *gorm.DB) error {
+		return tx.AutoMigrate(&model.Compose{})
+	},
+}
+
+var AddFirewallRuleTable = &gormigrate.Migration{
+	ID: "20260819-add-firewall-v2-tables",
+	Migrate: func(tx *gorm.DB) error {
+		return tx.AutoMigrate(&model.FirewallRule{}, &model.DockerPortGuardPolicy{}, &model.ForwardingRule{})
+	},
+}
+
+var InitDockerPortGuardStatus = &gormigrate.Migration{
+	ID: "20260818-init-docker-port-guard-status",
+	Migrate: func(tx *gorm.DB) error {
+		return tx.Where("key = ?", "DockerPortGuardStatus").FirstOrCreate(&model.Setting{
+			Key:   "DockerPortGuardStatus",
+			Value: constant.StatusDisable,
+		}).Error
+	},
+}
+
+var NormalizeFirewallBackendSelections = &gormigrate.Migration{
+	ID: "20260826-normalize-firewall-backend-selections",
+	Migrate: func(tx *gorm.DB) error {
+		return tx.Transaction(func(tx *gorm.DB) error {
+			result := tx.Model(&model.Setting{}).
+				Where(
+					"key = ? AND value NOT IN ?",
+					constant.FirewallDockerBackendKey,
+					[]string{constant.FirewallProviderIptables, constant.FirewallProviderNftables},
+				).
+				Update("value", constant.FirewallProviderIptables)
+			if result.Error != nil {
+				return result.Error
+			}
+			if err := tx.Where("key = ?", constant.FirewallDockerBackendKey).FirstOrCreate(&model.Setting{
+				Key: constant.FirewallDockerBackendKey, Value: constant.FirewallProviderIptables,
+			}).Error; err != nil {
+				return err
+			}
+			result = tx.Model(&model.Setting{}).
+				Where(
+					"key = ? AND value NOT IN ?",
+					constant.FirewallForwardingBackendKey,
+					[]string{constant.FirewallProviderIptables, constant.FirewallProviderNftables},
+				).
+				Update("value", constant.FirewallProviderIptables)
+			if result.Error != nil {
+				return result.Error
+			}
+			if err := tx.Where("key = ?", constant.FirewallForwardingBackendKey).FirstOrCreate(&model.Setting{
+				Key: constant.FirewallForwardingBackendKey, Value: constant.FirewallProviderIptables,
+			}).Error; err != nil {
+				return err
+			}
+			return nil
+		})
+	},
+}
+
+var SimplifyFirewallRulePolicy = &gormigrate.Migration{
+	ID: "20260826-simplify-firewall-rule-policy",
+	Migrate: func(tx *gorm.DB) error {
+		if !tx.Migrator().HasTable(&model.FirewallRule{}) {
+			return nil
+		}
+		return tx.Transaction(func(tx *gorm.DB) error {
+			if !tx.Migrator().HasColumn("firewall_rules", "compatibility_error") {
+				if err := tx.Exec("ALTER TABLE firewall_rules ADD COLUMN compatibility_error text NOT NULL DEFAULT ''").Error; err != nil {
+					return err
+				}
+			}
+			if !tx.Migrator().HasColumn("firewall_rules", "sequence") {
+				if err := tx.Exec("ALTER TABLE firewall_rules ADD COLUMN sequence integer").Error; err != nil {
+					return err
+				}
+			}
+			if tx.Migrator().HasColumn("firewall_rules", "native_kind") {
+				if err := tx.Exec(`UPDATE firewall_rules
+					SET compatibility_error = 'legacy native firewall rule requires manual recreation: ' || native_kind
+					WHERE native_kind IN ('zone_service', 'ufw_application', 'opaque')`).Error; err != nil {
+					return err
+				}
+			}
+			if tx.Migrator().HasColumn("firewall_rules", "provider") {
+				if err := tx.Exec(`UPDATE firewall_rules
+					SET priority = NULL, sequence = NULL`).Error; err != nil {
+					return err
+				}
+			}
+			if err := tx.Exec("CREATE INDEX IF NOT EXISTS idx_firewall_rules_sequence ON firewall_rules(sequence)").Error; err != nil {
+				return err
+			}
+			for _, index := range []string{
+				"idx_firewall_rules_scope_key",
+				"uk_firewall_rules_scope_rule",
+				"uk_firewall_rules_scope_match",
+			} {
+				if err := tx.Exec("DROP INDEX IF EXISTS " + index).Error; err != nil {
+					return err
+				}
+			}
+			for _, column := range []string{
+				"provider", "scope_key", "location", "native_kind", "order_index", "order_bucket", "rule_key", "match_key",
+			} {
+				if tx.Migrator().HasColumn("firewall_rules", column) {
+					_ = tx.Exec("ALTER TABLE firewall_rules DROP COLUMN " + column).Error
+				}
+			}
+			return nil
+		})
+	},
+}
+
+var AddDockerPortGuardReadOnly = &gormigrate.Migration{
+	ID: "20260902-add-docker-port-guard-read-only",
+	Migrate: func(tx *gorm.DB) error {
+		if !tx.Migrator().HasTable(&model.DockerPortGuardPolicy{}) {
+			return nil
+		}
+		if err := tx.AutoMigrate(&model.DockerPortGuardPolicy{}); err != nil {
+			return err
+		}
+		if tx.Migrator().HasIndex(&model.DockerPortGuardPolicy{}, "idx_docker_port_guard_endpoint") {
+			if err := tx.Migrator().DropIndex(&model.DockerPortGuardPolicy{}, "idx_docker_port_guard_endpoint"); err != nil {
+				return err
+			}
+		}
+		return tx.Migrator().CreateIndex(&model.DockerPortGuardPolicy{}, "idx_docker_port_guard_endpoint")
 	},
 }

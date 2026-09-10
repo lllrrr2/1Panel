@@ -6,7 +6,7 @@
             </template>
             <template #leftToolBar>
                 <el-button type="primary" @click="onOpenDialog('create')">
-                    {{ $t('commons.button.create') }}{{ $t('terminal.quickCommand') }}
+                    {{ $t('commons.button.create') }}
                 </el-button>
                 <el-button type="primary" plain @click="onOpenGroupDialog()">
                     {{ $t('commons.table.group') }}
@@ -109,8 +109,7 @@ import { reactive, ref } from 'vue';
 import i18n from '@/lang';
 import { MsgSuccess } from '@/utils/message';
 import { getGroupList } from '@/api/modules/group';
-import { downloadFile } from '@/utils/util';
-
+import { downloadFile } from '@/utils/file';
 const loading = ref();
 const data = ref();
 const selects = ref<any>([]);
@@ -208,14 +207,12 @@ const batchDelete = async (row: Command.CommandInfo | null) => {
 const buttons = [
     {
         label: i18n.global.t('commons.button.edit'),
-        icon: 'Edit',
         click: (row: any) => {
             onOpenDialog('edit', row);
         },
     },
     {
         label: i18n.global.t('commons.button.delete'),
-        icon: 'Delete',
         click: batchDelete,
     },
 ];

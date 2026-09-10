@@ -18,7 +18,7 @@
         <template #footer>
             <span class="dialog-footer">
                 <el-button @click="drawerVisible = false">{{ $t('commons.button.cancel') }}</el-button>
-                <el-button :disabled="loading" type="primary" @click="onSave(formRef)">
+                <el-button v-permission v-node-admin :disabled="loading" type="primary" @click="onSave(formRef)">
                     {{ $t('commons.button.confirm') }}
                 </el-button>
             </span>
@@ -32,8 +32,7 @@ import { MsgSuccess } from '@/utils/message';
 import { FormInstance } from 'element-plus';
 import { Rules } from '@/global/form-rules';
 import { updateFail2ban } from '@/api/modules/toolbox';
-import { splitTime, transTimeUnit } from '@/utils/util';
-
+import { splitTime, transTimeUnit } from '@/utils/validate';
 const emit = defineEmits<{ (e: 'search'): void }>();
 
 interface DialogProps {

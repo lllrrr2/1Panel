@@ -24,6 +24,21 @@ import (
 )
 
 func (w WebsiteService) OperateProxy(req request.WebsiteProxyConfig) (err error) {
+	switch req.Operate {
+	case "delete":
+		return w.DeleteProxy(request.WebsiteProxyDel{
+			ID:   req.ID,
+			Name: req.Name,
+		})
+	case "disable":
+		fallthrough
+	case "enable":
+		return w.UpdateProxyStatus(request.WebsiteProxyStatusUpdate{
+			ID:     req.ID,
+			Name:   req.Name,
+			Status: req.Operate,
+		})
+	}
 	var (
 		website    model.Website
 		par        *parser.Parser
@@ -81,16 +96,8 @@ func (w WebsiteService) OperateProxy(req request.WebsiteProxyConfig) (err error)
 		if err != nil {
 			return
 		}
-	case "delete":
-		_ = fileOp.DeleteFile(includePath)
-		_ = fileOp.DeleteFile(backPath)
-		return updateNginxConfig(constant.NginxScopeServer, nil, &website)
-	case "disable":
-		_ = fileOp.Rename(includePath, backPath)
-		return updateNginxConfig(constant.NginxScopeServer, nil, &website)
-	case "enable":
-		_ = fileOp.Rename(backPath, includePath)
-		return updateNginxConfig(constant.NginxScopeServer, nil, &website)
+	default:
+		return errors.New("unknown operate")
 	}
 
 	config.FilePath = includePath
@@ -107,16 +114,15 @@ func (w WebsiteService) OperateProxy(req request.WebsiteProxyConfig) (err error)
 		err = errors.New("invalid proxy config, no location found")
 		return
 	}
-	safePass, err := nginx.NginxSafeString(req.ProxyPass, nginx.ModeURL)
-	if err != nil {
-		return err
+	applyLocationProxyPass(location, req.ProxyPass, &req.SNI, req.ProxySSLName)
+	if isHTTPSProxyPass(req.ProxyPass) && req.SSLVerify {
+		location.UpdateDirective("proxy_ssl_verify", []string{"on"})
+		location.UpdateDirective("proxy_ssl_trusted_certificate", []string{"/etc/ssl/certs/ca-certificates.crt"})
+	} else {
+		location.RemoveDirective("proxy_ssl_verify", []string{})
+		location.RemoveDirective("proxy_ssl_trusted_certificate", []string{})
 	}
-	safeHeader, err := nginx.NginxSafeString(req.ProxyHost, nginx.ModeHost)
-	if err != nil {
-		return err
-	}
-	location.UpdateDirective("proxy_pass", []string{safePass})
-	location.UpdateDirective("proxy_set_header", []string{"Host", safeHeader})
+	location.UpdateDirective("proxy_set_header", []string{"Host", req.ProxyHost})
 	location.ChangePath(req.Modifier, req.Match)
 	// Server Cache Settings
 	if req.Cache {
@@ -144,37 +150,17 @@ func (w WebsiteService) OperateProxy(req request.WebsiteProxyConfig) (err error)
 	} else {
 		location.RemoveSubFilter()
 	}
-	// SSL Settings
-	if req.SNI {
-		location.UpdateDirective("proxy_ssl_server_name", []string{"on"})
-		if req.ProxySSLName != "" {
-			location.UpdateDirective("proxy_ssl_name", []string{req.ProxySSLName})
-		}
-	} else {
-		location.UpdateDirective("proxy_ssl_server_name", []string{"off"})
-	}
+	// Explicit SNI configuration still takes precedence over the automatic HTTPS upstream default.
 	// CORS Settings
 	if req.Cors {
-		safeAllowOrigins, err := nginx.NginxSafeString(req.AllowOrigins, nginx.ModeGeneric)
-		if err != nil {
-			return err
-		}
-		location.UpdateDirective("add_header", []string{"Access-Control-Allow-Origin", safeAllowOrigins, "always"})
+		location.UpdateDirective("add_header", []string{"Access-Control-Allow-Origin", req.AllowOrigins, "always"})
 		if req.AllowMethods != "" {
-			safeAllowMethods, err := nginx.NginxSafeString(req.AllowMethods, nginx.ModeAllowMethods)
-			if err != nil {
-				return err
-			}
-			location.UpdateDirective("add_header", []string{"Access-Control-Allow-Methods", safeAllowMethods, "always"})
+			location.UpdateDirective("add_header", []string{"Access-Control-Allow-Methods", req.AllowMethods, "always"})
 		} else {
 			location.RemoveDirective("add_header", []string{"Access-Control-Allow-Methods"})
 		}
 		if req.AllowHeaders != "" {
-			safeAllowHeaders, err := nginx.NginxSafeString(req.AllowHeaders, nginx.ModeGeneric)
-			if err != nil {
-				return err
-			}
-			location.UpdateDirective("add_header", []string{"Access-Control-Allow-Headers", safeAllowHeaders, "always"})
+			location.UpdateDirective("add_header", []string{"Access-Control-Allow-Headers", req.AllowHeaders, "always"})
 		} else {
 			location.RemoveDirective("add_header", []string{"Access-Control-Allow-Headers"})
 		}
@@ -350,6 +336,9 @@ func (w WebsiteService) GetProxies(id uint) (res []request.WebsiteProxyConfig, e
 			if directive.GetName() == "proxy_ssl_name" && len(directive.GetParameters()) > 0 {
 				proxyConfig.ProxySSLName = directive.GetParameters()[0]
 			}
+			if directive.GetName() == "proxy_ssl_verify" {
+				proxyConfig.SSLVerify = len(directive.GetParameters()) > 0 && directive.GetParameters()[0] == "on"
+			}
 		}
 		proxyConfig.Cors = location.Cors
 		proxyConfig.AllowCredentials = location.AllowCredentials
@@ -411,24 +400,47 @@ func (w WebsiteService) ClearProxyCache(req request.NginxCommonReq) error {
 }
 
 func (w WebsiteService) DeleteProxy(req request.WebsiteProxyDel) (err error) {
-	fileOp := files.NewFileOp()
 	website, err := websiteRepo.GetFirst(repo.WithByID(req.ID))
 	if err != nil {
 		return
 	}
-	nginxInstall, err := getAppInstallByKey(constant.AppOpenresty)
-	if err != nil {
-		return
-	}
-	includeDir := path.Join(nginxInstall.GetPath(), "www", "sites", website.Alias, "proxy")
+	includeDir := GetSitePath(website, SiteProxyDir)
+	fileOp := files.NewFileOp()
 	if !fileOp.Stat(includeDir) {
-		_ = fileOp.CreateDir(includeDir, 0755)
+		return
 	}
 	fileName := fmt.Sprintf("%s.conf", req.Name)
 	includePath := path.Join(includeDir, fileName)
 	backName := fmt.Sprintf("%s.bak", req.Name)
 	backPath := path.Join(includeDir, backName)
+
 	_ = fileOp.DeleteFile(includePath)
 	_ = fileOp.DeleteFile(backPath)
 	return updateNginxConfig(constant.NginxScopeServer, nil, &website)
+}
+
+func (w WebsiteService) UpdateProxyStatus(req request.WebsiteProxyStatusUpdate) (err error) {
+	website, err := websiteRepo.GetFirst(repo.WithByID(req.ID))
+	if err != nil {
+		return
+	}
+	includeDir := GetSitePath(website, SiteProxyDir)
+	fileOp := files.NewFileOp()
+	if !fileOp.Stat(includeDir) {
+		return
+	}
+	fileName := fmt.Sprintf("%s.conf", req.Name)
+	includePath := path.Join(includeDir, fileName)
+	backName := fmt.Sprintf("%s.bak", req.Name)
+	backPath := path.Join(includeDir, backName)
+
+	switch req.Status {
+	case "disable":
+		_ = fileOp.Rename(includePath, backPath)
+		return updateNginxConfig(constant.NginxScopeServer, nil, &website)
+	case "enable":
+		_ = fileOp.Rename(backPath, includePath)
+		return updateNginxConfig(constant.NginxScopeServer, nil, &website)
+	}
+	return errors.New("unknown status")
 }

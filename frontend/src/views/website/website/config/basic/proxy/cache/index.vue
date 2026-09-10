@@ -28,7 +28,7 @@
                 </el-input>
                 <span class="input-help">{{ $t('website.cacheLimitHelper') }}</span>
             </el-form-item>
-            <el-form-item :label="$t('website.shareCahe')" prop="shareCache">
+            <el-form-item :label="$t('website.shareCache')" prop="shareCache">
                 <el-input v-model.number="req.shareCache" class="p-w-200">
                     <template #append>
                         <el-select v-model="req.shareCacheUnit" class="p-w-100">
@@ -41,7 +41,7 @@
                         </el-select>
                     </template>
                 </el-input>
-                <span class="input-help">{{ $t('website.shareCaheHelper') }}</span>
+                <span class="input-help">{{ $t('website.shareCacheHelper') }}</span>
             </el-form-item>
             <el-form-item :label="$t('website.cacheExpire')" prop="cacheExpire">
                 <el-input v-model.number="req.cacheExpire" class="p-w-200">
@@ -61,7 +61,7 @@
         </el-form>
         <template #footer>
             <el-button @click="handleClose" :disabled="loading">{{ $t('commons.button.cancel') }}</el-button>
-            <el-button type="primary" @click="submit(proxyForm)" :disabled="loading">
+            <el-button v-permission type="primary" @click="submit(proxyForm)" :disabled="loading">
                 {{ $t('commons.button.confirm') }}
             </el-button>
         </template>

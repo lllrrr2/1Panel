@@ -21,31 +21,104 @@ import (
 	"github.com/spf13/afero"
 )
 
+var binaryPreviewMimeTypes = map[string]struct{}{
+	"application/pdf":               {},
+	"application/zip":               {},
+	"application/gzip":              {},
+	"application/x-gzip":            {},
+	"application/x-7z-compressed":   {},
+	"application/x-rar-compressed":  {},
+	"application/x-bzip2":           {},
+	"application/x-xz":              {},
+	"application/x-tar":             {},
+	"application/java-archive":      {},
+	"application/msword":            {},
+	"application/vnd.ms-excel":      {},
+	"application/vnd.ms-powerpoint": {},
+	"application/vnd.openxmlformats-officedocument.wordprocessingml.document":   {},
+	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":         {},
+	"application/vnd.openxmlformats-officedocument.presentationml.presentation": {},
+}
+
+var binaryPreviewMimePrefixes = []string{
+	"image/",
+	"audio/",
+	"video/",
+	"application/vnd.ms-",
+	"application/vnd.openxmlformats-officedocument.",
+	"application/vnd.oasis.opendocument.",
+}
+
+var binaryPreviewExtensions = map[string]struct{}{
+	".pdf":  {},
+	".zip":  {},
+	".gz":   {},
+	".bz2":  {},
+	".xz":   {},
+	".tar":  {},
+	".tgz":  {},
+	".rar":  {},
+	".7z":   {},
+	".war":  {},
+	".doc":  {},
+	".docx": {},
+	".xls":  {},
+	".xlsx": {},
+	".ppt":  {},
+	".pptx": {},
+	".jpg":  {},
+	".jpeg": {},
+	".png":  {},
+	".bmp":  {},
+	".gif":  {},
+	".tiff": {},
+	".ico":  {},
+	".webp": {},
+	".svg":  {},
+	".mp3":  {},
+	".wav":  {},
+	".wma":  {},
+	".ape":  {},
+	".acc":  {},
+	".ogg":  {},
+	".flac": {},
+	".mp4":  {},
+	".webm": {},
+	".mov":  {},
+	".wmv":  {},
+	".mkv":  {},
+	".avi":  {},
+	".flv":  {},
+}
+
 type FileInfo struct {
-	Fs         afero.Fs    `json:"-"`
-	Path       string      `json:"path"`
-	Name       string      `json:"name"`
-	User       string      `json:"user"`
-	Group      string      `json:"group"`
-	Uid        string      `json:"uid"`
-	Gid        string      `json:"gid"`
-	Extension  string      `json:"extension"`
-	Content    string      `json:"content"`
-	Size       int64       `json:"size"`
-	IsDir      bool        `json:"isDir"`
-	IsSymlink  bool        `json:"isSymlink"`
-	IsHidden   bool        `json:"isHidden"`
-	LinkPath   string      `json:"linkPath"`
-	Type       string      `json:"type"`
-	Mode       string      `json:"mode"`
-	MimeType   string      `json:"mimeType"`
-	UpdateTime time.Time   `json:"updateTime"`
-	ModTime    time.Time   `json:"modTime"`
-	FileMode   os.FileMode `json:"-"`
-	Items      []*FileInfo `json:"items"`
-	ItemTotal  int         `json:"itemTotal"`
-	FavoriteID uint        `json:"favoriteID"`
-	IsDetail   bool        `json:"isDetail"`
+	Fs           afero.Fs    `json:"-"`
+	Path         string      `json:"path"`
+	Name         string      `json:"name"`
+	User         string      `json:"user"`
+	Group        string      `json:"group"`
+	Uid          string      `json:"uid"`
+	Gid          string      `json:"gid"`
+	Extension    string      `json:"extension"`
+	Content      string      `json:"content"`
+	Size         int64       `json:"size"`
+	IsDir        bool        `json:"isDir"`
+	IsSymlink    bool        `json:"isSymlink"`
+	IsHidden     bool        `json:"isHidden"`
+	LinkPath     string      `json:"linkPath"`
+	Type         string      `json:"type"`
+	Mode         string      `json:"mode"`
+	MimeType     string      `json:"mimeType"`
+	UpdateTime   time.Time   `json:"updateTime"`
+	ModTime      time.Time   `json:"modTime"`
+	FileMode     os.FileMode `json:"-"`
+	Items        []*FileInfo `json:"items"`
+	ItemTotal    int         `json:"itemTotal"`
+	FavoriteID   uint        `json:"favoriteID"`
+	ShareCode    string      `json:"shareCode"`
+	IsDetail     bool        `json:"isDetail"`
+	IsAppendOnly bool        `json:"isAppendOnly"`
+	IsImmutable  bool        `json:"isImmutable"`
 }
 
 type FileOption struct {
@@ -102,6 +175,7 @@ func NewFileInfo(op FileOption) (*FileInfo, error) {
 	if favorite.ID > 0 {
 		file.FavoriteID = favorite.ID
 	}
+	file.IsAppendOnly, file.IsImmutable = getFileAttributes(op.Path)
 
 	if file.IsSymlink {
 		linkPath := GetSymlink(op.Path)
@@ -131,6 +205,18 @@ func NewFileInfo(op FileOption) (*FileInfo, error) {
 		}
 	}
 	return file, nil
+}
+
+func getFileAttributes(filePath string) (bool, bool) {
+	output, err := exec.Command("lsattr", "-d", "--", filePath).Output()
+	if err != nil {
+		return false, false
+	}
+	fields := strings.Fields(string(output))
+	if len(fields) == 0 {
+		return false, false
+	}
+	return strings.Contains(fields[0], "a"), strings.Contains(fields[0], "i")
 }
 
 func handleExpansion(file *FileInfo, op FileOption) error {
@@ -417,6 +503,9 @@ func (f *FileInfo) getContent() error {
 	if f.Size > 10*1024*1024 {
 		return buserr.New("ErrFileToLarge")
 	}
+	if IsBinaryPreviewFile(f.MimeType, f.Extension) {
+		return buserr.New("ErrFileCanNotRead")
+	}
 	afs := &afero.Afero{Fs: f.Fs}
 	cByte, err := afs.ReadFile(f.Path)
 	if err != nil {
@@ -429,8 +518,39 @@ func (f *FileInfo) getContent() error {
 	return nil
 }
 
+func IsBinaryPreviewFile(mimeType, extension string) bool {
+	mimeType = strings.ToLower(strings.TrimSpace(mimeType))
+	extension = strings.ToLower(strings.TrimSpace(extension))
+
+	if mimeType == "" || mimeType == "application/octet-stream" {
+		_, ok := binaryPreviewExtensions[extension]
+		return ok
+	}
+
+	if strings.HasPrefix(mimeType, "text/") {
+		return false
+	}
+
+	for _, prefix := range binaryPreviewMimePrefixes {
+		if strings.HasPrefix(mimeType, prefix) {
+			return true
+		}
+	}
+
+	_, ok := binaryPreviewMimeTypes[mimeType]
+	if ok {
+		return true
+	}
+
+	_, ok = binaryPreviewExtensions[extension]
+	return ok
+}
+
 func DetectBinary(buf []byte) bool {
 	mimeType := http.DetectContentType(buf)
+	if IsBinaryPreviewFile(mimeType, "") {
+		return true
+	}
 	if !strings.HasPrefix(mimeType, "text/") {
 		whiteByte := 0
 		n := min(1024, len(buf))
@@ -444,7 +564,6 @@ func DetectBinary(buf []byte) bool {
 		return whiteByte < 1
 	}
 	return false
-
 }
 
 func min(x, y int) int {

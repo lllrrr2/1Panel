@@ -12,6 +12,7 @@ import (
 	cmdUtils "github.com/1Panel-dev/1Panel/core/utils/cmd"
 	"github.com/1Panel-dev/1Panel/core/utils/common"
 	"github.com/1Panel-dev/1Panel/core/utils/controller"
+	"github.com/1Panel-dev/1Panel/core/utils/ctl_conf"
 	"github.com/1Panel-dev/1Panel/core/utils/files"
 
 	"github.com/spf13/cobra"
@@ -29,11 +30,10 @@ var restoreCmd = &cobra.Command{
 			fmt.Println(i18n.GetMsgWithMapForCmd("SudoHelper", map[string]interface{}{"cmd": "sudo 1pctl restore"}))
 			return nil
 		}
-		stdout, err := cmdUtils.RunDefaultWithStdoutBashC("grep '^BASE_DIR=' /usr/local/bin/1pctl | cut -d'=' -f2")
+		baseDir, err := ctl_conf.LoadFromFile("/usr/local/bin/1pctl", "BASE_DIR")
 		if err != nil {
 			return fmt.Errorf("handle load `BASE_DIR` failed, err: %v", err)
 		}
-		baseDir := strings.ReplaceAll(stdout, "\n", "")
 		upgradeDir := path.Join(baseDir, "1panel", "tmp", "upgrade")
 
 		tmpPath, err := loadRestorePath(upgradeDir)
@@ -59,17 +59,17 @@ var restoreCmd = &cobra.Command{
 		if err := files.CopyItem(false, true, path.Join(tmpPath, "GeoIP.mmdb"), path.Join(baseDir, "1panel/geo")); err != nil {
 			return err
 		}
-		sudo := cmdUtils.SudoHandleCmd()
-		_, _ = cmdUtils.RunDefaultWithStdoutBashCf("%s chmod 755 /usr/local/bin/1panel-agent /usr/local/bin/1panel-core", sudo)
+		_, _ = cmdUtils.NewCommandMgr().RunWithStdout("chmod", "755", "/usr/local/bin/1panel-agent", "/usr/local/bin/1panel-core")
 
 		fmt.Println(i18n.GetMsgByKeyForCmd("RestoreStep2"))
 		if err := files.CopyItem(false, true, path.Join(tmpPath, "1pctl"), "/usr/local/bin"); err != nil {
 			return err
 		}
-		_, _ = cmdUtils.RunDefaultWithStdoutBashCf("%s chmod 755 /usr/local/bin/1pctl", sudo)
-		_, _ = cmdUtils.RunDefaultWithStdoutBashCf("cp -r %s /usr/local/bin", path.Join(tmpPath, "lang"))
+		_, _ = cmdUtils.NewCommandMgr().RunWithStdout("chmod", "755", "/usr/local/bin/1pctl")
+		_, _ = cmdUtils.NewCommandMgr().RunWithStdout("cp", "-r", path.Join(tmpPath, "lang"), "/usr/local/bin")
 		geoPath := path.Join(global.CONF.Base.InstallDir, "1panel/geo")
-		_, _ = cmdUtils.RunDefaultWithStdoutBashCf("mkdir %s && cp %s %s/", geoPath, path.Join(tmpPath, "GeoIP.mmdb"), geoPath)
+		_ = os.MkdirAll(geoPath, os.ModePerm)
+		_, _ = cmdUtils.NewCommandMgr().RunWithStdout("cp", path.Join(tmpPath, "GeoIP.mmdb"), geoPath+"/")
 
 		fmt.Println(i18n.GetMsgByKeyForCmd("RestoreStep3"))
 		svcBasePath, _ := controller.GetServicePath("")
@@ -92,8 +92,15 @@ var restoreCmd = &cobra.Command{
 		fmt.Println(i18n.GetMsgByKeyForCmd("RestoreStep4"))
 		if _, err := os.Stat(path.Join(tmpPath, "db")); err == nil {
 			dbPath := path.Join(baseDir, "1panel")
+			targetDBDir := path.Join(dbPath, "db")
+			if err := os.RemoveAll(targetDBDir); err != nil {
+				global.LOG.Errorf("rollback 1panel db cleanup failed, err: %v", err)
+			}
 			if err := files.CopyItem(true, true, path.Join(tmpPath, "db"), dbPath); err != nil {
 				global.LOG.Errorf("rollback 1panel db failed, err: %v", err)
+			}
+			if err := cleanOrphanSQLiteSidecars(targetDBDir); err != nil {
+				global.LOG.Errorf("rollback 1panel db sidecar cleanup failed, err: %v", err)
 			}
 		}
 
@@ -130,13 +137,50 @@ func loadRestorePath(upgradeDir string) (string, error) {
 }
 
 func loadRollbackVersion(upgradeDir string) string {
-	stdout, err := cmdUtils.RunDefaultWithStdoutBashCf("grep '^ORIGINAL_VERSION=' %s/1pctl | cut -d'=' -f2", upgradeDir)
+	info, err := ctl_conf.LoadFromFile(path.Join(upgradeDir, "1pctl"), "ORIGINAL_VERSION")
 	if err != nil {
 		return "-"
 	}
-	info := strings.ReplaceAll(stdout, "\n", "")
 	if len(info) == 0 || info == `""` {
 		return "-"
 	}
 	return info
+}
+
+func cleanOrphanSQLiteSidecars(dbDir string) error {
+	entries, err := os.ReadDir(dbDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		name := entry.Name()
+		var mainDB string
+		switch {
+		case strings.HasSuffix(name, ".db-wal"):
+			mainDB = strings.TrimSuffix(name, "-wal")
+		case strings.HasSuffix(name, ".db-shm"):
+			mainDB = strings.TrimSuffix(name, "-shm")
+		default:
+			continue
+		}
+
+		if _, statErr := os.Stat(path.Join(dbDir, mainDB)); statErr != nil {
+			if !os.IsNotExist(statErr) {
+				return statErr
+			}
+			if removeErr := os.Remove(path.Join(dbDir, name)); removeErr != nil && !os.IsNotExist(removeErr) {
+				return removeErr
+			}
+		}
+	}
+
+	return nil
 }

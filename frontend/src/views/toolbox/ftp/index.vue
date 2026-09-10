@@ -5,17 +5,31 @@
                 <div class="flex w-full flex-col gap-4 md:flex-row">
                     <div class="flex flex-wrap gap-4 ml-3">
                         <el-tag effect="dark" type="success">FTP</el-tag>
-                        <Status class="mt-0.5" :status="form.isActive ? 'enable' : 'disable'" />
+                        <Status v-if="baseLoaded" class="mt-0.5" :status="form.isActive ? 'enable' : 'disable'" />
                     </div>
-                    <div class="mt-0.5">
-                        <el-button v-if="form.isActive" type="primary" @click="onOperate('stop')" link>
+                    <div v-if="baseLoaded" class="mt-0.5">
+                        <el-button
+                            v-if="form.isActive"
+                            v-permission
+                            v-node-admin
+                            type="primary"
+                            @click="onOperate('stop')"
+                            link
+                        >
                             {{ $t('commons.button.stop') }}
                         </el-button>
-                        <el-button v-if="!form.isActive" type="primary" @click="onOperate('start')" link>
+                        <el-button
+                            v-if="!form.isActive"
+                            v-permission
+                            v-node-admin
+                            type="primary"
+                            @click="onOperate('start')"
+                            link
+                        >
                             {{ $t('commons.button.start') }}
                         </el-button>
                         <el-divider direction="vertical" />
-                        <el-button type="primary" @click="onOperate('restart')" link>
+                        <el-button v-permission v-node-admin type="primary" @click="onOperate('restart')" link>
                             {{ $t('commons.button.restart') }}
                         </el-button>
                     </div>
@@ -23,8 +37,12 @@
             </el-card>
         </div>
         <div v-if="form.isExist">
-            <LayoutContent v-loading="loading" :title="$t('toolbox.ftp.ftp', 2)" :class="{ mask: !form.isActive }">
-                <template #prompt v-if="!globalStore.isFxplay">
+            <LayoutContent
+                v-loading="loading"
+                :title="$t('toolbox.ftp.ftp', 2)"
+                :class="{ mask: baseLoaded && !form.isActive }"
+            >
+                <template #prompt v-if="!isFxplay">
                     <el-alert type="info" :closable="false">
                         <template #title>
                             {{ $t('toolbox.common.toolboxHelper') }}
@@ -35,13 +53,13 @@
                     </el-alert>
                 </template>
                 <template #leftToolBar>
-                    <el-button type="primary" @click="onOpenDialog('add')">
+                    <el-button v-permission v-node-admin type="primary" @click="onOpenDialog('add')">
                         {{ $t('commons.button.add') }}
                     </el-button>
-                    <el-button @click="onSync()">
+                    <el-button v-permission v-node-admin @click="onSync()">
                         {{ $t('commons.button.sync') }}
                     </el-button>
-                    <el-button plain :disabled="selects.length === 0" @click="onDelete(null)">
+                    <el-button v-permission v-node-admin plain :disabled="selects.length === 0" @click="onDelete(null)">
                         {{ $t('commons.button.delete') }}
                     </el-button>
                 </template>
@@ -125,6 +143,8 @@
                             <template #default="{ row }">
                                 <fu-input-rw-switch
                                     v-model="row.description"
+                                    v-permission
+                                    v-node-admin
                                     @enter="onChange(row)"
                                     @blur="onChange(row)"
                                 />
@@ -141,11 +161,11 @@
                 </template>
             </LayoutContent>
 
-            <el-card v-if="form.isExist && !form.isActive" class="mask-prompt">
+            <el-card v-if="baseLoaded && !form.isActive" class="mask-prompt">
                 <span>{{ $t('toolbox.ftp.notStart') }}</span>
             </el-card>
         </div>
-        <NoSuchService v-else name="FTP (pure-ftpd)" />
+        <NoSuchService v-if="!form.isExist" name="FTP (pure-ftpd)" />
 
         <OpDialog ref="opRef" @search="search" @submit="onSubmitDelete()" />
         <OperateDialog @search="search" ref="dialogRef" />
@@ -161,13 +181,13 @@ import { deleteFtp, searchFtp, updateFtp, syncFtp, operateFtp, getFtpBase } from
 import OperateDialog from '@/views/toolbox/ftp/operate/index.vue';
 import LogDialog from '@/views/toolbox/ftp/log/index.vue';
 import { Toolbox } from '@/api/interface/toolbox';
-import { GlobalStore } from '@/store';
+import { useGlobalStore } from '@/composables/useGlobalStore';
 import { routerToFileWithPath } from '@/utils/router';
-import { getRandomStr } from '@/utils/util';
+import { getRandomStr } from '@/utils/id';
+const { docsUrl, isFxplay } = useGlobalStore();
 
-const globalStore = GlobalStore();
-
-const loading = ref();
+const loading = ref(true);
+const baseLoaded = ref(false);
 const selects = ref<any>([]);
 
 const data = ref();
@@ -197,6 +217,7 @@ const search = async (column?: any) => {
         .then(async (res) => {
             form.isActive = res.data.isActive;
             form.isExist = res.data.isExist;
+            baseLoaded.value = true;
             paginationConfig.orderBy = column?.order ? column.prop : paginationConfig.orderBy;
             paginationConfig.order = column?.order ? column.order : paginationConfig.order;
             let params = {
@@ -336,6 +357,8 @@ const onSubmitDelete = async () => {
 const buttons = [
     {
         label: i18n.global.t('commons.button.edit'),
+        permission: true,
+        nodeAdmin: true,
         disabled: (row: Toolbox.FtpInfo) => {
             return row.status === 'deleted';
         },
@@ -354,6 +377,8 @@ const buttons = [
     },
     {
         label: i18n.global.t('commons.button.delete'),
+        permission: true,
+        nodeAdmin: true,
         click: (row: Toolbox.FtpInfo) => {
             onDelete(row);
         },
@@ -361,7 +386,7 @@ const buttons = [
 ];
 
 const toDoc = () => {
-    window.open(globalStore.docsUrl + '/user_manual/toolbox/ftp/', '_blank', 'noopener,noreferrer');
+    window.open(docsUrl.value + '/user_manual/toolbox/ftp/', '_blank', 'noopener,noreferrer');
 };
 
 onMounted(() => {

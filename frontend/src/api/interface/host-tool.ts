@@ -4,7 +4,7 @@ export namespace HostTool {
         config: {};
     }
 
-    export interface Supersivor extends HostTool {
+    export interface Supervisor extends HostTool {
         configPath: string;
         includeDir: string;
         logPath: string;
@@ -17,24 +17,22 @@ export namespace HostTool {
         serviceName: string;
     }
 
-    export interface SupersivorConfig {
-        type: string;
-        operate: string;
+    export interface SupervisorConfigUpdate {
         content?: string;
     }
 
-    export interface SupersivorConfigRes {
+    export interface SupervisorConfigRes {
         type: string;
         content: string;
     }
 
-    export interface SupersivorInit {
+    export interface SupervisorInit {
         type: string;
         configPath: string;
         serviceName: string;
     }
 
-    export interface SupersivorProcess {
+    export interface SupervisorProcess {
         operate: string;
         name: string;
         command: string;
@@ -57,6 +55,11 @@ export namespace HostTool {
     export interface ProcessReq {
         operate: string;
         name: string;
+    }
+
+    export interface ProcessFileGetReq {
+        name: string;
+        file: string;
     }
 
     export interface ProcessFileReq {

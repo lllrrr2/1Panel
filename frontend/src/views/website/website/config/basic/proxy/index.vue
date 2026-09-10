@@ -1,9 +1,11 @@
 <template>
     <ComplexTable :data="data" @search="search" v-loading="loading">
         <template #toolbar>
-            <el-button type="primary" plain @click="openCreate">{{ $t('commons.button.create') }}</el-button>
-            <el-button @click="openCache">{{ $t('website.proxyCache') }}</el-button>
-            <el-button type="primary" @click="clear" link>
+            <el-button v-permission type="primary" plain @click="openCreate">
+                {{ $t('commons.button.create') }}
+            </el-button>
+            <el-button v-permission @click="openCache">{{ $t('website.proxyCache') }}</el-button>
+            <el-button v-permission type="primary" @click="clear" link>
                 {{ $t('nginx.clearProxyCache') }}
             </el-button>
         </template>
@@ -24,7 +26,12 @@
         </el-table-column>
         <el-table-column :label="$t('commons.table.status')" prop="enable" width="100">
             <template #default="{ row }">
-                <Status :status="row.enable ? 'enable' : 'disable'" @click="opProxy(row)" :operate="true" />
+                <Status
+                    v-permission
+                    :status="row.enable ? 'enable' : 'disable'"
+                    @click="opProxy(row)"
+                    :operate="true"
+                />
             </template>
         </el-table-column>
         <fu-table-operations
@@ -32,7 +39,7 @@
             width="260px"
             :buttons="buttons"
             :label="$t('commons.table.operate')"
-            :fixed="mobile ? false : 'right'"
+            :fixed="isMobile ? false : 'right'"
             fix
         />
     </ComplexTable>
@@ -43,19 +50,20 @@
     <Cache ref="cacheRef" @close="search()" />
 </template>
 
-<script lang="ts" setup name="proxy">
+<script lang="ts" setup>
 import { Website } from '@/api/interface/website';
-import { operateProxyConfig, getProxyConfig, clearProxyCache } from '@/api/modules/website';
+import { getProxyConfig, deleteProxyConfig, updateProxyConfigStatus, clearProxyCache } from '@/api/modules/website';
 import { computed, onMounted, ref } from 'vue';
 import i18n from '@/lang';
 import { MsgSuccess } from '@/utils/message';
 import { ElMessageBox } from 'element-plus';
-import { GlobalStore } from '@/store';
 import Create from './create/index.vue';
 import File from './file/index.vue';
 import Cache from './cache/index.vue';
-const globalStore = GlobalStore();
+import { useGlobalStore } from '@/composables/useGlobalStore';
 
+const { isMobile } = useGlobalStore();
+defineOptions({ name: 'Proxy' });
 const props = defineProps({
     id: {
         type: Number,
@@ -63,9 +71,6 @@ const props = defineProps({
     },
 });
 
-const mobile = computed(() => {
-    return globalStore.isMobile();
-});
 const id = computed(() => {
     return props.id;
 });
@@ -80,6 +85,7 @@ const hasCache = ref(false);
 const buttons = [
     {
         label: i18n.global.t('website.sourceFile'),
+        permission: true,
         click: function (row: Website.ProxyConfig) {
             openEditFile(row);
         },
@@ -89,15 +95,17 @@ const buttons = [
     },
     {
         label: i18n.global.t('commons.button.edit'),
-        click: function (row: Website.ProxyConfig) {
-            openEdit(row);
-        },
+        permission: true,
         disabled: (row: Website.ProxyConfig) => {
             return !row.enable;
+        },
+        click: function (row: Website.ProxyConfig) {
+            openEdit(row);
         },
     },
     {
         label: i18n.global.t('commons.button.delete'),
+        permission: true,
         click: function (row: Website.ProxyConfig) {
             deleteProxy(row);
         },
@@ -158,14 +166,17 @@ const deleteProxy = async (proxyConfig: Website.ProxyConfig) => {
             i18n.global.t('website.proxy'),
             i18n.global.t('commons.button.delete'),
         ]),
-        api: operateProxyConfig,
-        params: proxyConfig,
+        api: deleteProxyConfig,
+        params: {
+            id: proxyConfig.id,
+            name: proxyConfig.name,
+        },
     });
 };
 
-const submit = async (proxyConfig: Website.ProxyConfig) => {
+const submit = async (proxyConfig: Website.ProxyStatusUpdate) => {
     loading.value = true;
-    operateProxyConfig(proxyConfig)
+    updateProxyConfigStatus(proxyConfig)
         .then(() => {
             MsgSuccess(i18n.global.t('commons.msg.updateSuccess'));
             search();
@@ -176,14 +187,14 @@ const submit = async (proxyConfig: Website.ProxyConfig) => {
 };
 
 const opProxy = (proxyConfig: Website.ProxyConfig) => {
-    let proxy = JSON.parse(JSON.stringify(proxyConfig));
-    proxy.enable = !proxyConfig.enable;
+    const enable = !proxyConfig.enable;
+    let status = '';
     let message = '';
-    if (proxy.enable) {
-        proxy.operate = 'enable';
+    if (enable) {
+        status = 'enable';
         message = i18n.global.t('website.startProxy');
     } else {
-        proxy.operate = 'disable';
+        status = 'disable';
         message = i18n.global.t('website.stopProxy');
     }
     ElMessageBox.confirm(message, i18n.global.t('cronjob.changeStatus'), {
@@ -191,7 +202,11 @@ const opProxy = (proxyConfig: Website.ProxyConfig) => {
         cancelButtonText: i18n.global.t('commons.button.cancel'),
     })
         .then(async () => {
-            await submit(proxy);
+            await submit({
+                id: proxyConfig.id,
+                name: proxyConfig.name,
+                status,
+            });
             search();
         })
         .catch(() => {});

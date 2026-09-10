@@ -48,6 +48,34 @@ type ContainerOptions struct {
 	State string `json:"state"`
 }
 
+type ContainerFileReq struct {
+	ContainerID string `json:"containerID" validate:"required"`
+	Path        string `json:"path" validate:"required"`
+}
+
+type ContainerFileBatchDeleteReq struct {
+	ContainerID string   `json:"containerID" validate:"required"`
+	Paths       []string `json:"paths" validate:"required,min=1,dive,required"`
+}
+
+type ContainerFileInfo struct {
+	Name    string `json:"name"`
+	Path    string `json:"path"`
+	IsDir   bool   `json:"isDir"`
+	IsLink  bool   `json:"isLink"`
+	LinkTo  string `json:"linkTo"`
+	Size    int64  `json:"size"`
+	Mode    string `json:"mode"`
+	ModTime string `json:"modTime"`
+}
+
+type ContainerFileContent struct {
+	Content   string `json:"content"`
+	Size      int64  `json:"size"`
+	Truncated bool   `json:"truncated"`
+	IsBinary  bool   `json:"isBinary"`
+}
+
 type ContainerStatus struct {
 	Created    int `json:"created"`
 	Running    int `json:"running"`
@@ -95,15 +123,26 @@ type ContainerOperate struct {
 	Privileged      bool           `json:"privileged"`
 	AutoRemove      bool           `json:"autoRemove"`
 	Volumes         []VolumeHelper `json:"volumes"`
+	ExtraHosts      []ExtraHost    `json:"extraHosts"`
 	Labels          []string       `json:"labels"`
 	Env             []string       `json:"env"`
 	RestartPolicy   string         `json:"restartPolicy"`
 }
+
+type ExtraHost struct {
+	Hostname string `json:"hostname"`
+	IP       string `json:"ip"`
+}
 type ContainerNetwork struct {
-	Network string `json:"network"`
-	Ipv4    string `json:"ipv4"`
-	Ipv6    string `json:"ipv6"`
-	MacAddr string `json:"macAddr"`
+	Network      string            `json:"network"`
+	Ipv4         string            `json:"ipv4"`
+	Ipv6         string            `json:"ipv6"`
+	MacAddr      string            `json:"macAddr"`
+	Links        []string          `json:"links"`
+	Aliases      []string          `json:"aliases"`
+	DriverOpts   map[string]string `json:"driverOpts"`
+	GwPriority   int               `json:"gwPriority"`
+	LinkLocalIPs []string          `json:"linkLocalIPs"`
 }
 
 type ContainerCreateByCommand struct {
@@ -253,16 +292,18 @@ type BatchDelete struct {
 }
 
 type ComposeInfo struct {
-	Name           string             `json:"name"`
-	CreatedAt      string             `json:"createdAt"`
-	CreatedBy      string             `json:"createdBy"`
-	ContainerCount int                `json:"containerCount"`
-	RunningCount   int                `json:"runningCount"`
-	ConfigFile     string             `json:"configFile"`
-	Workdir        string             `json:"workdir"`
-	Path           string             `json:"path"`
-	Containers     []ComposeContainer `json:"containers"`
-	Env            string             `json:"env"`
+	Name              string             `json:"name"`
+	CreatedAt         string             `json:"createdAt"`
+	CreatedBy         string             `json:"createdBy"`
+	ContainerCount    int                `json:"containerCount"`
+	RunningCount      int                `json:"runningCount"`
+	ConfigFile        string             `json:"configFile"`
+	Workdir           string             `json:"workdir"`
+	ComposeFileExists bool               `json:"composeFileExists"`
+	IsPinned          bool               `json:"isPinned"`
+	Path              string             `json:"path"`
+	Containers        []ComposeContainer `json:"containers"`
+	Env               string             `json:"env"`
 }
 type ComposeContainer struct {
 	ContainerID string   `json:"containerID"`
@@ -274,6 +315,7 @@ type ComposeContainer struct {
 type ComposeCreate struct {
 	TaskID    string `json:"taskID"`
 	Name      string `json:"name"`
+	DirName   string `json:"dirName"`
 	From      string `json:"from" validate:"required,oneof=edit path template"`
 	File      string `json:"file"`
 	Path      string `json:"path"`
@@ -284,7 +326,7 @@ type ComposeCreate struct {
 type ComposeOperation struct {
 	Name      string `json:"name" validate:"required"`
 	Path      string `json:"path"`
-	Operation string `json:"operation" validate:"required,oneof=up start restart stop down delete"`
+	Operation string `json:"operation" validate:"required,oneof=up start restart stop down delete rebuild"`
 	WithFile  bool   `json:"withFile"`
 	Force     bool   `json:"force"`
 }
@@ -296,6 +338,10 @@ type ComposeUpdate struct {
 	Content    string `json:"content" validate:"required"`
 	Env        string `json:"env"`
 	ForcePull  bool   `json:"forcePull"`
+}
+type ComposePin struct {
+	Name     string `json:"name" validate:"required"`
+	IsPinned bool   `json:"isPinned"`
 }
 type ComposeLogClean struct {
 	Name       string `json:"name" validate:"required"`

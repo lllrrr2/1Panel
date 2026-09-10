@@ -1,7 +1,11 @@
 package v2
 
 import (
+	"net/http"
+	"net/url"
+	"path"
 	"strconv"
+	"strings"
 
 	"github.com/1Panel-dev/1Panel/agent/app/api/v2/helper"
 	"github.com/1Panel-dev/1Panel/agent/app/dto"
@@ -51,6 +55,162 @@ func (b *BaseApi) LoadContainerUsers(c *gin.Context) {
 	}
 
 	helper.SuccessWithData(c, containerService.LoadUsers(req))
+}
+
+// @Tags Container
+// @Summary List container files
+// @Accept json
+// @Param request body dto.ContainerFileReq true "request"
+// @Success 200 {array} dto.ContainerFileInfo
+// @Security ApiKeyAuth
+// @Security Timestamp
+// @Router /containers/files/search [post]
+func (b *BaseApi) ListContainerFiles(c *gin.Context) {
+	var req dto.ContainerFileReq
+	if err := helper.CheckBindAndValidate(&req, c); err != nil {
+		return
+	}
+	files, err := containerService.ListContainerFiles(req)
+	if err != nil {
+		helper.InternalServer(c, err)
+		return
+	}
+	helper.SuccessWithData(c, files)
+}
+
+// @Tags Container
+// @Summary Upload container file
+// @Accept multipart/form-data
+// @Param containerID formData string true "containerID"
+// @Param path formData string true "path"
+// @Param file formData file true "file"
+// @Success 200
+// @Security ApiKeyAuth
+// @Security Timestamp
+// @Router /containers/files/upload [post]
+// @x-panel-log {"bodyKeys":["containerID","path"],"paramKeys":[],"BeforeFunctions":[],"formatZH":"容器 [containerID] 上传文件到 [path]","formatEN":"Upload file to [path] in container [containerID]"}
+func (b *BaseApi) UploadContainerFile(c *gin.Context) {
+	form, err := c.MultipartForm()
+	if err != nil {
+		helper.BadRequest(c, err)
+		return
+	}
+	containerIDs := form.Value["containerID"]
+	paths := form.Value["path"]
+	uploadFiles := form.File["file"]
+	if len(containerIDs) == 0 || len(paths) == 0 || len(uploadFiles) == 0 {
+		helper.BadRequest(c, errors.New("invalid container file upload params"))
+		return
+	}
+	req := dto.ContainerFileReq{
+		ContainerID: containerIDs[0],
+		Path:        paths[0],
+	}
+	for _, uploadFile := range uploadFiles {
+		file, err := uploadFile.Open()
+		if err != nil {
+			helper.InternalServer(c, err)
+			return
+		}
+		err = containerService.UploadContainerFile(req, path.Base(uploadFile.Filename), uploadFile.Size, file)
+		_ = file.Close()
+		if err != nil {
+			helper.InternalServer(c, err)
+			return
+		}
+	}
+	helper.Success(c)
+}
+
+// @Tags Container
+// @Summary Get container file content
+// @Accept json
+// @Param request body dto.ContainerFileReq true "request"
+// @Success 200 {object} dto.ContainerFileContent
+// @Security ApiKeyAuth
+// @Security Timestamp
+// @Router /containers/files/content [post]
+func (b *BaseApi) GetContainerFileContent(c *gin.Context) {
+	var req dto.ContainerFileReq
+	if err := helper.CheckBindAndValidate(&req, c); err != nil {
+		return
+	}
+	content, err := containerService.GetContainerFileContent(req)
+	if err != nil {
+		helper.InternalServer(c, err)
+		return
+	}
+	helper.SuccessWithData(c, content)
+}
+
+// @Tags Container
+// @Summary Get container file size
+// @Accept json
+// @Param request body dto.ContainerFileReq true "request"
+// @Success 200 {int} size
+// @Security ApiKeyAuth
+// @Security Timestamp
+// @Router /containers/files/size [post]
+func (b *BaseApi) GetContainerFileSize(c *gin.Context) {
+	var req dto.ContainerFileReq
+	if err := helper.CheckBindAndValidate(&req, c); err != nil {
+		return
+	}
+	size, err := containerService.GetContainerFileSize(req)
+	if err != nil {
+		helper.InternalServer(c, err)
+		return
+	}
+	helper.SuccessWithData(c, size)
+}
+
+// @Tags Container
+// @Summary Delete container file
+// @Accept json
+// @Param request body dto.ContainerFileBatchDeleteReq true "request"
+// @Success 200
+// @Security ApiKeyAuth
+// @Security Timestamp
+// @Router /containers/files/del [post]
+// @x-panel-log {"bodyKeys":["containerID","paths"],"paramKeys":[],"BeforeFunctions":[],"formatZH":"删除容器 [containerID] 文件 [paths]","formatEN":"Delete files [paths] in container [containerID]"}
+func (b *BaseApi) DeleteContainerFile(c *gin.Context) {
+	var req dto.ContainerFileBatchDeleteReq
+	if err := helper.CheckBindAndValidate(&req, c); err != nil {
+		return
+	}
+	if err := containerService.DeleteContainerFile(req); err != nil {
+		helper.InternalServer(c, err)
+		return
+	}
+	helper.Success(c)
+}
+
+// @Tags Container
+// @Summary Download container file
+// @Accept json
+// @Param request body dto.ContainerFileReq true "request"
+// @Security ApiKeyAuth
+// @Security Timestamp
+// @Router /containers/files/download [post]
+// @x-panel-log {"bodyKeys":["containerID","path"],"paramKeys":[],"BeforeFunctions":[],"formatZH":"下载容器 [containerID] 文件 [path]","formatEN":"Download file [path] from container [containerID]"}
+func (b *BaseApi) DownloadContainerFile(c *gin.Context) {
+	var req dto.ContainerFileReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		helper.BadRequest(c, err)
+		return
+	}
+	if req.ContainerID == "" || req.Path == "" {
+		helper.BadRequest(c, errors.New("invalid container file download params"))
+		return
+	}
+	reader, fileName, contentType, err := containerService.DownloadContainerFile(req)
+	if err != nil {
+		helper.InternalServer(c, err)
+		return
+	}
+	defer reader.Close()
+	c.Header("Content-Disposition", "attachment; filename*=utf-8''"+url.PathEscape(fileName))
+	c.DataFromReader(http.StatusOK, -1, contentType, reader, nil)
 }
 
 // @Tags Container
@@ -235,6 +395,7 @@ func (b *BaseApi) ContainerInfo(c *gin.Context) {
 	helper.SuccessWithData(c, data)
 }
 
+// @Tags Container
 // @Summary Load container limits
 // @Success 200 {object} dto.ResourceLimit
 // @Security ApiKeyAuth
@@ -249,6 +410,7 @@ func (b *BaseApi) LoadResourceLimit(c *gin.Context) {
 	helper.SuccessWithData(c, data)
 }
 
+// @Tags Container
 // @Summary Load container stats
 // @Success 200 {array} dto.ContainerListStats
 // @Security ApiKeyAuth
@@ -263,6 +425,7 @@ func (b *BaseApi) ContainerListStats(c *gin.Context) {
 	helper.SuccessWithData(c, data)
 }
 
+// @Tags Container
 // @Summary Load container stats size
 // @Accept json
 // @Param request body dto.OperationWithName true "request"
@@ -276,7 +439,7 @@ func (b *BaseApi) ContainerItemStats(c *gin.Context) {
 		return
 	}
 
-	data, err := containerService.ContainerItemStats(req)
+	data, err := containerService.ContainerItemStats(c.Request.Context(), req)
 	if err != nil {
 		helper.InternalServer(c, err)
 		return
@@ -503,6 +666,14 @@ func (b *BaseApi) Inspect(c *gin.Context) {
 	helper.SuccessWithData(c, result)
 }
 
+// @Tags Container
+// @Summary Download container logs
+// @Accept json
+// @Param request body dto.ContainerLog true "request"
+// @Success 200
+// @Security ApiKeyAuth
+// @Security Timestamp
+// @Router /containers/download/log [post]
 func (b *BaseApi) DownloadContainerLogs(c *gin.Context) {
 	var req dto.ContainerLog
 	if err := helper.CheckBindAndValidate(&req, c); err != nil {
@@ -711,6 +882,26 @@ func (b *BaseApi) ComposeUpdate(c *gin.Context) {
 }
 
 // @Tags Container Compose
+// @Summary Pin compose
+// @Accept json
+// @Param request body dto.ComposePin true "request"
+// @Success 200
+// @Security ApiKeyAuth
+// @Security Timestamp
+// @Router /containers/compose/pin [post]
+func (b *BaseApi) ComposePin(c *gin.Context) {
+	var req dto.ComposePin
+	if err := helper.CheckBindAndValidate(&req, c); err != nil {
+		return
+	}
+	if err := containerService.ComposePin(req); err != nil {
+		helper.InternalServer(c, err)
+		return
+	}
+	helper.Success(c)
+}
+
+// @Tags Container Compose
 // @Summary Load compose environment variables
 // @Accept json
 // @Param request body dto.FilePath true "request"
@@ -742,6 +933,10 @@ func (b *BaseApi) LoadComposeEnv(c *gin.Context) {
 // @Security Timestamp
 // @Router /containers/search/log [get]
 func (b *BaseApi) ContainerStreamLogs(c *gin.Context) {
+	if !strings.Contains(strings.ToLower(c.GetHeader("Accept")), "text/event-stream") {
+		helper.Success(c)
+		return
+	}
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")

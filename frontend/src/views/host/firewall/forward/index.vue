@@ -7,29 +7,45 @@
                 ref="fireStatusRef"
                 @search="search"
                 v-model:loading="loading"
-                v-model:mask-show="maskShow"
-                v-model:is-active="isActive"
+                v-model:is-init="isInit"
+                v-model:is-bind="isBind"
                 v-model:name="fireName"
                 current-tab="forward"
-            />
+            >
+                <template v-if="isInit" #actions>
+                    <el-divider direction="vertical" />
+                    <el-button v-permission v-node-admin type="primary" link @click="cleanupBackend">
+                        {{ $t('firewall.cleanupAction') }}
+                    </el-button>
+                </template>
+            </FireStatus>
             <div v-if="fireName !== '-'">
-                <el-card v-if="!isActive && maskShow" class="mask-prompt">
-                    <span>{{ $t('firewall.firewallNotStart') }}</span>
+                <el-card v-if="!isInit || !isBind" class="mask-prompt">
+                    <span v-if="!isInit">{{ $t('firewall.initHelper', [`${fireName}-forward`]) }}</span>
+                    <span v-else>{{ $t('firewall.basicStatus') }}</span>
                 </el-card>
-
-                <LayoutContent :title="$t('firewall.forwardRule', 2)" :class="{ mask: !isActive }">
+                <LayoutContent :title="$t('firewall.forwardRule', 2)" :class="{ mask: !isInit || !isBind }">
                     <template #leftToolBar>
-                        <el-button type="primary" @click="onOpenDialog('create')">
-                            {{ $t('firewall.createForwardRule') }}
+                        <el-button v-permission v-node-admin type="primary" @click="onOpenDialog('create')">
+                            {{ $t('commons.button.create') }}
                         </el-button>
-                        <el-button @click="onDelete(null)" plain :disabled="selects.length === 0">
+                        <el-button v-permission v-node-admin @click="openRuleSync">
+                            {{ $t('commons.button.sync') }}
+                        </el-button>
+                        <el-button
+                            v-permission
+                            v-node-admin
+                            @click="onDelete(null)"
+                            plain
+                            :disabled="selects.length === 0"
+                        >
                             {{ $t('commons.button.delete') }}
                         </el-button>
                         <el-button-group>
-                            <el-button @click="onImport">
+                            <el-button v-permission v-node-admin @click="onImport">
                                 {{ $t('commons.button.import') }}
                             </el-button>
-                            <el-button :disabled="selects.length === 0" @click="onExport">
+                            <el-button v-permission v-node-admin :disabled="loading" @click="onExport">
                                 {{ $t('commons.button.export') }}
                             </el-button>
                         </el-button-group>
@@ -45,14 +61,32 @@
                             v-model:selects="selects"
                             @search="search"
                             :data="data"
-                            :heightDiff="370"
+                            :heightDiff="320"
                         >
                             <el-table-column type="selection" fix />
+                            <el-table-column label="IP" :min-width="60" prop="family">
+                                <template #default="{ row }">
+                                    {{ row.family === 'ipv6' ? 'IPv6' : 'IPv4' }}
+                                </template>
+                            </el-table-column>
                             <el-table-column :label="$t('commons.table.protocol')" :min-width="70" prop="protocol" />
+                            <el-table-column :label="$t('commons.table.status')" :min-width="90" prop="syncStatus">
+                                <template #default="{ row }">
+                                    <el-tooltip
+                                        :disabled="!syncStatusMessage(row.syncStatus)"
+                                        :content="syncStatusMessage(row.syncStatus)"
+                                        placement="top"
+                                    >
+                                        <el-tag :type="syncStatusType(row.syncStatus)">
+                                            {{ syncStatusLabel(row.syncStatus) }}
+                                        </el-tag>
+                                    </el-tooltip>
+                                </template>
+                            </el-table-column>
                             <el-table-column :label="$t('firewall.sourcePort')" :min-width="70" prop="port" />
                             <el-table-column :min-width="80" :label="$t('firewall.targetIP')" prop="targetIP" />
                             <el-table-column :label="$t('firewall.targetPort')" :min-width="70" prop="targetPort" />
-                            <template v-if="fireName === 'ufw'">
+                            <template v-if="fireName === 'iptables' || fireName === 'nftables'">
                                 <el-table-column
                                     :label="$t('firewall.forwardInboundInterface')"
                                     :min-width="70"
@@ -92,31 +126,81 @@
         </OpDialog>
         <OperateDialog @search="search" ref="dialogRef" />
         <ImportDialog @search="search" ref="dialogImportRef" />
+        <RuleSync ref="ruleSyncRef" @search="refreshAfterSync" />
+        <ConfirmDialog ref="cleanupConfirmRef" @confirm="submitCleanupBackend" />
     </div>
 </template>
 
 <script lang="ts" setup>
-import FireRouter from '@/views/host/firewall/index.vue';
 import OperateDialog from './operate/index.vue';
 import ImportDialog from './import/index.vue';
+import RuleSync from '@/views/host/firewall/sync/index.vue';
+import FireRouter from '@/views/host/firewall/index.vue';
 import FireStatus from '@/views/host/firewall/status/index.vue';
+import ConfirmDialog from '@/components/confirm-dialog/index.vue';
 import { onMounted, reactive, ref } from 'vue';
-import { operateForwardRule, searchFireRule } from '@/api/modules/host';
-import { Host } from '@/api/interface/host';
+import { operateFirewallBackend, operateForwardRule, searchForwardRule } from '@/api/modules/firewall';
+import { Firewall } from '@/api/interface/firewall';
 import i18n from '@/lang';
 import { MsgSuccess } from '@/utils/message';
-import { downloadWithContent, getCurrentDateFormatted } from '@/utils/util';
-
+import { downloadWithContent } from '@/utils/file';
+import { getCurrentDateFormatted } from '@/utils/date';
+import { ElMessageBox } from 'element-plus';
 const loading = ref();
-const activeTag = ref('forward');
 const selects = ref<any>([]);
 const searchName = ref();
-const searchStrategy = ref('');
 
-const maskShow = ref(true);
-const isActive = ref(false);
+const isInit = ref(false);
+const isBind = ref(false);
 const fireName = ref();
 const fireStatusRef = ref();
+const ruleSyncRef = ref<InstanceType<typeof RuleSync>>();
+const cleanupConfirmRef = ref<InstanceType<typeof ConfirmDialog>>();
+
+const openRuleSync = () => {
+    if (fireName.value !== 'iptables' && fireName.value !== 'nftables') return;
+    ruleSyncRef.value?.acceptParams(fireName.value, 'forwarding');
+};
+
+const refreshAfterSync = async () => {
+    await fireStatusRef.value?.acceptParams();
+};
+
+const cleanupBackend = () => {
+    if (fireName.value !== 'iptables' && fireName.value !== 'nftables') return;
+    cleanupConfirmRef.value?.acceptParams({
+        header: i18n.global.t('firewall.cleanupAction'),
+        operationInfo: i18n.global.t('firewall.cleanupForwardingBackendHelper', [fireName.value]),
+        submitInputInfo: fireName.value,
+    });
+};
+
+const submitCleanupBackend = async () => {
+    if (fireName.value !== 'iptables' && fireName.value !== 'nftables') return;
+    loading.value = true;
+    try {
+        await operateFirewallBackend({ subsystem: 'forwarding', backend: fireName.value, operation: 'cleanup' });
+        MsgSuccess(i18n.global.t('commons.msg.operationSuccess'));
+        await fireStatusRef.value?.acceptParams();
+    } finally {
+        loading.value = false;
+    }
+};
+
+const syncStatusLabel = (status?: Firewall.RuleForward['syncStatus']) => {
+    if (status === 'converged') return i18n.global.t('firewall.effective');
+    if (status === 'runtime_only') return i18n.global.t('firewall.forwardUnsynced');
+    return i18n.global.t('firewall.notEffective');
+};
+const syncStatusType = (status?: Firewall.RuleForward['syncStatus']) => {
+    if (status === 'converged') return 'success';
+    return status === 'runtime_only' ? 'warning' : 'danger';
+};
+const syncStatusMessage = (status?: Firewall.RuleForward['syncStatus']) => {
+    if (status === 'missing') return i18n.global.t('firewall.ruleSyncReasonDetail.missingFromTarget');
+    if (status === 'runtime_only') return i18n.global.t('firewall.ruleSyncReasonDetail.onlyInTarget');
+    return '';
+};
 
 const opRef = ref();
 const dialogImportRef = ref();
@@ -132,21 +216,20 @@ const paginationConfig = reactive({
 });
 
 const search = async () => {
-    if (!isActive.value) {
+    if (!isInit.value || !isBind.value || fireName.value === '-') {
         loading.value = false;
         data.value = [];
         paginationConfig.total = 0;
         return;
     }
     let params = {
-        type: activeTag.value,
-        strategy: searchStrategy.value,
+        strategy: '',
         info: searchName.value,
         page: paginationConfig.currentPage,
         pageSize: paginationConfig.pageSize,
     };
     loading.value = true;
-    await searchFireRule(params)
+    await searchForwardRule(params)
         .then((res) => {
             loading.value = false;
             data.value =
@@ -166,7 +249,8 @@ const search = async () => {
 const dialogRef = ref();
 const onOpenDialog = async (
     title: string,
-    rowData: Partial<Host.RuleForward> = {
+    rowData: Partial<Firewall.RuleForward> = {
+        family: 'ipv4',
         protocol: 'tcp',
         port: '8080',
         targetIP: '',
@@ -177,11 +261,10 @@ const onOpenDialog = async (
     let params = {
         title,
         rowData: { ...rowData },
-        fireName: fireName.value,
     };
     dialogRef.value!.acceptParams(params);
 };
-const onDelete = async (row: Host.RuleForward | null) => {
+const onDelete = async (row: Firewall.RuleForward | null) => {
     let names = [];
     let rules = [];
     if (row) {
@@ -228,39 +311,65 @@ const onImport = () => {
     dialogImportRef.value.acceptParams(fireName.value);
 };
 
-const onExport = () => {
-    ElMessageBox.confirm(
-        i18n.global.t('firewall.exportHelper', [selects.value.length]),
+const loadAllRules = async (): Promise<Firewall.RuleForward[]> => {
+    const response = await searchForwardRule({
+        all: true,
+        strategy: '',
+        info: '',
+        page: 1,
+        pageSize: paginationConfig.pageSize,
+    });
+    return (response.data.items || []).map((item) => ({
+        operation: '',
+        family: item.family === 'ipv6' ? 'ipv6' : 'ipv4',
+        protocol: item.protocol,
+        port: item.port,
+        targetIP: item.targetIP,
+        targetPort: item.targetPort,
+        interface: item.interface || '',
+    }));
+};
+
+const exportRules = async (rules: Firewall.RuleForward[]) => {
+    if (rules.length === 0) return;
+    await ElMessageBox.confirm(
+        i18n.global.t('firewall.exportHelper', [rules.length]),
         i18n.global.t('commons.button.export'),
         {
             confirmButtonText: i18n.global.t('commons.button.confirm'),
             cancelButtonText: i18n.global.t('commons.button.cancel'),
         },
-    ).then(async () => {
-        const exportData = selects.value.map((item: Host.RuleInfo) => ({
-            family: item.family,
-            protocol: item.protocol,
-            port: item.port,
-            targetIP: item.targetIP,
-            targetPort: item.targetPort,
-            interface: item.interface,
-        }));
-        const content = JSON.stringify(exportData, null, 2);
-        const fileName = `1panel-firewall-forward-${getCurrentDateFormatted()}.json`;
-        downloadWithContent(content, fileName);
-    });
+    );
+    const exportData = rules.map((item) => ({
+        family: item.family,
+        protocol: item.protocol,
+        port: item.port,
+        targetIP: item.targetIP,
+        targetPort: item.targetPort,
+        interface: item.interface,
+    }));
+    downloadWithContent(
+        JSON.stringify(exportData, null, 2),
+        `1panel-firewall-forward-${getCurrentDateFormatted()}.json`,
+    );
 };
+
+const onExport = async () => exportRules(selects.value.length > 0 ? selects.value : await loadAllRules());
 
 const buttons = [
     {
         label: i18n.global.t('commons.button.edit'),
-        click: (row: Host.RuleForward) => {
+        permission: true,
+        nodeAdmin: true,
+        click: (row: Firewall.RuleForward) => {
             onOpenDialog('edit', row);
         },
     },
     {
         label: i18n.global.t('commons.button.delete'),
-        click: (row: Host.RuleForward) => {
+        permission: true,
+        nodeAdmin: true,
+        click: (row: Firewall.RuleForward) => {
             onDelete(row);
         },
     },

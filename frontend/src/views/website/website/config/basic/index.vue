@@ -82,7 +82,7 @@
     </div>
 </template>
 
-<script lang="ts" setup name="Basic">
+<script lang="ts" setup>
 import { computed, onMounted, ref, watch } from 'vue';
 
 import Domain from './domain/index.vue';
@@ -102,6 +102,7 @@ import RealIP from './real-ip/index.vue';
 import Resource from './resource/index.vue';
 import Cors from './cors/index.vue';
 import Stream from './stream/index.vue';
+defineOptions({ name: 'Basic' });
 
 const props = defineProps({
     website: {

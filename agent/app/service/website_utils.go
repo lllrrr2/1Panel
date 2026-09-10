@@ -11,6 +11,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -45,6 +46,82 @@ func handleChineseDomain(domain string) (string, error) {
 		return common.PunycodeEncode(domain)
 	}
 	return domain, nil
+}
+
+func isHTTPSProxyPass(proxyPass string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(proxyPass)), "https://")
+}
+
+func normalizeProxyPass(proxyPass string) string {
+	proxyPass = strings.TrimSpace(proxyPass)
+	if proxyPass == "" {
+		return ""
+	}
+	if strings.Contains(proxyPass, "://") || strings.HasPrefix(proxyPass, "unix:") {
+		return proxyPass
+	}
+	return fmt.Sprintf("http://%s", proxyPass)
+}
+
+func getAppInstallProxyPass(appInstall *model.AppInstall) (string, error) {
+	if appInstall == nil {
+		return "", errors.New("app install is nil")
+	}
+	if appInstall.HttpPort > 0 {
+		return fmt.Sprintf("http://127.0.0.1:%d", appInstall.HttpPort), nil
+	}
+	if appInstall.HttpsPort > 0 {
+		return fmt.Sprintf("https://127.0.0.1:%d", appInstall.HttpsPort), nil
+	}
+	return "", fmt.Errorf("app %s has no available http or https port", appInstall.Name)
+}
+
+func getAppInstallProxyPassOrEmpty(appInstall *model.AppInstall) string {
+	proxyPass, err := getAppInstallProxyPass(appInstall)
+	if err != nil {
+		return ""
+	}
+	return proxyPass
+}
+
+func hasAppInstallProxyPassChanged(before *model.AppInstall, after *model.AppInstall) bool {
+	return getAppInstallProxyPassOrEmpty(before) != getAppInstallProxyPassOrEmpty(after)
+}
+
+func getRootProxyDirectives(proxyPass string) []components.IDirective {
+	server := &components.Server{}
+	server.UpdateRootProxy([]string{normalizeProxyPass(proxyPass)})
+
+	locations := server.FindDirectives("location")
+	if len(locations) == 0 || locations[0].GetBlock() == nil {
+		return nil
+	}
+
+	return append([]components.IDirective(nil), locations[0].GetBlock().GetDirectives()...)
+}
+
+func getWebsiteRedirectInclude(website model.Website) string {
+	return fmt.Sprintf("/www/sites/%s/redirect/*.conf", website.Alias)
+}
+
+func applyLocationProxyPass(location *components.Location, proxyPass string, sni *bool, proxySSLName string) {
+	location.UpdateDirective("proxy_pass", []string{proxyPass})
+
+	enableSNI := isHTTPSProxyPass(proxyPass)
+	if sni != nil {
+		enableSNI = enableSNI && *sni
+	}
+	if enableSNI {
+		location.UpdateDirective("proxy_ssl_server_name", []string{"on"})
+	} else {
+		location.UpdateDirective("proxy_ssl_server_name", []string{"off"})
+	}
+
+	sslName := "$proxy_host"
+	if proxySSLName != "" {
+		sslName = proxySSLName
+	}
+	location.UpdateDirective("proxy_ssl_name", []string{sslName})
 }
 
 func createIndexFile(website *model.Website, runtime *model.Runtime) error {
@@ -122,7 +199,7 @@ func createProxyFile(website *model.Website) error {
 		return errors.New("error")
 	}
 	location.ChangePath("^~", "/")
-	location.UpdateDirective("proxy_pass", []string{website.Proxy})
+	applyLocationProxyPass(location, website.Proxy, nil, "")
 	location.UpdateDirective("proxy_set_header", []string{"Host", "$host"})
 	if err := nginx.WriteConfig(config, nginx.IndentedStyle); err != nil {
 		return buserr.WithErr("ErrUpdateBuWebsite", err)
@@ -179,7 +256,12 @@ func createWebsiteFolder(website *model.Website, runtime *model.Runtime) error {
 	return nil
 }
 
-func configDefaultNginx(website *model.Website, domains []model.WebsiteDomain, appInstall *model.AppInstall, runtime *model.Runtime, streamConfig request.StreamConfig) error {
+type websiteInitialSSL struct {
+	certificate model.WebsiteSSL
+	request     request.WebsiteHTTPSOp
+}
+
+func configDefaultNginx(website *model.Website, domains []model.WebsiteDomain, appInstall *model.AppInstall, runtime *model.Runtime, streamConfig request.StreamConfig, initialSSL *websiteInitialSSL) error {
 	nginxInstall, err := getAppInstallByKey(constant.AppOpenresty)
 	if err != nil {
 		return err
@@ -249,6 +331,13 @@ func configDefaultNginx(website *model.Website, domains []model.WebsiteDomain, a
 			setListen(server, strconv.Itoa(domain.Port), website.IPV6, false, website.DefaultServer, false)
 		}
 		server.UpdateServerName(serverNames)
+		if initialSSL != nil {
+			plan := buildWebsiteTLSPlan(domains, nginxInstall.HttpPort, nginxInstall.HttpsPort)
+			applyWebsiteSSLConfig(server, *website, plan, initialSSL.request)
+			if err = createPemFile(*website, initialSSL.certificate); err != nil {
+				return err
+			}
+		}
 
 		siteFolder := path.Join("/www", "sites", website.Alias)
 		server.UpdateDirective("access_log", []string{path.Join(siteFolder, "log", "access.log"), "main"})
@@ -257,7 +346,10 @@ func configDefaultNginx(website *model.Website, domains []model.WebsiteDomain, a
 		rootIndex := path.Join("/www/sites", website.Alias, "index")
 		switch website.Type {
 		case constant.Deployment:
-			proxy := fmt.Sprintf("http://127.0.0.1:%d", appInstall.HttpPort)
+			proxy, err := getAppInstallProxyPass(appInstall)
+			if err != nil {
+				return err
+			}
 			server.UpdateRootProxy([]string{proxy})
 		case constant.Static:
 			server.UpdateRoot(rootIndex)
@@ -279,7 +371,7 @@ func configDefaultNginx(website *model.Website, domains []model.WebsiteDomain, a
 					server.UpdatePHPProxy([]string{website.Proxy}, "")
 				}
 			case constant.RuntimeNode, constant.RuntimeJava, constant.RuntimeGo, constant.RuntimePython, constant.RuntimeDotNet:
-				server.UpdateRootProxy([]string{fmt.Sprintf("http://%s", website.Proxy)})
+				server.UpdateRootProxy([]string{normalizeProxyPass(website.Proxy)})
 			}
 		case constant.Subsite:
 			parentWebsite, err := websiteRepo.GetFirst(repo.WithByID(website.ParentWebsiteID))
@@ -497,7 +589,7 @@ func delNginxConfig(website model.Website, force bool) error {
 	}
 	sitePath := GetSiteDir(website.Alias)
 	if fileOp.Stat(sitePath) {
-		xpack.RemoveTamper(website.Alias)
+		xpack.MultiNodeProvider.RemoveTamper(website.Alias)
 		_ = fileOp.DeleteDir(sitePath)
 	}
 
@@ -534,10 +626,6 @@ func delWafConfig(website model.Website, force bool) error {
 	if !fileOp.Stat(wafDataPath) {
 		return nil
 	}
-	monitorDir := path.Join(wafDataPath, "db", "sites", website.Alias)
-	if fileOp.Stat(monitorDir) {
-		_ = fileOp.DeleteDir(monitorDir)
-	}
 	websitesConfigPath := path.Join(wafDataPath, "conf", "sites.json")
 	content, err := fileOp.GetContent(websitesConfigPath)
 	if err != nil {
@@ -563,7 +651,13 @@ func delWafConfig(website model.Website, force bool) error {
 		return err
 	}
 
-	_ = fileOp.DeleteDir(path.Join(wafDataPath, "sites", website.Alias))
+	for _, websiteDataDir := range []string{
+		path.Join(wafDataPath, "sites", website.Alias),
+		path.Join(wafDataPath, "db", "monitor", website.Alias),
+		path.Join(wafDataPath, "db", "sites", website.Alias),
+	} {
+		_ = fileOp.DeleteDir(websiteDataDir)
+	}
 
 	if err := opNginx(nginxInstall.ContainerName, constant.NginxReload); err != nil {
 		if force {
@@ -708,52 +802,22 @@ func createPemFile(website model.Website, websiteSSL model.WebsiteSSL) error {
 	return nil
 }
 
-func getHttpsPort(websiteID uint) map[int]struct{} {
-	domains, err := websiteDomainRepo.GetBy(websiteDomainRepo.WithWebsiteId(websiteID))
-	if err != nil {
-		return nil
-	}
-	httpsPorts := make(map[int]struct{})
-	nginxInstall, _ := getAppInstallByKey(constant.AppOpenresty)
-	hasDefaultPort := false
-	for _, domain := range domains {
-		if domain.Port == nginxInstall.HttpPort {
-			hasDefaultPort = true
-		}
-		if domain.SSL {
-			httpsPorts[domain.Port] = struct{}{}
-		}
-	}
-	if hasDefaultPort {
-		httpsPorts[nginxInstall.HttpsPort] = struct{}{}
-	}
-	if len(httpsPorts) == 0 {
-		for _, domain := range domains {
-			if !domain.SSL {
-				httpsPorts[domain.Port] = struct{}{}
-			}
-		}
-	}
-	return httpsPorts
+type websiteTLSPlan struct {
+	httpPorts       []int
+	httpsPorts      []int
+	redirectPort    int
+	defaultHTTPPort int
+	hasDefaultHTTP  bool
 }
 
-func applySSL(website *model.Website, websiteSSL model.WebsiteSSL, req request.WebsiteHTTPSOp) error {
-	nginxFull, err := getNginxFull(website)
-	if err != nil {
-		return nil
-	}
-	domains, err := websiteDomainRepo.GetBy(websiteDomainRepo.WithWebsiteId(website.ID))
-	if err != nil {
-		return nil
-	}
+func buildWebsiteTLSPlan(domains []model.WebsiteDomain, defaultHTTPPort, defaultHTTPSPort int) websiteTLSPlan {
 	httpPorts := make(map[int]struct{})
 	httpsPorts := make(map[int]struct{})
-	sslPort := 0
+	plan := websiteTLSPlan{defaultHTTPPort: defaultHTTPPort}
 
-	hasDefaultPort := false
 	for _, domain := range domains {
-		if domain.Port == nginxFull.Install.HttpPort {
-			hasDefaultPort = true
+		if domain.Port == defaultHTTPPort {
+			plan.hasDefaultHTTP = true
 		}
 		if domain.SSL {
 			httpsPorts[domain.Port] = struct{}{}
@@ -761,112 +825,75 @@ func applySSL(website *model.Website, websiteSSL model.WebsiteSSL, req request.W
 			httpPorts[domain.Port] = struct{}{}
 		}
 	}
-	if hasDefaultPort {
-		httpsPorts[nginxFull.Install.HttpsPort] = struct{}{}
+	if plan.hasDefaultHTTP {
+		httpsPorts[defaultHTTPSPort] = struct{}{}
 	}
 	if len(httpsPorts) == 0 {
 		for port := range httpPorts {
 			httpsPorts[port] = struct{}{}
 		}
 	}
-	config := nginxFull.SiteConfig.Config
-	server := config.FindServers()[0]
-
-	defaultHttpPort := strconv.Itoa(nginxFull.Install.HttpPort)
-	defaultHttpPortIPV6 := "[::]:" + defaultHttpPort
-
 	for port := range httpsPorts {
-		sslPort = port
-		portStr := strconv.Itoa(port)
-		server.RemoveListenByBind(portStr)
-		server.RemoveListenByBind("[::]:" + portStr)
-		setListen(server, portStr, website.IPV6, req.Http3, website.DefaultServer, true)
+		delete(httpPorts, port)
 	}
+	for port := range httpPorts {
+		plan.httpPorts = append(plan.httpPorts, port)
+	}
+	for port := range httpsPorts {
+		plan.httpsPorts = append(plan.httpsPorts, port)
+	}
+	sort.Ints(plan.httpPorts)
+	sort.Ints(plan.httpsPorts)
+	if plan.hasDefaultHTTP {
+		plan.redirectPort = defaultHTTPSPort
+	} else if len(plan.httpsPorts) > 0 {
+		plan.redirectPort = plan.httpsPorts[0]
+	}
+	return plan
+}
 
-	server.UpdateDirective("http2", []string{"on"})
+func getHttpsPort(websiteID uint) map[int]struct{} {
+	domains, err := websiteDomainRepo.GetBy(websiteDomainRepo.WithWebsiteId(websiteID))
+	if err != nil {
+		return nil
+	}
+	nginxInstall, _ := getAppInstallByKey(constant.AppOpenresty)
+	plan := buildWebsiteTLSPlan(domains, nginxInstall.HttpPort, nginxInstall.HttpsPort)
+	httpsPorts := make(map[int]struct{}, len(plan.httpsPorts))
+	for _, port := range plan.httpsPorts {
+		httpsPorts[port] = struct{}{}
+	}
+	return httpsPorts
+}
 
-	switch req.HttpConfig {
-	case constant.HTTPSOnly:
-		server.RemoveListenByBind(defaultHttpPort)
-		server.RemoveListenByBind(defaultHttpPortIPV6)
-		server.RemoveDirective("if", []string{"($scheme"})
-	case constant.HTTPToHTTPS:
-		if hasDefaultPort {
-			server.UpdateListen(defaultHttpPort, website.DefaultServer)
-			if website.IPV6 {
-				server.UpdateListen(defaultHttpPortIPV6, website.DefaultServer)
-			}
-		}
-		server.AddHTTP2HTTPS(sslPort)
-	case constant.HTTPAlso:
-		if hasDefaultPort {
-			server.UpdateListen(defaultHttpPort, website.DefaultServer)
-			if website.IPV6 {
-				server.UpdateListen(defaultHttpPortIPV6, website.DefaultServer)
-			}
-		}
-		server.RemoveDirective("if", []string{"($scheme"})
-	}
-
-	if !req.Hsts {
-		server.RemoveDirective("add_header", []string{"Strict-Transport-Security", "\"max-age=31536000\""})
-		server.RemoveDirective("add_header", []string{"Strict-Transport-Security", "\"max-age=31536000; includeSubDomains\""})
-	}
-	if !req.Http3 {
-		for port := range httpsPorts {
-			server.RemoveListen(strconv.Itoa(port), "quic")
-			if website.IPV6 {
-				httpsPortIPV6 := "[::]:" + strconv.Itoa(port)
-				server.RemoveListen(httpsPortIPV6, "quic")
-			}
-		}
-		server.RemoveDirective("add_header", []string{"Alt-Svc"})
-	}
-
-	if err = nginx.WriteConfig(config, nginx.IndentedStyle); err != nil {
-		return err
-	}
-	if err = createPemFile(*website, websiteSSL); err != nil {
-		return err
-	}
+func buildWebsiteSSLParams(alias string, req request.WebsiteHTTPSOp, redirectPort int) []dto.NginxParam {
 	nginxParams := getNginxParamsFromStaticFile(dto.SSL, []dto.NginxParam{})
-	for i, param := range nginxParams {
-		if param.Name == "ssl_certificate" {
-			nginxParams[i].Params = []string{path.Join("/www", "sites", website.Alias, "ssl", "fullchain.pem")}
-		}
-		if param.Name == "ssl_certificate_key" {
-			nginxParams[i].Params = []string{path.Join("/www", "sites", website.Alias, "ssl", "privkey.pem")}
-		}
-		if param.Name == "ssl_protocols" {
+	for i := range nginxParams {
+		switch nginxParams[i].Name {
+		case "ssl_certificate":
+			nginxParams[i].Params = []string{path.Join("/www", "sites", alias, "ssl", "fullchain.pem")}
+		case "ssl_certificate_key":
+			nginxParams[i].Params = []string{path.Join("/www", "sites", alias, "ssl", "privkey.pem")}
+		case "ssl_protocols":
 			nginxParams[i].Params = req.SSLProtocol
 			if len(req.SSLProtocol) == 0 {
 				nginxParams[i].Params = []string{"TLSv1.3", "TLSv1.2"}
 			}
-		}
-		if param.Name == "ssl_ciphers" {
+		case "ssl_ciphers":
 			nginxParams[i].Params = []string{req.Algorithm}
 			if len(req.Algorithm) == 0 {
 				nginxParams[i].Params = []string{"ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-SHA384:ECDHE-RSA-AES128-SHA256:!aNULL:!eNULL:!EXPORT:!DSS:!DES:!RC4:!3DES:!MD5:!PSK:!KRB5:!SRP:!CAMELLIA:!SEED"}
 			}
-		}
-		if param.Name == "error_page" {
-			if len(param.Params) < 2 {
-				continue
-			}
-			code := param.Params[0]
-			if code == "497" {
-				if sslPort != 443 && param.Params[1] == "https://$host$request_uri" {
-					param.Params[1] = fmt.Sprintf("https://$host:%d$request_uri", sslPort)
-				}
+		case "error_page":
+			if len(nginxParams[i].Params) >= 2 && nginxParams[i].Params[0] == "497" && redirectPort != 443 && nginxParams[i].Params[1] == "https://$host$request_uri" {
+				nginxParams[i].Params[1] = fmt.Sprintf("https://$host:%d$request_uri", redirectPort)
 			}
 		}
 	}
 	if req.Hsts {
-		var hstsValue string
+		hstsValue := "\"max-age=31536000\""
 		if req.HstsIncludeSubDomains {
 			hstsValue = "\"max-age=31536000; includeSubDomains\""
-		} else {
-			hstsValue = "\"max-age=31536000\""
 		}
 		nginxParams = append(nginxParams, dto.NginxParam{
 			Name:   "add_header",
@@ -879,11 +906,80 @@ func applySSL(website *model.Website, websiteSSL model.WebsiteSSL, req request.W
 			Params: []string{"Alt-Svc", "'h3=\":443\"; ma=2592000'"},
 		})
 	}
+	return nginxParams
+}
 
-	if err := updateNginxConfig(constant.NginxScopeServer, nginxParams, website); err != nil {
+func applyWebsiteSSLConfig(server *components.Server, website model.Website, plan websiteTLSPlan, req request.WebsiteHTTPSOp) {
+	for _, port := range plan.httpsPorts {
+		portStr := strconv.Itoa(port)
+		server.RemoveListenByBind(portStr)
+		server.RemoveListenByBind("[::]:" + portStr)
+		setListen(server, portStr, website.IPV6, req.Http3, website.DefaultServer, true)
+	}
+	server.UpdateDirective("http2", []string{"on"})
+
+	defaultHTTPPort := strconv.Itoa(plan.defaultHTTPPort)
+	switch req.HttpConfig {
+	case constant.HTTPSOnly:
+		if plan.hasDefaultHTTP {
+			server.RemoveListenByBind(defaultHTTPPort)
+			server.RemoveListenByBind("[::]:" + defaultHTTPPort)
+		}
+		server.RemoveDirective("if", []string{"($scheme"})
+	case constant.HTTPToHTTPS:
+		if plan.hasDefaultHTTP {
+			setListen(server, defaultHTTPPort, website.IPV6, false, website.DefaultServer, false)
+		}
+		if plan.redirectPort > 0 {
+			server.AddHTTP2HTTPS(plan.redirectPort)
+		}
+	case constant.HTTPAlso:
+		if plan.hasDefaultHTTP {
+			setListen(server, defaultHTTPPort, website.IPV6, false, website.DefaultServer, false)
+		}
+		server.RemoveDirective("if", []string{"($scheme"})
+	}
+
+	if !req.Hsts {
+		server.RemoveDirective("add_header", []string{"Strict-Transport-Security", "\"max-age=31536000\""})
+		server.RemoveDirective("add_header", []string{"Strict-Transport-Security", "\"max-age=31536000; includeSubDomains\""})
+	}
+	if !req.Http3 {
+		for _, port := range plan.httpsPorts {
+			server.RemoveListen(strconv.Itoa(port), "quic")
+			if website.IPV6 {
+				server.RemoveListen("[::]:"+strconv.Itoa(port), "quic")
+			}
+		}
+		server.RemoveDirective("add_header", []string{"Alt-Svc"})
+	}
+
+	for _, param := range buildWebsiteSSLParams(website.Alias, req, plan.redirectPort) {
+		server.UpdateDirective(param.Name, param.Params)
+	}
+}
+
+func applySSL(website *model.Website, websiteSSL model.WebsiteSSL, req request.WebsiteHTTPSOp) error {
+	nginxFull, err := getNginxFull(website)
+	if err != nil {
+		return nil
+	}
+	domains, err := websiteDomainRepo.GetBy(websiteDomainRepo.WithWebsiteId(website.ID))
+	if err != nil {
+		return nil
+	}
+	config := nginxFull.SiteConfig.Config
+	server := config.FindServers()[0]
+	plan := buildWebsiteTLSPlan(domains, nginxFull.Install.HttpPort, nginxFull.Install.HttpsPort)
+	applyWebsiteSSLConfig(server, *website, plan, req)
+
+	if err = createPemFile(*website, websiteSSL); err != nil {
 		return err
 	}
-	return nil
+	if err = nginx.WriteConfig(config, nginx.IndentedStyle); err != nil {
+		return err
+	}
+	return nginxCheckAndReload(nginxFull.SiteConfig.OldContent, nginxFull.SiteConfig.FilePath, nginxFull.Install.ContainerName)
 }
 
 func getParamArray(key string, param interface{}) []string {
@@ -977,7 +1073,7 @@ func opWebsite(website *model.Website, operate string) error {
 		server.RemoveDirective("include", []string{proxyInclude})
 		rewriteInclude := fmt.Sprintf("/www/sites/%s/rewrite/%s.conf", website.Alias, website.Alias)
 		server.RemoveDirective("include", []string{rewriteInclude})
-		redirectInclude := fmt.Sprintf("/www/sites/%s/redirect/%s.conf", website.Alias, website.Alias)
+		redirectInclude := getWebsiteRedirectInclude(*website)
 		server.RemoveDirective("include", []string{redirectInclude})
 
 		switch website.Type {
@@ -1009,7 +1105,7 @@ func opWebsite(website *model.Website, operate string) error {
 		if fileOp.Stat(absoluteRewritePath) {
 			server.UpdateDirective("include", []string{rewriteInclude})
 		}
-		redirectInclude := fmt.Sprintf("/www/sites/%s/redirect/%s.conf", website.Alias, website.Alias)
+		redirectInclude := getWebsiteRedirectInclude(*website)
 		absoluteRedirectPath := GetSitePath(*website, SiteRedirectDir)
 		if fileOp.Stat(absoluteRedirectPath) {
 			server.UpdateDirective("include", []string{redirectInclude})
@@ -1025,7 +1121,10 @@ func opWebsite(website *model.Website, operate string) error {
 			if err != nil {
 				return err
 			}
-			proxy := fmt.Sprintf("http://127.0.0.1:%d", appInstall.HttpPort)
+			proxy, err := getAppInstallProxyPass(&appInstall)
+			if err != nil {
+				return err
+			}
 			server.UpdateRootProxy([]string{proxy})
 		case constant.Static:
 			server.UpdateRoot(rootIndex)
@@ -1045,8 +1144,33 @@ func opWebsite(website *model.Website, operate string) error {
 				}
 				server.UpdatePHPProxy([]string{website.Proxy}, localPath)
 			} else {
-				proxy := fmt.Sprintf("http://%s", website.Proxy)
+				proxy := normalizeProxyPass(website.Proxy)
 				server.UpdateRootProxy([]string{proxy})
+			}
+		case constant.Subsite:
+			parentWebsite, err := websiteRepo.GetFirst(repo.WithByID(website.ParentWebsiteID))
+			if err != nil {
+				return err
+			}
+			website.Proxy = parentWebsite.Proxy
+			rootIndex = path.Join("/www/sites", parentWebsite.Alias, "index", website.SiteDir)
+			if parentWebsite.Type == constant.Runtime {
+				parentRuntime, err := runtimeRepo.GetFirst(context.Background(), repo.WithByID(parentWebsite.RuntimeID))
+				if err != nil {
+					return err
+				}
+				website.RuntimeID = parentRuntime.ID
+				if parentRuntime.Type == constant.RuntimePHP {
+					server.UpdateRoot(rootIndex)
+					localPath := ""
+					if parentRuntime.Resource == constant.ResourceLocal {
+						localPath = path.Join(rootIndex, "index.php")
+					}
+					server.UpdatePHPProxy([]string{website.Proxy}, localPath)
+				}
+			}
+			if parentWebsite.Type == constant.Static {
+				server.UpdateRoot(rootIndex)
 			}
 		}
 		website.Status = constant.WebRunning
@@ -1114,7 +1238,8 @@ func checkIsLinkApp(website model.Website) bool {
 
 func chownRootDir(path string) error {
 	cmdMgr := cmd.NewCommandMgr(cmd.WithTimeout(1 * time.Second))
-	if err := cmdMgr.RunBashCf(`chown -R 1000:1000 "%s"`, path); err != nil {
+	owner := fmt.Sprintf("%d:%d", constant.WebsiteUID, constant.WebsiteGID)
+	if err := cmdMgr.Run("chown", "-R", owner, path); err != nil {
 		return err
 	}
 	return nil
@@ -1452,7 +1577,7 @@ func GetSitePath(website model.Website, confType string) string {
 
 func GetConfDir(website model.Website) string {
 	if website.Type != constant.Stream {
-		return GetOpenrestyDir(SiteConf)
+		return GetOpenrestyDir(SiteConfDir)
 	}
 	return GetOpenrestyDir(StreamDir)
 }

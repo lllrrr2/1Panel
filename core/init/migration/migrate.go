@@ -8,7 +8,16 @@ import (
 )
 
 func Init() {
-	m := gormigrate.New(global.DB, gormigrate.DefaultOptions, []*gormigrate.Migration{
+	m := gormigrate.New(global.DB, gormigrate.DefaultOptions, coreMigrations())
+	if err := m.Migrate(); err != nil {
+		global.LOG.Error(err)
+		panic(err)
+	}
+	global.LOG.Info("Migration run successfully")
+}
+
+func coreMigrations() []*gormigrate.Migration {
+	return []*gormigrate.Migration{
 		migrations.AddTable,
 		migrations.InitSetting,
 		migrations.InitOneDrive,
@@ -33,10 +42,30 @@ func Init() {
 		migrations.UpdateAiAgentsMenu,
 		migrations.AddDashboardCarouselSetting,
 		migrations.AddEditionSetting,
-	})
-	if err := m.Migrate(); err != nil {
-		global.LOG.Error(err)
-		panic(err)
+		migrations.UpdateAiLocalModelMenuTitle,
+		migrations.UpdateAiAgentsHideMenuTitle,
+		migrations.UpdateAiModelMenuStructure,
+		migrations.AddDocSourceSetting,
+		migrations.AddAppStoreInstallAllowPortSetting,
+		migrations.AddAppStoreUpgradeDeleteImageSetting,
+		migrations.AddUserManagementMenu,
+		migrations.AddOpsReportMenu,
+		migrations.AddAIBenchmarkMenu,
+		migrations.AddAIProxyMenu,
+		migrations.AddSkillsHubMenu,
+		migrations.UpdateXpackSyncMenu,
+		migrations.AddVirtualMachineMenu,
+		migrations.UpdateXpackMenuSort,
+		migrations.AddOperationLogUser,
+		migrations.AddLoginLogUser,
+		migrations.AddAlertAuditUser,
+		migrations.AddMenuAccordionSetting,
+		migrations.AddAPITrustedProxiesSetting,
+		migrations.AddAllowIPTrustedProxiesSetting,
+		migrations.AddWebsiteTemplateMenu,
+		migrations.RepairXpackAppMenus,
+		migrations.UpdateFirewallMenuPath,
+		migrations.RemoveUpageHideMenu,
+		migrations.MoveVirtualMachineMenuToXpack,
 	}
-	global.LOG.Info("Migration run successfully")
 }

@@ -34,6 +34,8 @@ type WebsiteCreate struct {
 
 	SiteDir string `json:"siteDir"`
 
+	TemplateOutputID uint `json:"templateOutputID"`
+
 	RuntimeConfig
 	FtpConfig
 	DataBaseConfig
@@ -223,9 +225,14 @@ type WebsiteNginxUpdate struct {
 }
 
 type WebsiteLogReq struct {
+	ID      uint   `json:"id" validate:"required"`
+	Operate string `json:"operate" validate:"required,oneof=enable disable delete"`
+	LogType string `json:"logType" validate:"required,oneof=access.log error.log"`
+}
+
+type WebsiteLogSearchReq struct {
 	ID       uint   `json:"id" validate:"required"`
-	Operate  string `json:"operate" validate:"required"`
-	LogType  string `json:"logType" validate:"required"`
+	LogType  string `json:"logType" validate:"required,oneof=access.log error.log"`
 	Page     int    `json:"page"`
 	PageSize int    `json:"pageSize"`
 }
@@ -269,7 +276,19 @@ type WebsiteProxyConfig struct {
 	Replaces        map[string]string `json:"replaces"`
 	SNI             bool              `json:"sni"`
 	ProxySSLName    string            `json:"proxySSLName"`
+	SSLVerify       bool              `json:"sslVerify"`
 	CorsConfig
+}
+
+type WebsiteProxyDelete struct {
+	ID   uint   `json:"id" validate:"required"`
+	Name string `json:"name" validate:"required"`
+}
+
+type WebsiteProxyStatusUpdate struct {
+	ID     uint   `json:"id" validate:"required"`
+	Name   string `json:"name" validate:"required"`
+	Status string `json:"status" validate:"required"`
 }
 
 type CorsConfig struct {

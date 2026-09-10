@@ -23,7 +23,10 @@ export namespace File {
         extension: string;
         itemTotal: number;
         favoriteID: number;
+        shareCode: string;
         remark?: string;
+        isAppendOnly: boolean;
+        isImmutable: boolean;
     }
 
     export interface ReqFile extends ReqPage {
@@ -36,6 +39,49 @@ export namespace File {
         sortBy?: string;
         sortOrder?: string;
         isDetail?: boolean;
+    }
+
+    export interface FileAISearchReq {
+        path: string;
+        query: string;
+        responseLanguage?: string;
+        containSub?: boolean;
+        maxItems?: number;
+        matchCase?: boolean;
+        wholeWord?: boolean;
+        useRegex?: boolean;
+        extensions?: string[];
+        minSize?: number;
+        maxSize?: number;
+        modifiedAfter?: string;
+        modifiedBefore?: string;
+        maxScanFiles?: number;
+        maxFileBytes?: number;
+        maxHitsPerFile?: number;
+        maxTotalHits?: number;
+        contentHitsPromptMaxBytes?: number;
+        llmMaxOutputTokens?: number;
+    }
+
+    export interface FileAIContentHit {
+        path: string;
+        line: number;
+        text: string;
+    }
+
+    export interface FileAISearchResult {
+        mode?: 'ai' | 'grep';
+        summary: string;
+        hits: FileAIContentHit[];
+        contentScannedFiles: number;
+        contentHitsTruncated: boolean;
+        truncated: boolean;
+        preFiltered: boolean;
+        itemCount: number;
+        promptTokens: number;
+        completionTokens: number;
+        totalTokens: number;
+        duration: string;
     }
 
     export interface ReqNodeFile extends ReqFile {
@@ -73,6 +119,7 @@ export namespace File {
         linkPath?: boolean;
         sub?: boolean;
         name?: string;
+        isAppendOnly?: boolean;
     }
 
     export interface FileDelete {
@@ -93,6 +140,11 @@ export namespace File {
         name: string;
         replace: boolean;
         secret: string;
+        taskID?: string;
+    }
+
+    export interface FileCompressStopReq {
+        taskID: string;
     }
 
     export interface FileDeCompress {
@@ -100,11 +152,50 @@ export namespace File {
         dst: string;
         type: string;
         secret: string;
+        taskID?: string;
+    }
+
+    export interface FileDeCompressStopReq {
+        taskID: string;
     }
 
     export interface FileEdit {
         path: string;
         content: string;
+    }
+
+    export interface FileHistorySearchReq {
+        page: number;
+        pageSize: number;
+        path: string;
+        scope: 'current' | 'all';
+        operation?: string;
+    }
+
+    export interface FileHistoryInfo {
+        id: number;
+        fileId?: string;
+        path: string;
+        currentPath?: string;
+        previousId?: number;
+        sourcePath?: string;
+        targetPath?: string;
+        fileName: string;
+        extension: string;
+        fileMode?: string;
+        operation: string;
+        deleted?: boolean;
+        contentSize: number;
+        contentSHA: string;
+        storagePath?: string;
+        content?: string;
+        currentContent?: string;
+        createdAt: string;
+        updatedAt: string;
+    }
+
+    export interface FileHistoryDeleteReq {
+        ids: number[];
     }
 
     export interface FileRename {
@@ -124,6 +215,7 @@ export namespace File {
         name: string;
         url: string;
         ignoreCertificate?: boolean;
+        useProxy?: boolean;
     }
 
     export interface FileWgetRes {
@@ -138,6 +230,14 @@ export namespace File {
         oldPaths: string[];
         newPath: string;
         type: string;
+        name?: string;
+        cover?: boolean;
+        coverPaths?: string[];
+        taskID?: string;
+    }
+
+    export interface FileMoveStopReq {
+        taskID: string;
     }
 
     export interface FileDownload {
@@ -259,5 +359,34 @@ export namespace File {
         log: string;
         status: string;
         message: string;
+    }
+
+    export interface FileShareCreate {
+        path: string;
+        expireMinutes: number;
+        password?: string;
+    }
+
+    export interface FileShareCheck {
+        code: string;
+        password?: string;
+        operateNode: string;
+    }
+
+    export interface FileShareInfo {
+        code: string;
+        path: string;
+        fileName: string;
+        expiresAt: number;
+        permanent: boolean;
+        hasPassword: boolean;
+        password?: string;
+    }
+
+    export interface FileSharePublicInfo {
+        fileName: string;
+        expiresAt: number;
+        permanent: boolean;
+        hasPassword: boolean;
     }
 }

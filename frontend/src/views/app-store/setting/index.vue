@@ -4,8 +4,8 @@
             <el-form
                 :model="config"
                 label-position="left"
-                label-width="180px"
-                class="ml-2.5"
+                label-width="260px"
+                class="ml-2.5 app-setting-form"
                 v-loading="loading"
                 :rules="rules"
                 ref="configForm"
@@ -14,6 +14,7 @@
                     <el-col :xs="24" :sm="20" :md="15" :lg="12" :xl="12">
                         <el-form-item :label="$t('app.uninstallDeleteBackup')" prop="uninstallDeleteBackup">
                             <el-switch
+                                v-permission
                                 v-model="config.uninstallDeleteBackup"
                                 active-value="Enable"
                                 inactive-value="Disable"
@@ -23,6 +24,7 @@
                         </el-form-item>
                         <el-form-item :label="$t('app.uninstallDeleteImage')" prop="uninstallDeleteImage">
                             <el-switch
+                                v-permission
                                 v-model="config.uninstallDeleteImage"
                                 active-value="Enable"
                                 inactive-value="Disable"
@@ -32,6 +34,7 @@
                         </el-form-item>
                         <el-form-item :label="$t('app.upgradeBackup')" prop="upgradeBackup">
                             <el-switch
+                                v-permission
                                 v-model="config.upgradeBackup"
                                 active-value="Enable"
                                 inactive-value="Disable"
@@ -39,7 +42,27 @@
                                 @change="updateConfig('UpgradeBackup', config.upgradeBackup)"
                             />
                         </el-form-item>
-                        <CustomSetting v-if="isProductPro" />
+                        <el-form-item :label="$t('app.upgradeDeleteImage')" prop="upgradeDeleteImage">
+                            <el-switch
+                                v-permission
+                                v-model="config.upgradeDeleteImage"
+                                active-value="Enable"
+                                inactive-value="Disable"
+                                :loading="loading"
+                                @change="updateConfig('UpgradeDeleteImage', config.upgradeDeleteImage)"
+                            />
+                        </el-form-item>
+                        <el-form-item :label="$t('app.installAllowPort')" prop="installAllowPort">
+                            <el-switch
+                                v-permission
+                                v-model="config.installAllowPort"
+                                active-value="Enable"
+                                inactive-value="Disable"
+                                :loading="loading"
+                                @change="updateConfig('InstallAllowPort', config.installAllowPort)"
+                            />
+                        </el-form-item>
+                        <CustomSetting v-if="isXpackOrEE" />
                         <span class="input-help logText" v-else>
                             {{ $t('xpack.customApp.licenseHelper') }}
                             <el-link class="link" @click="toUpload" type="primary">
@@ -61,23 +84,19 @@ import { FormRules } from 'element-plus';
 import { MsgSuccess } from '@/utils/message';
 import i18n from '@/lang';
 import { defineAsyncComponent } from 'vue';
+import { loadOptionalComponent } from '@/extensions/optional';
 import { useGlobalStore } from '@/composables/useGlobalStore';
-const { isProductPro, isMasterProductPro } = useGlobalStore();
+const { isXpackOrEE } = useGlobalStore();
 
-const CustomSetting = defineAsyncComponent(async () => {
-    const modules = import.meta.glob('@/xpack/views/appstore/index.vue');
-    const loader = modules['/src/xpack/views/appstore/index.vue'];
-    if (loader) {
-        return ((await loader()) as any).default;
-    }
-    return { template: '<div></div>' };
-});
+const CustomSetting = defineAsyncComponent(() => loadOptionalComponent('/src/xpack/views/appstore/index.vue'));
 
 const rules = ref<FormRules>({});
 const config = ref({
     uninstallDeleteImage: '',
     uninstallDeleteBackup: '',
     upgradeBackup: '',
+    upgradeDeleteImage: '',
+    installAllowPort: '',
 });
 const loading = ref(false);
 const configForm = ref();
@@ -107,7 +126,7 @@ const toUpload = () => {
 };
 
 const getNodeConfig = async () => {
-    if (isMasterProductPro.value) {
+    if (isXpackOrEE.value) {
         return;
     }
     const res = await getCurrentNodeCustomAppConfig();
@@ -142,6 +161,17 @@ onMounted(() => {
 </script>
 
 <style lang="css" scoped>
+.app-setting-form :deep(.el-form-item) {
+    align-items: flex-start;
+}
+
+.app-setting-form :deep(.el-form-item__label) {
+    white-space: normal;
+    line-height: 20px;
+    word-break: break-word;
+    padding-top: 6px;
+}
+
 .logText {
     line-height: 22px;
     font-size: 12px;

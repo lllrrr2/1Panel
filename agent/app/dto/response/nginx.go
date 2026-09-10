@@ -17,6 +17,17 @@ type NginxParam struct {
 	Params []string `json:"params"`
 }
 
+// NginxBrotliRes carries the brotli settings together with where they live.
+// ManagedExternally is true when the user defined brotli by hand, in which
+// case the panel only reports the values and must not write its own copy.
+// ManagedUnavailable is true when the panel could not wire the managed
+// configuration into nginx.conf at all, so the reported values are inert.
+type NginxBrotliRes struct {
+	Params             []NginxParam `json:"params"`
+	ManagedExternally  bool         `json:"managedExternally"`
+	ManagedUnavailable bool         `json:"managedUnavailable"`
+}
+
 type NginxAuthRes struct {
 	Enable bool            `json:"enable"`
 	Items  []dto.NginxAuth `json:"items"`
@@ -69,16 +80,25 @@ type NginxProxyCache struct {
 }
 
 type NginxModule struct {
-	Name     string `json:"name"`
-	Script   string `json:"script"`
-	Packages string `json:"packages"`
-	Params   string `json:"params"`
-	Enable   bool   `json:"enable"`
+	Name        string                    `json:"name"`
+	Custom      bool                      `json:"custom"`
+	Script      string                    `json:"script"`
+	Packages    string                    `json:"packages"`
+	Params      string                    `json:"params"`
+	Enable      bool                      `json:"enable"`
+	BuildMode   string                    `json:"buildMode"`
+	Provider    string                    `json:"provider"`
+	LoadOrder   int                       `json:"loadOrder"`
+	BuildStatus string                    `json:"buildStatus"`
+	LoadStatus  string                    `json:"loadStatus"`
+	Artifacts   []dto.NginxModuleArtifact `json:"artifacts"`
+	LastError   string                    `json:"lastError"`
 }
 
 type NginxBuildConfig struct {
-	Mirror  string        `json:"mirror"`
-	Modules []NginxModule `json:"modules"`
+	Mirror           string        `json:"mirror"`
+	DynamicSupported bool          `json:"dynamicSupported"`
+	Modules          []NginxModule `json:"modules"`
 }
 
 type NginxConfigRes struct {

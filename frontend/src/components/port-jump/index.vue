@@ -19,10 +19,10 @@ import { ref } from 'vue';
 import { getAgentSettingInfo } from '@/api/modules/setting';
 import i18n from '@/lang';
 import { MsgError, MsgWarning } from '@/utils/message';
-import { jumpToPath } from '@/utils/util';
+import { jumpToPath } from '@/utils/router';
 import { useRouter } from 'vue-router';
-import { GlobalStore } from '@/store';
-const globalStore = GlobalStore();
+import { useGlobalStore } from '@/composables/useGlobalStore';
+const { currentNodeAddr, isMaster } = useGlobalStore();
 const router = useRouter();
 
 const open = ref();
@@ -33,6 +33,7 @@ interface DialogProps {
     protocol: string;
     path?: string;
     query?: string;
+    hash?: string;
 }
 
 const acceptParams = async (params: DialogProps): Promise<void> => {
@@ -43,8 +44,8 @@ const acceptParams = async (params: DialogProps): Promise<void> => {
     let protocol = params.protocol === 'https' ? 'https' : 'http';
     const res = await getAgentSettingInfo();
     if (!res.data.systemIP) {
-        if (!globalStore.isMaster || globalStore.currentNodeAddr != '127.0.0.1') {
-            res.data.systemIP = globalStore.currentNodeAddr;
+        if (!isMaster.value || currentNodeAddr.value != '127.0.0.1') {
+            res.data.systemIP = currentNodeAddr.value;
         } else {
             open.value = true;
             return;
@@ -57,6 +58,9 @@ const acceptParams = async (params: DialogProps): Promise<void> => {
         }
         if (params.query) {
             url += params.query.startsWith('?') ? params.query : `?${params.query}`;
+        }
+        if (params.hash) {
+            url += params.hash.startsWith('#') ? params.hash : `#${params.hash}`;
         }
         return url;
     };

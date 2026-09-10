@@ -1,5 +1,5 @@
 <template>
-    <el-dialog v-model="submitVisible" :destroy-on-close="true" :close-on-click-modal="false" width="40%">
+    <DialogPro v-model="submitVisible">
         <template #header>
             {{ $t('aiTools.mcp.importMcpJson') }}
         </template>
@@ -27,12 +27,12 @@
                 <el-button @click="onCancel">
                     {{ $t('commons.button.cancel') }}
                 </el-button>
-                <el-button type="primary" @click="onConfirm">
+                <el-button v-permission type="primary" @click="onConfirm">
                     {{ $t('commons.button.confirm') }}
                 </el-button>
             </span>
         </template>
-    </el-dialog>
+    </DialogPro>
 </template>
 
 <script lang="ts" setup>
@@ -53,7 +53,7 @@ const onConfirm = async () => {
     try {
         const data = JSON.parse(mcpServerJson.value);
         if (!data.mcpServers || typeof data.mcpServers !== 'object') {
-            throw new Error(i18n.global.t('mcp.importMcpJsonError'));
+            throw new Error(i18n.global.t('aiTools.mcp.importMcpJsonError'));
         }
         mcpServerConfig.value = Object.entries(data.mcpServers).map(([name, config]: any) => ({
             name,

@@ -11,7 +11,7 @@
                 <el-button @click="handleClose" :disabled="loading">
                     {{ $t('commons.button.cancel') }}
                 </el-button>
-                <el-button type="primary" @click="handleSubmit" :disabled="loading">
+                <el-button type="primary" @click="handleSubmit" :disabled="loading || !formData.appDetailId">
                     {{ $t('commons.button.confirm') }}
                 </el-button>
             </span>
@@ -20,16 +20,17 @@
     <TaskLog ref="taskLogRef" />
 </template>
 
-<script lang="ts" setup name="AppInstallPage">
+<script lang="ts" setup>
 import { useRouter } from 'vue-router';
 import AppInstallForm from '@/views/app-store/detail/form/index.vue';
 import { installApp } from '@/api/modules/app';
 import { MsgError } from '@/utils/message';
-import { newUUID } from '@/utils/util';
+import { newUUID } from '@/utils/id';
 import { routerToName } from '@/utils/router';
 import TaskLog from '@/components/log/task/index.vue';
 import i18n from '@/lang';
 import { installAppToNodes } from '@/api/modules/app';
+defineOptions({ name: 'AppInstallPage' });
 
 const router = useRouter();
 const open = ref(false);
@@ -70,6 +71,8 @@ const handleClose = () => {
 };
 
 const handleSubmit = async () => {
+    if (!formData.value.appDetailId) return;
+
     const isValid = await installFormRef.value?.validate();
     if (!isValid) return;
 

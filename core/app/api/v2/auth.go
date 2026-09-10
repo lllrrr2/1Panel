@@ -7,13 +7,16 @@ import (
 	"path"
 
 	"github.com/1Panel-dev/1Panel/core/app/api/v2/helper"
+	appauth "github.com/1Panel-dev/1Panel/core/app/auth"
 	"github.com/1Panel-dev/1Panel/core/app/dto"
 	"github.com/1Panel-dev/1Panel/core/app/model"
 	"github.com/1Panel-dev/1Panel/core/buserr"
 	"github.com/1Panel-dev/1Panel/core/constant"
 	"github.com/1Panel-dev/1Panel/core/global"
+	initauth "github.com/1Panel-dev/1Panel/core/init/auth"
 	"github.com/1Panel-dev/1Panel/core/utils/captcha"
 	"github.com/1Panel-dev/1Panel/core/utils/common"
+	"github.com/1Panel-dev/1Panel/core/utils/xpack"
 	"github.com/gin-gonic/gin"
 )
 
@@ -33,6 +36,10 @@ func (b *BaseApi) Login(c *gin.Context) {
 	}
 
 	ip := common.GetRealClientIP(c)
+	if global.IPTracker.IsLocked(ip) {
+		helper.BadAuth(c, "ErrLoginLocked", nil)
+		return
+	}
 	needCaptcha := global.IPTracker.NeedCaptcha(ip)
 	if needCaptcha {
 		if errMsg := captcha.VerifyCode(req.CaptchaID, req.Captcha); errMsg != "" {
@@ -53,23 +60,27 @@ func (b *BaseApi) Login(c *gin.Context) {
 		}
 	}
 
-	user, msgKey, err := authService.Login(c, req, string(entrance))
+	user, msgKey, err := xpack.AuthProvider.Login(c, req, string(entrance))
 	if user == nil || user.MfaStatus != constant.StatusEnable {
-		go saveLoginLogs(c, wrapLoginErr(msgKey, err))
+		go saveLoginLogs(c, req.Name, wrapLoginErr(msgKey, err))
 	}
-	if msgKey == "ErrAuth" || msgKey == "ErrEntrance" {
+	if msgKey == "ErrAuth" || msgKey == "ErrEntrance" || msgKey == "ErrNoneNode" {
 		if msgKey == "ErrAuth" {
+			global.IPTracker.RecordFailure(ip)
 			global.IPTracker.SetNeedCaptcha(ip)
 		}
 		helper.BadAuth(c, msgKey, err)
 		return
 	}
 	if err != nil {
+		global.IPTracker.RecordFailure(ip)
 		global.IPTracker.SetNeedCaptcha(ip)
 		helper.InternalServer(c, err)
 		return
 	}
-	global.IPTracker.Clear(ip)
+	if user == nil || user.MfaStatus != constant.StatusEnable {
+		global.IPTracker.Clear(ip)
+	}
 	helper.SuccessWithData(c, user)
 }
 
@@ -85,6 +96,11 @@ func (b *BaseApi) MFALogin(c *gin.Context) {
 	if err := helper.CheckBindAndValidate(&req, c); err != nil {
 		return
 	}
+	ip := common.GetRealClientIP(c)
+	if global.IPTracker.IsLocked(ip) {
+		helper.BadAuth(c, "ErrLoginLocked", nil)
+		return
+	}
 
 	entranceItem := c.Request.Header.Get("EntranceCode")
 	var entrance []byte
@@ -92,16 +108,29 @@ func (b *BaseApi) MFALogin(c *gin.Context) {
 		entrance, _ = base64.StdEncoding.DecodeString(entranceItem)
 	}
 
-	user, msgKey, err := authService.MFALogin(c, req, string(entrance))
-	go saveLoginLogs(c, wrapLoginErr(msgKey, err))
-	if msgKey == "ErrAuth" {
+	user, msgKey, err := xpack.AuthProvider.MFALogin(c, req, string(entrance))
+	go saveLoginLogs(c, loginLogUserName(user, req.SessionID), wrapLoginErr(msgKey, err))
+	if msgKey == "ErrNoneNode" {
+		helper.BadAuth(c, msgKey, err)
+		return
+	}
+	if msgKey == "ErrMFA" {
+		global.IPTracker.RecordFailure(ip)
+		failures := initauth.GetMFASessionStore().RecordFailure(req.SessionID)
+		if failures >= initauth.MFASessionMaxFailures {
+			global.IPTracker.SetNeedCaptcha(ip)
+			helper.BadAuth(c, "ErrCaptchaCode", nil)
+			return
+		}
 		helper.BadAuth(c, msgKey, err)
 		return
 	}
 	if err != nil {
+		global.IPTracker.RecordFailure(ip)
 		helper.InternalServer(c, err)
 		return
 	}
+	global.IPTracker.Clear(ip)
 	helper.SuccessWithData(c, user)
 }
 
@@ -111,7 +140,7 @@ func (b *BaseApi) MFALogin(c *gin.Context) {
 // @Router /core/auth/passkey/begin [post]
 func (b *BaseApi) PasskeyBeginLogin(c *gin.Context) {
 	entrance := loadEntranceFromRequest(c)
-	res, msgKey, err := authService.PasskeyBeginLogin(c, entrance)
+	res, msgKey, err := xpack.AuthProvider.PasskeyBeginLogin(c, entrance)
 	if msgKey != "" {
 		if msgKey == "ErrEntrance" {
 			helper.BadAuth(c, msgKey, err)
@@ -138,9 +167,9 @@ func (b *BaseApi) PasskeyBeginLogin(c *gin.Context) {
 func (b *BaseApi) PasskeyFinishLogin(c *gin.Context) {
 	sessionID := c.GetHeader("Passkey-Session")
 	entrance := loadEntranceFromRequest(c)
-	user, msgKey, err := authService.PasskeyFinishLogin(c, sessionID, entrance)
-	go saveLoginLogs(c, wrapLoginErr(msgKey, err))
-	if msgKey == "ErrAuth" || msgKey == "ErrEntrance" {
+	user, msgKey, err := xpack.AuthProvider.PasskeyFinishLogin(c, sessionID, entrance)
+	go saveLoginLogs(c, loginLogUserName(user, ""), wrapLoginErr(msgKey, err))
+	if msgKey == "ErrAuth" || msgKey == "ErrEntrance" || msgKey == "ErrNoneNode" {
 		if msgKey == "ErrAuth" {
 			global.IPTracker.SetNeedCaptcha(common.GetRealClientIP(c))
 		}
@@ -167,11 +196,19 @@ func (b *BaseApi) PasskeyFinishLogin(c *gin.Context) {
 // @Security Timestamp
 // @Router /core/auth/logout [post]
 func (b *BaseApi) LogOut(c *gin.Context) {
+	result, prepareErr := xpack.AuthProvider.PrepareLogout(c)
 	if err := authService.LogOut(c); err != nil {
 		helper.InternalServer(c, err)
 		return
 	}
-	helper.Success(c)
+	if prepareErr != nil {
+		global.LOG.Warnf("prepare external logout failed: %v", prepareErr)
+		result = &dto.LogoutResult{}
+	}
+	if result == nil {
+		result = &dto.LogoutResult{}
+	}
+	helper.SuccessWithData(c, result)
 }
 
 // @Tags Auth
@@ -187,6 +224,12 @@ func (b *BaseApi) Captcha(c *gin.Context) {
 	helper.SuccessWithData(c, captcha)
 }
 
+// @Tags Auth
+// @Summary Get welcome page
+// @Success 200
+// @Security ApiKeyAuth
+// @Security Timestamp
+// @Router /core/auth/welcome [get]
 func (b *BaseApi) GetWelcomePage(c *gin.Context) {
 	count, _, _ := logService.PageLoginLog(c, dto.SearchLgLogWithPage{PageInfo: dto.PageInfo{Page: 1, PageSize: 10}})
 	if count != 1 {
@@ -203,7 +246,7 @@ func (b *BaseApi) GetWelcomePage(c *gin.Context) {
 
 // @Tags Auth
 // @Summary Get Setting For Login
-// @Success 200 {object} dto.SystemSetting
+// @Success 200 {object} dto.LoginSetting
 // @Router /core/auth/setting [get]
 func (b *BaseApi) GetLoginSetting(c *gin.Context) {
 	settingInfo, err := settingService.GetSettingInfo()
@@ -214,21 +257,276 @@ func (b *BaseApi) GetLoginSetting(c *gin.Context) {
 	ip := common.GetRealClientIP(c)
 	needCaptcha := global.IPTracker.NeedCaptcha(ip)
 	res := &dto.LoginSetting{
-		IsDemo:      global.CONF.Base.IsDemo,
-		IsIntl:      global.CONF.Base.Edition == "intl",
-		IsFxplay:    global.CONF.Base.IsFxplay,
-		IsOffLine:   global.CONF.Base.IsOffLine,
-		Language:    settingInfo.Language,
-		MenuTabs:    settingInfo.MenuTabs,
-		PanelName:   settingInfo.PanelName,
-		Theme:       settingInfo.Theme,
-		NeedCaptcha: needCaptcha,
+		IsDemo:        global.CONF.Base.IsDemo,
+		IsIntl:        global.CONF.Base.Edition == "intl",
+		IsFxplay:      global.CONF.Base.IsFxplay,
+		IsOffline:     global.CONF.Base.IsOffline,
+		IsEnterprise:  global.CONF.Base.IsEnterprise,
+		Language:      settingInfo.Language,
+		MenuTabs:      settingInfo.MenuTabs,
+		MenuAccordion: settingInfo.MenuAccordion,
+		PanelName:     settingInfo.PanelName,
+		Theme:         settingInfo.Theme,
+		NeedCaptcha:   needCaptcha,
 	}
-	res.PasskeySetting = authService.PasskeyStatus(c)
+	res.PasskeySetting = xpack.AuthProvider.PasskeyStatus(c)
 	helper.SuccessWithData(c, res)
 }
 
-func saveLoginLogs(c *gin.Context, err error) {
+// @Tags Auth
+// @Summary Begin passkey registration
+// @Accept json
+// @Param request body dto.PasskeyRegisterRequest true "request"
+// @Success 200 {object} dto.PasskeyBeginResponse
+// @Security ApiKeyAuth
+// @Security Timestamp
+// @Router /core/auth/passkey/register/begin [post]
+func (b *BaseApi) PasskeyRegisterBegin(c *gin.Context) {
+	var req dto.PasskeyRegisterRequest
+	if err := helper.CheckBindAndValidate(&req, c); err != nil {
+		return
+	}
+	res, msgKey, err := xpack.AuthProvider.PasskeyBeginRegister(c, req.Name)
+	if msgKey != "" {
+		helper.ErrorWithDetail(c, http.StatusBadRequest, msgKey, err)
+		return
+	}
+	if err != nil {
+		helper.InternalServer(c, err)
+		return
+	}
+	helper.SuccessWithData(c, res)
+}
+
+// @Tags Auth
+// @Summary Finish passkey registration
+// @Accept json
+// @Success 200
+// @Security ApiKeyAuth
+// @Security Timestamp
+// @Router /core/auth/passkey/register/finish [post]
+func (b *BaseApi) PasskeyRegisterFinish(c *gin.Context) {
+	sessionID := c.GetHeader("Passkey-Session")
+	msgKey, err := xpack.AuthProvider.PasskeyFinishRegister(c, sessionID)
+	if msgKey != "" {
+		helper.ErrorWithDetail(c, http.StatusBadRequest, msgKey, err)
+		return
+	}
+	if err != nil {
+		helper.InternalServer(c, err)
+		return
+	}
+	helper.Success(c)
+}
+
+// @Tags Auth
+// @Summary List passkeys
+// @Success 200 {array} dto.PasskeyInfo
+// @Security ApiKeyAuth
+// @Security Timestamp
+// @Router /core/auth/passkey/list [get]
+func (b *BaseApi) PasskeyList(c *gin.Context) {
+	list, err := xpack.AuthProvider.PasskeyList(c)
+	if err != nil {
+		helper.InternalServer(c, err)
+		return
+	}
+	helper.SuccessWithData(c, list)
+}
+
+// @Tags Auth
+// @Summary Delete passkey
+// @Success 200
+// @Security ApiKeyAuth
+// @Security Timestamp
+// @Router /core/auth/passkey/del [post]
+func (b *BaseApi) PasskeyDelete(c *gin.Context) {
+	var req dto.PasskeyID
+	if err := helper.CheckBindAndValidate(&req, c); err != nil {
+		return
+	}
+	if err := xpack.AuthProvider.PasskeyDelete(c, req.ID); err != nil {
+		helper.InternalServer(c, err)
+		return
+	}
+	helper.Success(c)
+}
+
+// @Tags System Setting
+// @Summary Load mfa info
+// @Accept json
+// @Param request body dto.MfaCredential true "request"
+// @Success 200 {object} mfa.Otp
+// @Security ApiKeyAuth
+// @Security Timestamp
+// @Router /core/auth/mfa [post]
+func (b *BaseApi) LoadMFA(c *gin.Context) {
+	var req dto.MfaRequest
+	if err := helper.CheckBindAndValidate(&req, c); err != nil {
+		return
+	}
+	otp, err := xpack.AuthProvider.LoadMFA(c, req)
+	if err != nil {
+		helper.InternalServer(c, err)
+		return
+	}
+
+	helper.SuccessWithData(c, otp)
+}
+
+// @Tags System Setting
+// @Summary Bind mfa
+// @Accept json
+// @Param request body dto.MfaCredential true "request"
+// @Success 200
+// @Security ApiKeyAuth
+// @Security Timestamp
+// @Router /core/auth/mfa/bind [post]
+// @x-panel-log {"bodyKeys":[],"paramKeys":[],"BeforeFunctions":[],"formatZH":"mfa 绑定","formatEN":"bind mfa"}
+func (b *BaseApi) MFABind(c *gin.Context) {
+	var req dto.MfaCredential
+	if err := helper.CheckBindAndValidate(&req, c); err != nil {
+		return
+	}
+
+	if err := xpack.AuthProvider.MFABind(c, req); err != nil {
+		helper.InternalServer(c, err)
+		return
+	}
+
+	helper.Success(c)
+}
+
+// @Tags System Setting
+// @Summary Close mfa
+// @Accept json
+// @Success 200
+// @Security ApiKeyAuth
+// @Security Timestamp
+// @Router /core/auth/mfa/close [post]
+// @x-panel-log {"bodyKeys":[],"paramKeys":[],"BeforeFunctions":[],"formatZH":"mfa 关闭","formatEN":"close mfa"}
+func (b *BaseApi) MFAClose(c *gin.Context) {
+	if err := xpack.AuthProvider.MFAClose(c); err != nil {
+		helper.InternalServer(c, err)
+		return
+	}
+
+	helper.Success(c)
+}
+
+// @Tags Auth
+// @Summary generate api key
+// @Accept json
+// @Success 200 {string} key
+// @Security ApiKeyAuth
+// @Security Timestamp
+// @Router /core/auth/api/generate [post]
+// @x-panel-log {"bodyKeys":[],"paramKeys":[],"BeforeFunctions":[],"formatZH":"生成 API 接口密钥","formatEN":"generate api key"}
+func (b *BaseApi) GenerateApiKey(c *gin.Context) {
+	panelToken := c.GetHeader("1Panel-Token")
+	if panelToken != "" {
+		helper.BadAuth(c, "ErrApiConfigDisable", nil)
+		return
+	}
+	apiKey, err := xpack.AuthProvider.GenerateApiKey(c)
+	if err != nil {
+		helper.InternalServer(c, err)
+		return
+	}
+	helper.SuccessWithData(c, apiKey)
+}
+
+// @Tags Auth
+// @Summary Update api config
+// @Accept json
+// @Param request body dto.ApiInterfaceConfig true "request"
+// @Success 200
+// @Security ApiKeyAuth
+// @Security Timestamp
+// @Router /core/auth/api/update [post]
+// @x-panel-log {"bodyKeys":["ipWhiteList","apiTrustedProxies"],"paramKeys":[],"BeforeFunctions":[],"formatZH":"更新 API 接口配置 => IP 白名单: [ipWhiteList], API 可信代理: [apiTrustedProxies]","formatEN":"update api config => IP Allowlist: [ipWhiteList], API Trusted Proxies: [apiTrustedProxies]"}
+func (b *BaseApi) UpdateApiConfig(c *gin.Context) {
+	panelToken := c.GetHeader("1Panel-Token")
+	if panelToken != "" {
+		helper.BadAuth(c, "ErrApiConfigDisable", nil)
+		return
+	}
+	var req dto.ApiInterfaceConfig
+	if err := helper.CheckBindAndValidate(&req, c); err != nil {
+		return
+	}
+	trustedProxies, err := appauth.NormalizeAPITrustedProxies(req.ApiTrustedProxies)
+	if err != nil {
+		helper.BadRequest(c, err)
+		return
+	}
+	req.ApiTrustedProxies = trustedProxies
+
+	if err := xpack.AuthProvider.UpdateApiConfig(c, req); err != nil {
+		helper.InternalServer(c, err)
+		return
+	}
+	helper.Success(c)
+}
+
+// @Tags Auth
+// @Summary Load current user info
+// @Success 200 {object} dto.CurrentUserInfo
+// @Security ApiKeyAuth
+// @Security Timestamp
+// @Router /core/auth/current [get]
+func (b *BaseApi) GetCurrentUser(c *gin.Context) {
+	userInfo, err := xpack.AuthProvider.GetCurrentUserInfo(c)
+	if err != nil {
+		helper.InternalServer(c, err)
+		return
+	}
+	helper.SuccessWithData(c, userInfo)
+}
+
+// @Tags Auth
+// @Summary Update current user info
+// @Accept json
+// @Param request body dto.CurrentUserUpdate true "request"
+// @Success 200
+// @Security ApiKeyAuth
+// @Security Timestamp
+// @Router /core/auth/current/update [post]
+func (b *BaseApi) UpdateCurrentUser(c *gin.Context) {
+	var req dto.CurrentUserUpdate
+	if err := helper.CheckBindAndValidate(&req, c); err != nil {
+		return
+	}
+	if err := xpack.AuthProvider.UpdateCurrentUserInfo(c, req); err != nil {
+		helper.InternalServer(c, err)
+		return
+	}
+	helper.Success(c)
+}
+
+// @Tags Auth
+// @Summary Reset system password expired
+// @Accept json
+// @Param request body dto.PasswordUpdate true "request"
+// @Success 200
+// @Security ApiKeyAuth
+// @Security Timestamp
+// @Router /core/auth/expired/reset [post]
+// @x-panel-log {"bodyKeys":[],"paramKeys":[],"BeforeFunctions":[],"formatZH":"重置过期密码","formatEN":"reset an expired Password"}
+func (b *BaseApi) ResetPassword(c *gin.Context) {
+	var req dto.PasswordUpdate
+	if err := helper.CheckBindAndValidate(&req, c); err != nil {
+		return
+	}
+
+	if err := xpack.AuthProvider.HandlePasswordExpired(c, req.OldPassword, req.NewPassword); err != nil {
+		helper.InternalServer(c, err)
+		return
+	}
+	helper.Success(c)
+}
+
+func saveLoginLogs(c *gin.Context, userName string, err error) {
 	var logs model.LoginLog
 	if err != nil {
 		logs.Status = constant.StatusFailed
@@ -237,8 +535,22 @@ func saveLoginLogs(c *gin.Context, err error) {
 		logs.Status = constant.StatusSuccess
 	}
 	logs.IP = c.ClientIP()
+	logs.User = userName
 	logs.Agent = c.GetHeader("User-Agent")
 	_ = logService.CreateLoginLog(logs)
+}
+
+func loginLogUserName(user *dto.UserLoginInfo, mfaSessionID string) string {
+	if user != nil {
+		return user.Name
+	}
+	if mfaSessionID == "" {
+		return ""
+	}
+	if session, ok := initauth.GetMFASessionStore().Get(mfaSessionID); ok {
+		return session.Name
+	}
+	return ""
 }
 
 func wrapLoginErr(msgKey string, err error) error {

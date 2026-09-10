@@ -8,7 +8,7 @@
                 <el-input v-else v-model="dialogData.rowData!.name" />
             </el-form-item>
             <el-form-item
-                v-if="globalStore.isProductPro"
+                v-if="isProductPro"
                 :label="$t('setting.scope')"
                 prop="isPublic"
                 :rules="Rules.requiredSelect"
@@ -40,7 +40,7 @@
                     <el-option :label="$t('setting.UPYUN')" value="UPYUN"></el-option>
                 </el-select>
                 <span v-if="isALIYUNYUN()" class="input-help">{{ $t('setting.ALIYUNHelper') }}</span>
-                <span v-if="dialogData.rowData?.type === 'GoogleDrive' && !globalStore.isFxplay" class="input-help">
+                <span v-if="dialogData.rowData?.type === 'GoogleDrive' && !isFxplay" class="input-help">
                     {{ $t('setting.googleHelper', [$t('setting.' + dialogData.rowData?.type)]) }}
                     <el-link
                         style="font-size: 12px; margin-left: 5px"
@@ -84,7 +84,7 @@
                 :rules="Rules.requiredInput"
             >
                 <el-input v-model="dialogData.rowData!.varsJson['address']" />
-                <span class="input-help" v-if="!globalStore.isFxplay">
+                <span class="input-help" v-if="!isFxplay">
                     {{ $t('setting.WebDAVAlist') }}
                     <el-link
                         style="font-size: 12px; margin-left: 5px"
@@ -218,7 +218,10 @@
                     <el-option value="Deep_Archive" :label="$t('setting.scDeep_Archive')" />
                 </el-select>
                 <el-alert
-                    v-if="dialogData.rowData!.varsJson['scType'] === 'Archive' || dialogData.rowData!.varsJson['scType'] === 'Deep_Archive'"
+                    v-if="
+                        dialogData.rowData!.varsJson['scType'] === 'Archive' ||
+                        dialogData.rowData!.varsJson['scType'] === 'Deep_Archive'
+                    "
                     class="mt-2.5"
                     :closable="false"
                     type="warning"
@@ -238,7 +241,10 @@
                     <el-option value="ColdArchive" :label="$t('setting.scDeep_Archive')" />
                 </el-select>
                 <el-alert
-                    v-if="dialogData.rowData!.varsJson['scType'] === 'Archive' || dialogData.rowData!.varsJson['scType'] === 'ColdArchive'"
+                    v-if="
+                        dialogData.rowData!.varsJson['scType'] === 'Archive' ||
+                        dialogData.rowData!.varsJson['scType'] === 'ColdArchive'
+                    "
                     class="mt-2.5"
                     :closable="false"
                     type="warning"
@@ -258,7 +264,10 @@
                     <el-option value="DEEP_ARCHIVE" :label="$t('setting.scDeep_Archive')" />
                 </el-select>
                 <el-alert
-                    v-if="dialogData.rowData!.varsJson['scType'] === 'GLACIER' || dialogData.rowData!.varsJson['scType'] === 'DEEP_ARCHIVE'"
+                    v-if="
+                        dialogData.rowData!.varsJson['scType'] === 'GLACIER' ||
+                        dialogData.rowData!.varsJson['scType'] === 'DEEP_ARCHIVE'
+                    "
                     class="mt-2.5"
                     :closable="false"
                     type="warning"
@@ -291,7 +300,7 @@
                         <el-button class="append-button" @click="loadFromTokenForAliyun()">
                             {{ $t('setting.analysis') }}
                         </el-button>
-                        <span class="input-help" v-if="!globalStore.isFxplay">
+                        <span class="input-help" v-if="!isFxplay">
                             {{ $t('setting.analysisHelper') }}
                             <el-link
                                 style="font-size: 12px; margin-left: 5px"
@@ -318,7 +327,7 @@
                         <el-radio-button :value="false">{{ $t('setting.isNotCN') }}</el-radio-button>
                         <el-radio-button :value="true">{{ $t('setting.isCN') }}</el-radio-button>
                     </el-radio-group>
-                    <span class="input-help" v-if="!globalStore.isFxplay">
+                    <span class="input-help" v-if="!isFxplay">
                         {{ $t('setting.onedrive_helper') }}
                         <el-link
                             style="font-size: 12px; margin-left: 5px"
@@ -390,10 +399,10 @@
             <el-button :disabled="loading" @click="handleClose">
                 {{ $t('commons.button.cancel') }}
             </el-button>
-            <el-button :disabled="loading" @click="onCheck(formRef)">
+            <el-button v-permission :disabled="loading" @click="onCheck(formRef)">
                 {{ $t('terminal.testConn') }}
             </el-button>
-            <el-button type="primary" :disabled="!isOK || loading" @click="onSubmit()">
+            <el-button v-permission type="primary" :disabled="!isOK || loading" @click="onSubmit()">
                 {{ $t('commons.button.confirm') }}
             </el-button>
         </template>
@@ -410,11 +419,13 @@ import { Backup } from '@/api/interface/backup';
 import FileList from '@/components/file-list/index.vue';
 import { addBackup, checkBackup, editBackup, getClientInfo, listBucket } from '@/api/modules/backup';
 import { cities } from './../helper';
-import { dateFormat, deepCopy, spliceHttp, splitHttp } from '@/utils/util';
+import { dateFormat } from '@/utils/date';
+import { deepCopy } from '@/utils/misc';
+import { spliceHttp, splitHttp } from '@/utils/validate';
 import { MsgError, MsgSuccess } from '@/utils/message';
 import { Base64 } from 'js-base64';
-import { GlobalStore } from '@/store';
-const globalStore = GlobalStore();
+import { useGlobalStore } from '@/composables/useGlobalStore';
+const { docsUrl, isFxplay, isProductPro } = useGlobalStore();
 
 const loading = ref(false);
 type FormInstance = InstanceType<typeof ElForm>;
@@ -516,7 +527,7 @@ const toDoc = (type: string) => {
             uri = '#46-webdav-alist';
             break;
     }
-    window.open(globalStore.docsUrl + '/user_manual/settings/' + uri, '_blank', 'noopener,noreferrer');
+    window.open(docsUrl.value + '/user_manual/settings/' + uri, '_blank', 'noopener,noreferrer');
 };
 const jumpForCode = async (formEl: FormInstance | undefined) => {
     if (!formEl) return;

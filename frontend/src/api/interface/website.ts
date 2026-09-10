@@ -96,6 +96,7 @@ export namespace Website {
         ftpUser: string;
         ftpPassword: string;
         taskID: string;
+        templateOutputID?: number;
         SSLID?: number;
         enableSSL: boolean;
         createDB?: boolean;
@@ -130,12 +131,23 @@ export namespace Website {
         id: number;
         operate: string;
         logType: string;
+    }
+
+    export interface WebSiteLogReq {
+        id: number;
         page?: number;
         pageSize?: number;
+        logType: string;
     }
 
     export interface OptionReq {
         types?: string[];
+    }
+
+    export interface WebsiteOption {
+        id: number;
+        primaryDomain: string;
+        alias: string;
     }
 
     export interface WebSiteLog {
@@ -198,20 +210,20 @@ export namespace Website {
     export interface DnsAccount extends CommonModel {
         name: string;
         type: string;
-        authorization: Object;
+        authorization: object;
     }
 
     export interface DnsAccountCreate {
         name: string;
         type: string;
-        authorization: Object;
+        authorization: object;
     }
 
     export interface DnsAccountUpdate {
         id: number;
         name: string;
         type: string;
-        authorization: Object;
+        authorization: object;
     }
 
     export interface SSL extends CommonModel {
@@ -284,6 +296,15 @@ export namespace Website {
         keyType: string;
         pushDir: boolean;
         dir: string;
+        pushNode?: boolean;
+        nodes?: string;
+    }
+
+    export interface SSLPush {
+        id: number;
+        pushNode: boolean;
+        nodes: string;
+        taskID: string;
     }
 
     export interface AcmeAccount extends CommonModel {
@@ -397,7 +418,7 @@ export namespace Website {
         content: string;
     }
 
-    export interface CustomRewirte {
+    export interface CustomRewrite {
         operate: string;
         name: string;
         content: string;
@@ -439,6 +460,7 @@ export namespace Website {
         proxyProtocol?: string;
         sni?: boolean;
         proxySSLName: string;
+        sslVerify?: boolean;
         cors: boolean;
         allowOrigins: string;
         allowMethods: string;
@@ -446,6 +468,17 @@ export namespace Website {
         allowCredentials: boolean;
         preflight: boolean;
         browserCache?: 'enable' | 'disable' | 'noModify';
+    }
+
+    export interface ProxyDel {
+        id: number;
+        name: string;
+    }
+
+    export interface ProxyStatusUpdate {
+        id: number;
+        name: string;
+        status: string;
     }
 
     export interface ProxReplace {
@@ -555,6 +588,9 @@ export namespace Website {
         certificatePath: string;
         type: string;
         sslID: number;
+        description?: string;
+        pushNode?: boolean;
+        nodes?: string;
     }
 
     export interface SSLObtain {
@@ -597,6 +633,8 @@ export namespace Website {
         pushDir: boolean;
         dir: string;
         description: string;
+        pushNode?: boolean;
+        nodes?: string;
     }
 
     export interface RenewSSLByCA {
@@ -733,5 +771,78 @@ export namespace Website {
     export interface BatchSetGroup {
         ids: number[];
         groupID: number;
+    }
+
+    export interface TemplateVariable {
+        key: string;
+        label: string;
+        type: 'text' | 'textarea' | 'number' | 'select' | 'color';
+        default: string;
+        options: string;
+        required: boolean;
+    }
+
+    export interface Template extends CommonModel {
+        name: string;
+        type: string;
+        content: string;
+        filePath: string;
+        variables: string;
+        remark: string;
+    }
+
+    export interface TemplateSearch extends ReqPage {
+        name: string;
+        type: string;
+    }
+
+    export interface TemplateCreate {
+        name: string;
+        type: string;
+        content: string;
+        filePath: string;
+        variables: string;
+        remark: string;
+    }
+
+    export interface TemplateUpdate {
+        id: number;
+        name: string;
+        type: string;
+        content: string;
+        filePath: string;
+        variables: string;
+        remark: string;
+    }
+
+    export interface TemplateOutput extends CommonModel {
+        name: string;
+        templateID: number;
+        templateType: string;
+        variableValues: string;
+        outputPath: string;
+    }
+
+    export interface TemplateOutputDTO extends TemplateOutput {
+        templateName: string;
+    }
+
+    export interface TemplateOutputSearch extends ReqPage {
+        templateID: number;
+    }
+
+    export interface TemplateOutputCreate {
+        templateID: number;
+        name: string;
+        variableValues: Record<string, string>;
+    }
+
+    export interface PreviewReq {
+        templateID: number;
+        variableValues: Record<string, string>;
+    }
+
+    export interface PreviewDTO {
+        html: string;
     }
 }

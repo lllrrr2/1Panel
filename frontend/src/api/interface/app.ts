@@ -31,6 +31,8 @@ export namespace App {
         ko: string;
         tr: string;
         'es-es': string;
+        fa: string;
+        lo: string;
     }
 
     export interface AppDTO extends App {
@@ -181,7 +183,7 @@ export namespace App {
         message: string;
         httpPort: number;
         container: string;
-        env: { [key: string]: string };
+        env: { [key: string]: any };
         appKey: string;
     }
 
@@ -208,9 +210,11 @@ export namespace App {
         dockerCompose: string;
         app: App.AppDetail;
         linkDB: boolean;
+        resourceKeys?: string[];
+        env?: { [key: string]: any };
     }
 
-    export interface AppInstalledInfo {
+    export interface AppInstalledOption {
         id: number;
         key: string;
         name: string;
@@ -267,7 +271,7 @@ export namespace App {
     export interface AppService {
         label: string;
         value: string;
-        config?: Object;
+        config?: object;
         from?: string;
         status: string;
     }
@@ -344,6 +348,8 @@ export namespace App {
         uninstallDeleteImage: string;
         uninstallDeleteBackup: string;
         upgradeBackup: string;
+        upgradeDeleteImage: string;
+        installAllowPort: string;
     }
 
     export interface AppStoreConfigUpdate {

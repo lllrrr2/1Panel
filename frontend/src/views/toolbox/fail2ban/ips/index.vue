@@ -13,7 +13,7 @@
         <template #footer>
             <span class="dialog-footer">
                 <el-button @click="drawerVisible = false">{{ $t('commons.button.cancel') }}</el-button>
-                <el-button :disabled="loading" type="primary" @click="onSave(formRef)">
+                <el-button v-permission v-node-admin :disabled="loading" type="primary" @click="onSave(formRef)">
                     {{ $t('commons.button.confirm') }}
                 </el-button>
             </span>
@@ -26,8 +26,7 @@ import { operatorFail2banSSHD, searchFail2ban } from '@/api/modules/toolbox';
 import { FormInstance } from 'element-plus';
 import { MsgSuccess } from '@/utils/message';
 import i18n from '@/lang';
-import { checkCidr, checkIpV4V6 } from '@/utils/util';
-
+import { checkCidr, checkIpV4V6 } from '@/utils/validate';
 const emit = defineEmits<{ (e: 'search'): void }>();
 
 const drawerVisible = ref(false);

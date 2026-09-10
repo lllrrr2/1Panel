@@ -54,6 +54,7 @@ func (u *BackupService) WebsiteBackup(req dto.CommonBackup) error {
 		return err
 	}
 	if err = handleWebsiteBackup(&website, nil, record.ID, backupDir, fileName, "", req.Secret, req.TaskID); err != nil {
+		markBackupFailed(record.ID, err)
 		global.LOG.Errorf("backup website %s failed, err: %v", website.Alias, err)
 		return err
 	}
@@ -178,7 +179,7 @@ func handleWebsiteRecover(website *model.Website, parentTask *task.Task, recover
 		if err = fileOp.TarGzExtractPro(fmt.Sprintf("%s/%s.web.tar.gz", tmpPath, website.Alias), GetOpenrestyDir(SitesRootDir), ""); err != nil {
 			return err
 		}
-		if err := cmd.RunDefaultBashCf("docker exec -i %s nginx -s reload", nginxInfo.ContainerName); err != nil {
+		if err := cmd.NewCommandMgr().Run("docker", "exec", "-i", nginxInfo.ContainerName, "nginx", "-s", "reload"); err != nil {
 			return err
 		}
 		oldWebsite.ID = website.ID
@@ -235,7 +236,7 @@ func handleWebsiteBackup(website *model.Website, parentTask *task.Task, recordID
 	backupTask.AddSubTaskWithOps(task.GetTaskName(website.Alias, task.TaskBackup, task.TaskScopeBackup), func(t *task.Task) error { return itemHandler() }, nil, 3, time.Hour)
 	go func() {
 		if err := backupTask.Execute(); err != nil {
-			backupRepo.UpdateRecordByMap(recordID, map[string]interface{}{"status": constant.StatusFailed, "message": err.Error()})
+			markBackupFailed(recordID, err)
 			return
 		}
 		backupRepo.UpdateRecordByMap(recordID, map[string]interface{}{"status": constant.StatusSuccess})

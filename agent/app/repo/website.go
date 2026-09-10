@@ -10,16 +10,19 @@ import (
 
 type IWebsiteRepo interface {
 	WithAppInstallId(appInstallId uint) DBOption
+	WithAppInstallIds(appInstallIds []uint) DBOption
 	WithDomain(domain string) DBOption
 	WithAlias(alias string) DBOption
 	WithWebsiteSSLID(sslId uint) DBOption
 	WithGroupID(groupId uint) DBOption
 	WithDefaultServer() DBOption
 	WithDomainLike(domain string) DBOption
+	WithSearchKeyword(keyword string, ids []uint) DBOption
 	WithRuntimeID(runtimeID uint) DBOption
 	WithParentID(websiteID uint) DBOption
 	WithType(websiteType string) DBOption
 	WithDBType(dbType string) DBOption
+	WithDBTypes(dbTypes []string) DBOption
 	WithDBID(dbID uint) DBOption
 
 	Page(page, size int, opts ...DBOption) (int64, []model.Website, error)
@@ -48,6 +51,15 @@ func (w *WebsiteRepo) WithAppInstallId(appInstallID uint) DBOption {
 	}
 }
 
+func (w *WebsiteRepo) WithAppInstallIds(appInstallIDs []uint) DBOption {
+	return func(db *gorm.DB) *gorm.DB {
+		if len(appInstallIDs) == 0 {
+			return db
+		}
+		return db.Where("app_install_id in (?)", appInstallIDs)
+	}
+}
+
 func (w *WebsiteRepo) WithRuntimeID(runtimeID uint) DBOption {
 	return func(db *gorm.DB) *gorm.DB {
 		return db.Where("runtime_id = ?", runtimeID)
@@ -63,6 +75,19 @@ func (w *WebsiteRepo) WithDomain(domain string) DBOption {
 func (w *WebsiteRepo) WithDomainLike(domain string) DBOption {
 	return func(db *gorm.DB) *gorm.DB {
 		return db.Where("primary_domain like ?", "%"+domain+"%")
+	}
+}
+
+func (w *WebsiteRepo) WithSearchKeyword(keyword string, ids []uint) DBOption {
+	return func(db *gorm.DB) *gorm.DB {
+		if keyword == "" {
+			return db
+		}
+		keyword = "%" + keyword + "%"
+		if len(ids) == 0 {
+			return db.Where("(primary_domain like ? OR alias like ?)", keyword, keyword)
+		}
+		return db.Where("(primary_domain like ? OR alias like ? OR id in (?))", keyword, keyword, ids)
 	}
 }
 
@@ -105,6 +130,12 @@ func (w *WebsiteRepo) WithType(websiteType string) DBOption {
 func (w *WebsiteRepo) WithDBType(dbType string) DBOption {
 	return func(db *gorm.DB) *gorm.DB {
 		return db.Where("db_type = ?", dbType)
+	}
+}
+
+func (w *WebsiteRepo) WithDBTypes(dbTypes []string) DBOption {
+	return func(db *gorm.DB) *gorm.DB {
+		return db.Where("db_type IN ?", dbTypes)
 	}
 }
 

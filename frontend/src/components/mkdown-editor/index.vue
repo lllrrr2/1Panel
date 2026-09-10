@@ -1,9 +1,9 @@
 <template>
-    <MdEditor previewOnly v-model="sanitizedReadMe" :theme="isDarkTheme ? 'dark' : 'light'" />
+    <MdPreview :model-value="props.content" :sanitize="sanitizeHtml" :theme="isDarkTheme ? 'dark' : 'light'" />
 </template>
 
 <script lang="ts" setup>
-import MdEditor from 'md-editor-v3';
+import { MdPreview } from 'md-editor-v3';
 import 'md-editor-v3/lib/style.css';
 import DOMPurify from 'dompurify';
 
@@ -17,7 +17,7 @@ const props = defineProps({
     },
 });
 
-const sanitizedReadMe = computed(() => {
-    return DOMPurify.sanitize(props.content);
-});
+const sanitizeHtml = (html: string): string => {
+    return DOMPurify.sanitize(html);
+};
 </script>

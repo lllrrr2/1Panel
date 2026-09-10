@@ -23,11 +23,19 @@ type SettingInfo struct {
 	AppStoreLastModified string `json:"appStoreLastModified"`
 	AppStoreSyncStatus   string `json:"appStoreSyncStatus"`
 
-	FileRecycleBin string `json:"fileRecycleBin"`
+	FileRecycleBin   string `json:"fileRecycleBin"`
+	LocalSSHConnShow string `json:"localSSHConnShow"`
+
+	FirewallPortWhiteList string `json:"firewallPortWhiteList"`
 }
 
 type SettingUpdate struct {
 	Key   string `json:"key" validate:"required"`
+	Value string `json:"value"`
+}
+
+type AgentSettingUpdate struct {
+	Key   string `json:"key" validate:"required,oneof=SystemIP DockerSockPath FileRecycleBin FirewallPortWhiteList"`
 	Value string `json:"value"`
 }
 
@@ -55,6 +63,7 @@ type CleanTree struct {
 	Size        uint64 `json:"size"`
 	IsCheck     bool   `json:"isCheck"`
 	IsRecommend bool   `json:"isRecommend"`
+	CanDelete   bool   `json:"canDelete"`
 }
 
 type Clean struct {
@@ -85,6 +94,19 @@ type SystemProxy struct {
 	Port     string `json:"port"`
 	User     string `json:"user"`
 	Password string `json:"password"`
+}
+
+type TerminalAIInfo struct {
+	AIStatus              string `json:"aiStatus"`
+	AIAccountID           string `json:"aiAccountId"`
+	AIPrefix              string `json:"aiPrefix" validate:"required,oneof=@ai #ai /ai"`
+	AIRiskCommands        string `json:"aiRiskCommands"`
+	AIRiskCommandsDefault string `json:"aiRiskCommandsDefault"`
+}
+
+type FileManageAIInfo struct {
+	AIStatus    string `json:"aiStatus"`
+	AIAccountID string `json:"aiAccountId"`
 }
 
 type CommonDescription struct {

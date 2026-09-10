@@ -1,7 +1,6 @@
 package client
 
 import (
-	"bytes"
 	"compress/gzip"
 	"context"
 	"database/sql"
@@ -45,6 +44,21 @@ func NewRemote(db Remote) *Remote {
 }
 
 func (r *Remote) Create(info CreateInfo) error {
+	if err := r.CreateDatabase(info); err != nil {
+		return err
+	}
+	if len(info.Username) == 0 {
+		return nil
+	}
+	if err := r.CreateUser(info, true); err != nil {
+		_ = r.ExecSQL(fmt.Sprintf("drop database if exists `%s`", info.Name), info.Timeout)
+		return err
+	}
+
+	return nil
+}
+
+func (r *Remote) CreateDatabase(info CreateInfo) error {
 	createSql := fmt.Sprintf("create database `%s` default character set %s collate %s", info.Name, info.Format, info.Collation)
 	if len(info.Collation) == 0 {
 		createSql = fmt.Sprintf("create database `%s` default character set %s", info.Name, info.Format)
@@ -55,31 +69,13 @@ func (r *Remote) Create(info CreateInfo) error {
 		}
 		return err
 	}
-
-	if err := r.CreateUser(info, true); err != nil {
-		_ = r.ExecSQL(fmt.Sprintf("drop database if exists `%s`", info.Name), info.Timeout)
-		return err
-	}
-
 	return nil
 }
 
 func (r *Remote) CreateUser(info CreateInfo, withDeleteDB bool) error {
-	var userlist []string
-	if strings.Contains(info.Permission, ",") {
-		ips := strings.Split(info.Permission, ",")
-		for _, ip := range ips {
-			if len(ip) != 0 {
-				userlist = append(userlist, fmt.Sprintf("'%s'@'%s'", info.Username, ip))
-			}
-		}
-	} else {
-		userlist = append(userlist, fmt.Sprintf("'%s'@'%s'", info.Username, info.Permission))
-	}
-
-	for _, user := range userlist {
-		if err := r.ExecSQL(fmt.Sprintf("create user %s identified by '%s';", user, info.Password), info.Timeout); err != nil {
-			if strings.Contains(strings.ToLower(err.Error()), "error 1396") {
+	for _, user := range userIdentities(info.Username, info.Permission) {
+		if err := r.ExecSQL(createUserSQL(user, info.Password), info.Timeout); err != nil {
+			if isUserExistsErr(err) {
 				return buserr.New("ErrUserIsExist")
 			}
 			if withDeleteDB {
@@ -93,16 +89,7 @@ func (r *Remote) CreateUser(info CreateInfo, withDeleteDB bool) error {
 			}
 			return err
 		}
-		grantStr := fmt.Sprintf("grant all privileges on `%s`.* to %s", info.Name, user)
-		if info.Name == "*" {
-			grantStr = fmt.Sprintf("grant all privileges on *.* to %s", user)
-		}
-		if strings.HasPrefix(info.Version, "5.7") || strings.HasPrefix(info.Version, "5.6") {
-			grantStr = fmt.Sprintf("%s identified by '%s' with grant option;", grantStr, info.Password)
-		} else {
-			grantStr = grantStr + " with grant option;"
-		}
-		if err := r.ExecSQL(grantStr, info.Timeout); err != nil {
+		if err := r.ExecSQL(createUserGrantSQL(info, user), info.Timeout); err != nil {
 			if withDeleteDB {
 				_ = r.Delete(DeleteInfo{
 					Name:        info.Name,
@@ -118,20 +105,92 @@ func (r *Remote) CreateUser(info CreateInfo, withDeleteDB bool) error {
 	return nil
 }
 
-func (r *Remote) Delete(info DeleteInfo) error {
-	var userlist []string
-	if strings.Contains(info.Permission, ",") {
-		ips := strings.Split(info.Permission, ",")
-		for _, ip := range ips {
-			if len(ip) != 0 {
-				userlist = append(userlist, fmt.Sprintf("'%s'@'%s'", info.Username, ip))
-			}
+func (r *Remote) CreateUserOnly(info UserInfo, password string, timeout uint) error {
+	if err := r.ExecSQL(createUserSQL(userIdentity(info.Username, info.Host), password), timeout); err != nil {
+		if isUserExistsErr(err) {
+			return buserr.New("ErrUserIsExist")
 		}
-	} else {
-		userlist = append(userlist, fmt.Sprintf("'%s'@'%s'", info.Username, info.Permission))
+		return err
 	}
+	return nil
+}
 
-	for _, user := range userlist {
+func (r *Remote) GrantUser(info GrantInfo, timeout uint) error {
+	return r.ExecSQL(grantUserSQL(info), timeout)
+}
+
+func (r *Remote) RevokeGrant(info GrantInfo, timeout uint) error {
+	if err := r.ExecSQL(revokeGrantSQL(info), timeout); err != nil {
+		return err
+	}
+	_ = r.ExecSQL(revokeGrantOptionSQL(info), timeout)
+	return nil
+}
+
+func (r *Remote) DeleteUser(info UserInfo, version string, timeout uint) error {
+	return r.ExecSQL(dropUserSQL(info, version), timeout)
+}
+
+func (r *Remote) UpdateUser(info UserUpdateInfo, timeout uint) error {
+	if info.Host == info.NewHost {
+		return nil
+	}
+	return r.ExecSQL(renameUserSQL(info), timeout)
+}
+
+func (r *Remote) DeleteDatabase(info DeleteInfo) error {
+	if len(info.Name) == 0 {
+		return nil
+	}
+	if err := r.ExecSQL(dropDatabaseSQL(info.Name), info.Timeout); err != nil && !info.ForceDelete {
+		return fmt.Errorf("drop database failed, err: %v", err)
+	}
+	return nil
+}
+
+func (r *Remote) ListUsers(timeout uint) ([]UserInfo, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
+	defer cancel()
+	rows, err := r.Client.QueryContext(ctx, "select user,host from mysql.user order by user,host")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	users := make([]UserInfo, 0)
+	for rows.Next() {
+		var user, host string
+		if err := rows.Scan(&user, &host); err != nil {
+			return nil, err
+		}
+		users = append(users, UserInfo{Username: user, Host: host})
+	}
+	return users, rows.Err()
+}
+
+func (r *Remote) ListGrants(timeout uint) ([]GrantInfo, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
+	defer cancel()
+	rows, err := r.Client.QueryContext(ctx, "select db,user,host from mysql.db where db not in ('information_schema','mysql','performance_schema','sys','__recycle_bin__','recycle_bin') order by db,user,host")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	grants := make([]GrantInfo, 0)
+	for rows.Next() {
+		var db, user, host string
+		if err := rows.Scan(&db, &user, &host); err != nil {
+			return nil, err
+		}
+		if user == "root" {
+			continue
+		}
+		grants = append(grants, GrantInfo{Database: db, Username: user, Host: host})
+	}
+	return grants, rows.Err()
+}
+
+func (r *Remote) Delete(info DeleteInfo) error {
+	for _, user := range userIdentities(info.Username, info.Permission) {
 		if strings.HasPrefix(info.Version, "5.6") {
 			if err := r.ExecSQL(fmt.Sprintf("drop user %s", user), info.Timeout); err != nil && !info.ForceDelete {
 				return fmt.Errorf("drop user failed, err: %v", err)
@@ -143,7 +202,7 @@ func (r *Remote) Delete(info DeleteInfo) error {
 		}
 	}
 	if len(info.Name) != 0 {
-		if err := r.ExecSQL(fmt.Sprintf("drop database if exists `%s`", info.Name), info.Timeout); err != nil && !info.ForceDelete {
+		if err := r.ExecSQL(dropDatabaseSQL(info.Name), info.Timeout); err != nil && !info.ForceDelete {
 			return fmt.Errorf("drop database failed, err: %v", err)
 		}
 	}
@@ -156,24 +215,8 @@ func (r *Remote) Delete(info DeleteInfo) error {
 
 func (r *Remote) ChangePassword(info PasswordChangeInfo) error {
 	if info.Username != "root" {
-		var userlist []string
-		if strings.Contains(info.Permission, ",") {
-			ips := strings.Split(info.Permission, ",")
-			for _, ip := range ips {
-				if len(ip) != 0 {
-					userlist = append(userlist, fmt.Sprintf("'%s'@'%s'", info.Username, ip))
-				}
-			}
-		} else {
-			userlist = append(userlist, fmt.Sprintf("'%s'@'%s'", info.Username, info.Permission))
-		}
-
-		for _, user := range userlist {
-			passwordChangeSql := fmt.Sprintf("set password for %s = password('%s')", user, info.Password)
-			if !strings.HasPrefix(info.Version, "5.7") && !strings.HasPrefix(info.Version, "5.6") {
-				passwordChangeSql = fmt.Sprintf("ALTER USER %s IDENTIFIED BY '%s';", user, info.Password)
-			}
-			if err := r.ExecSQL(passwordChangeSql, info.Timeout); err != nil {
+		for _, user := range userIdentities(info.Username, info.Permission) {
+			if err := r.ExecSQL(changeUserPasswordSQL(user, info.Password, info.Version), info.Timeout); err != nil {
 				return err
 			}
 		}
@@ -244,11 +287,6 @@ func (r *Remote) Backup(info BackupInfo) error {
 			return fmt.Errorf("mkdir %s failed, err: %v", info.TargetDir, err)
 		}
 	}
-	outfile, err := os.OpenFile(path.Join(info.TargetDir, info.FileName), os.O_RDWR|os.O_CREATE, constant.DirPerm)
-	if err != nil {
-		return fmt.Errorf("open file %s failed, err: %v", path.Join(info.TargetDir, info.FileName), err)
-	}
-	defer outfile.Close()
 	dumpCmd := "mysqldump"
 	if r.Type == constant.AppMariaDB {
 		dumpCmd = "mariadb-dump"
@@ -268,23 +306,32 @@ func (r *Remote) Backup(info BackupInfo) error {
 		args = append(args, arg)
 	}
 
-	backupCmd := fmt.Sprintf("docker run --rm --net=host -i %s /bin/bash -c '%s %s -h %s -P %d -u%s -p%s %s --default-character-set=%s %s'",
-		image, dumpCmd, strings.Join(args, " "), r.Address, r.Port, r.User, r.Password, sslSkip(info.Version, r.Type), info.Format, info.Name)
-
-	global.LOG.Debug(strings.ReplaceAll(backupCmd, r.Password, "******"))
-	cmd := exec.Command("bash", "-c", backupCmd)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	gzipCmd := exec.Command("gzip", "-cf")
-	gzipCmd.Stdin, _ = cmd.StdoutPipe()
-	gzipCmd.Stdout = outfile
-
-	_ = gzipCmd.Start()
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("handle backup database failed, err: %v", stderr.String())
+	backupArgs := []string{"run", "--rm", "--net=host", "-i", image, dumpCmd}
+	backupArgs = append(backupArgs, args...)
+	backupArgs = append(
+		backupArgs,
+		"-h", r.Address,
+		"-P", fmt.Sprintf("%d", r.Port),
+		"-u"+r.User,
+		"-p"+r.Password,
+		sslSkip(info.Version, r.Type),
+		"--default-character-set="+info.Format,
+		info.Name,
+	)
+	debugArgs := append([]string{}, backupArgs...)
+	for i, arg := range debugArgs {
+		if strings.Contains(arg, r.Password) {
+			debugArgs[i] = strings.ReplaceAll(arg, r.Password, "******")
+		}
 	}
-	_ = gzipCmd.Wait()
+	global.LOG.Debug("docker " + strings.Join(debugArgs, " "))
+	cmdMgr := cmd.NewCommandMgr()
+	if _, err := cmdMgr.RunPipeToFile(path.Join(info.TargetDir, info.FileName),
+		cmd.PipeCommand{Name: "docker", Args: backupArgs},
+		cmd.PipeCommand{Name: "gzip", Args: []string{"-cf"}},
+	); err != nil {
+		return fmt.Errorf("handle backup database failed, err: %v", err)
+	}
 	return nil
 }
 
@@ -293,30 +340,43 @@ func (r *Remote) Recover(info RecoverInfo) error {
 		return buserr.New("ErrCmdIllegal")
 	}
 	fi, _ := os.Open(info.SourceFile)
-	defer fi.Close()
+	defer func() { _ = fi.Close() }()
 
 	image, err := loadImage(info.Type, info.Version)
 	if err != nil {
 		return err
 	}
 
-	recoverCmd := fmt.Sprintf("docker run --rm --net=host -i %s /bin/bash -c '%s -h %s -P %d -u%s -p%s %s --default-character-set=%s %s'",
-		image, r.Type, r.Address, r.Port, r.User, r.Password, sslSkip(info.Version, r.Type), info.Format, info.Name)
-
-	global.LOG.Debug(strings.ReplaceAll(recoverCmd, r.Password, "******"))
-	cmd := exec.Command("bash", "-c", recoverCmd)
+	recoverArgs := []string{
+		"run", "--rm", "--net=host", "-i", image, r.Type,
+		"-h", r.Address,
+		"-P", fmt.Sprintf("%d", r.Port),
+		"-u" + r.User,
+		"-p" + r.Password,
+		sslSkip(info.Version, r.Type),
+		"--default-character-set=" + info.Format,
+		info.Name,
+	}
+	debugArgs := append([]string{}, recoverArgs...)
+	for i, arg := range debugArgs {
+		if strings.Contains(arg, r.Password) {
+			debugArgs[i] = strings.ReplaceAll(arg, r.Password, "******")
+		}
+	}
+	global.LOG.Debug("docker " + strings.Join(debugArgs, " "))
+	cmd := exec.Command("docker", recoverArgs...)
 
 	if strings.HasSuffix(info.SourceFile, ".gz") {
 		gzipFile, err := os.Open(info.SourceFile)
 		if err != nil {
 			return err
 		}
-		defer gzipFile.Close()
+		defer func() { _ = gzipFile.Close() }()
 		gzipReader, err := gzip.NewReader(gzipFile)
 		if err != nil {
 			return err
 		}
-		defer gzipReader.Close()
+		defer func() { _ = gzipReader.Close() }()
 		cmd.Stdin = gzipReader
 	} else {
 		cmd.Stdin = fi
@@ -336,7 +396,7 @@ func (r *Remote) SyncDB(version string) ([]SyncDBInfo, error) {
 	if err != nil {
 		return datas, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var dbName, charsetName, collation string
@@ -431,7 +491,7 @@ func (r *Remote) LoadFormatCollation(timeout uint) ([]dto.MysqlFormatCollationOp
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	formatMap := make(map[string][]string)
 	for rows.Next() {
@@ -471,6 +531,7 @@ func (r *Remote) ExecSQLForHosts(timeout uint) ([]string, error) {
 		return nil, buserr.New("ErrExecTimeOut")
 	}
 	var rows []string
+	defer func() { _ = results.Close() }()
 	for results.Next() {
 		var host string
 		if err := results.Scan(&host); err != nil {
@@ -486,6 +547,7 @@ func loadImage(dbType, version string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	defer cli.Close()
 	images, err := cli.ImageList(context.Background(), image.ListOptions{})
 	if err != nil {
 		return "", err
@@ -515,7 +577,7 @@ func loadImage(dbType, version string) (string, error) {
 
 func loadVersion(dbType string, version string) string {
 	if dbType == "mariadb" {
-		return "mariadb:11.3.2 "
+		return "mariadb:11.3.2"
 	}
 	if strings.HasPrefix(version, "5.6") {
 		return "mysql:5.6.51"

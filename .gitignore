@@ -9,7 +9,6 @@ build/1panel-core
 
 # Mac
 .DS_Store
-*/.DS_Store
 
 # VS Code
 .vscode
@@ -41,20 +40,23 @@ core/cmd/server/web/index.html
 frontend/auto-imports.d.ts
 frontend/components.d.ts
 frontend/src/xpack
+frontend/src/enterprise
 agent/xpack
+agent/enterprise
 agent/router/entry_xpack.go
+agent/router/entry_enterprise.go
 agent/server/init_xpack.go
+agent/server/init_enterprise.go
 agent/utils/xpack/xpack.go
-agent/utils/xpack/xpack_xpack.go
+agent/utils/xpack/enterprise.go
 core/xpack
+core/enterprise
 core/router/entry_xpack.go
+core/router/entry_enterprise.go
 core/server/init_xpack.go
+core/server/init_enterprise.go
 core/utils/xpack/xpack.go
-core/utils/xpack/xpack_xpack.go
-core/xpack-ee
-core/router/entry_xpackee.go
-core/server/init_xpackee.go
-core/utils/xpack/xpack_xpackee.go
+core/utils/xpack/enterprise.go
 
 .history/
 dist/
@@ -74,3 +76,6 @@ openspec
 CLAUDE.md
 AGENTS.md
 opencode.json
+superpowers
+.worktrees/
+.codex/

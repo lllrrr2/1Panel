@@ -22,12 +22,25 @@
                 <el-input v-model="addForm.name"></el-input>
             </el-form-item>
             <el-form-item>
+                <el-checkbox v-model="addForm.useProxy">
+                    {{ $t('file.useProxy') }}
+                </el-checkbox>
+                <span class="input-help">{{ $t('file.useProxyHelper') }}</span>
+            </el-form-item>
+            <el-form-item>
                 <el-checkbox v-model="addForm.ignoreCertificate">
                     {{ $t('file.ignoreCertificate') }}
                 </el-checkbox>
                 <span class="input-help">{{ $t('file.ignoreCertificateHelper') }}</span>
             </el-form-item>
         </el-form>
+        <el-alert
+            v-if="isAppendOnly"
+            class="mt-4"
+            type="warning"
+            :title="$t('xpack.tamper.tamperCreateHint')"
+            :closable="false"
+        />
         <template #footer>
             <span class="dialog-footer">
                 <el-button @click="handleClose()" :disabled="loading">{{ $t('commons.button.cancel') }}</el-button>
@@ -48,21 +61,42 @@ import { FormInstance, FormRules } from 'element-plus';
 import { reactive, ref } from 'vue';
 import FileList from '@/components/file-list/index.vue';
 import { MsgSuccess } from '@/utils/message';
+import { getFilenameFromUrl } from '@/utils/file';
 
 interface WgetProps {
     path: string;
+    isAppendOnly?: boolean;
 }
 
 const fileForm = ref<FormInstance>();
 const loading = ref(false);
+const isAppendOnly = ref(false);
 let open = ref(false);
 let submitData = ref(false);
 const fileRef = ref();
 
+const validateWgetUrl = (_rule: unknown, value: string, callback: (e?: Error) => void) => {
+    const v = (value || '').trim();
+    if (!v) {
+        callback();
+        return;
+    }
+    try {
+        const u = new URL(v);
+        if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+            callback(new Error(i18n.global.t('file.wgetUrlInvalid')));
+            return;
+        }
+        callback();
+    } catch {
+        callback(new Error(i18n.global.t('file.wgetUrlInvalid')));
+    }
+};
+
 const rules = reactive<FormRules>({
     name: [Rules.requiredInput],
     path: [Rules.requiredInput],
-    url: [Rules.requiredInput],
+    url: [Rules.requiredInput, { validator: validateWgetUrl, trigger: 'blur' }],
 });
 
 const addForm = reactive({
@@ -70,6 +104,7 @@ const addForm = reactive({
     path: '',
     name: '',
     ignoreCertificate: false,
+    useProxy: false,
 });
 
 const em = defineEmits(['close']);
@@ -99,6 +134,9 @@ const submit = async (formEl: FormInstance | undefined) => {
                 submitData.value = true;
                 handleClose();
             })
+            .catch(() => {
+                submitData.value = false;
+            })
             .finally(() => {
                 loading.value = false;
             });
@@ -106,15 +144,16 @@ const submit = async (formEl: FormInstance | undefined) => {
 };
 
 const getFileName = (url: string) => {
-    const paths = url.split('/');
-    addForm.name = paths[paths.length - 1];
+    addForm.name = getFilenameFromUrl(url);
 };
 
 const acceptParams = (props: WgetProps) => {
     addForm.path = props.path;
+    isAppendOnly.value = Boolean(props.isAppendOnly);
     open.value = true;
     submitData.value = false;
     addForm.ignoreCertificate = false;
+    addForm.useProxy = false;
 };
 
 defineExpose({ acceptParams });

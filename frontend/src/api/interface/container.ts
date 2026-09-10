@@ -56,6 +56,26 @@ export namespace Container {
         name: string;
         state: string;
     }
+    export interface ContainerFileReq {
+        containerID: string;
+        path: string;
+    }
+    export interface ContainerFileInfo {
+        name: string;
+        path: string;
+        isDir: boolean;
+        isLink: boolean;
+        linkTo: string;
+        size: number;
+        mode: string;
+        modTime: string;
+    }
+    export interface ContainerFileContent {
+        content: string;
+        size: number;
+        truncated: boolean;
+        isBinary: boolean;
+    }
     export interface ResourceLimit {
         cpu: number;
         memory: number;
@@ -85,11 +105,16 @@ export namespace Container {
         cpuShares: number;
         memory: number;
         volumes: Array<Volume>;
+        extraHosts: Array<ExtraHost>;
         privileged: boolean;
         autoRemove: boolean;
         labels: Array<string>;
         env: Array<string>;
         restartPolicy: string;
+    }
+    export interface ExtraHost {
+        hostname: string;
+        ip: string;
     }
     export interface ContainerUpgrade {
         taskID: string;
@@ -131,10 +156,11 @@ export namespace Container {
         ipv4: string;
         ipv6: string;
         macAddr: string;
-    }
-    export interface ContainerInfo {
-        name: string;
-        state: string;
+        links?: Array<string>;
+        aliases?: Array<string>;
+        driverOpts?: Record<string, string>;
+        gwPriority?: number;
+        linkLocalIPs?: Array<string>;
     }
     export interface ContainerItemStats {
         sizeRw: number;
@@ -310,6 +336,8 @@ export namespace Container {
         runningCount: number;
         configFile: string;
         workdir: string;
+        composeFileExists: boolean;
+        isPinned: boolean;
         path: string;
         containers: Array<ComposeContainer>;
         expand: boolean;
@@ -324,6 +352,7 @@ export namespace Container {
     export interface ComposeCreate {
         taskID: string;
         name: string;
+        dirName: string;
         from: string;
         file: string;
         path: string;
@@ -347,6 +376,10 @@ export namespace Container {
         forcePull: boolean;
         createdBy: string;
     }
+    export interface ComposePin {
+        name: string;
+        isPinned: boolean;
+    }
 
     export interface TemplateCreate {
         name: string;
@@ -367,6 +400,7 @@ export namespace Container {
     }
 
     export interface BatchDelete {
+        taskID: string;
         names: Array<string>;
     }
 

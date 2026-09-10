@@ -13,7 +13,15 @@
             </el-col>
             <el-col :span="4">
                 <el-form-item>
-                    <el-button type="primary" @click="removeEnv(index)" link class="mt-1">
+                    <el-select v-model="volume.mode" :placeholder="$t('container.mode')">
+                        <el-option :label="$t('container.modeRW')" value="rw" />
+                        <el-option :label="$t('container.modeR')" value="ro" />
+                    </el-select>
+                </el-form-item>
+            </el-col>
+            <el-col :span="4">
+                <el-form-item>
+                    <el-button v-permission type="primary" @click="removeEnv(index)" link class="mt-1">
                         {{ $t('commons.button.delete') }}
                     </el-button>
                 </el-form-item>
@@ -21,7 +29,7 @@
         </el-row>
         <el-row :gutter="20">
             <el-col :span="4">
-                <el-button @click="addEnv">{{ $t('commons.button.add') }}</el-button>
+                <el-button v-permission @click="addEnv">{{ $t('commons.button.add') }}</el-button>
             </el-col>
         </el-row>
     </div>
@@ -48,6 +56,7 @@ const addEnv = () => {
     props.volumes.push({
         source: '',
         target: '',
+        mode: 'rw',
     });
 };
 

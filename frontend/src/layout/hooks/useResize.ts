@@ -1,34 +1,39 @@
 import { watch, onBeforeMount, onMounted, onBeforeUnmount } from 'vue';
 import { useRoute } from 'vue-router';
-import { GlobalStore, MenuStore } from '@/store';
+import { MenuStore } from '@/store';
 import { DeviceType } from '@/enums/app';
-/** 参考 Bootstrap 的响应式设计 WIDTH = 600 */
-const WIDTH = 600;
+import { useGlobalStore } from '@/composables/useGlobalStore';
+/** 与 Tailwind CSS 的 md 断点保持一致 */
+const MOBILE_BREAKPOINT = 768;
 
 /** 根据大小变化重新布局 */
 export default () => {
     const route = useRoute();
-    const globalStore = GlobalStore();
+    const { globalStore, isMobile } = useGlobalStore();
     const menuStore = MenuStore();
     const _isMobile = () => {
         const rect = document.body.getBoundingClientRect();
-        return rect.width - 1 < WIDTH;
+        return rect.width < MOBILE_BREAKPOINT;
+    };
+
+    const _syncLayout = () => {
+        const isMobileScreen = _isMobile();
+        globalStore.toggleDevice(isMobileScreen ? DeviceType.Mobile : DeviceType.Desktop);
+        if (isMobileScreen) {
+            menuStore.closeSidebar(true);
+        }
     };
 
     const _resizeHandler = () => {
         if (!document.hidden) {
-            const isMobile = _isMobile();
-            globalStore.toggleDevice(isMobile ? DeviceType.Mobile : DeviceType.Desktop);
-            if (isMobile) {
-                menuStore.closeSidebar(true);
-            }
+            _syncLayout();
         }
     };
 
     watch(
         () => route.name,
         () => {
-            if (globalStore.device === DeviceType.Mobile && !menuStore.isCollapse) {
+            if (isMobile.value && !menuStore.isCollapse) {
                 menuStore.closeSidebar(false);
             }
         },
@@ -39,10 +44,7 @@ export default () => {
     });
 
     onMounted(() => {
-        if (_isMobile()) {
-            globalStore.toggleDevice(DeviceType.Mobile);
-            menuStore.closeSidebar(true);
-        }
+        _syncLayout();
     });
 
     onBeforeUnmount(() => {

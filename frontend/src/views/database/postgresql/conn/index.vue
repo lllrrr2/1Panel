@@ -1,7 +1,15 @@
 <template>
     <DrawerPro v-model="dialogVisible" :header="$t('database.databaseConnInfo')" @close="handleClose" size="small">
         <el-form @submit.prevent v-loading="loading" ref="formRef" :rules="rules" :model="form" label-position="top">
-            <el-form-item :label="$t('database.containerConn')" v-if="form.from === 'local'">
+            <el-form-item v-if="form.from === 'local'">
+                <template #label>
+                    <div class="flex items-center justify-between">
+                        <span>{{ $t('database.containerConn') }}</span>
+                        <el-button link @click="copyConnURL(true)" icon="DocumentCopy">
+                            {{ $t('database.copyConnURL') }}
+                        </el-button>
+                    </div>
+                </template>
                 <el-card class="mini-border-card">
                     <el-descriptions :column="1">
                         <el-descriptions-item :label="$t('database.connAddress')">
@@ -23,7 +31,15 @@
                     {{ $t('database.containerConnHelper') }}
                 </span>
             </el-form-item>
-            <el-form-item :label="$t('database.remoteConn')">
+            <el-form-item>
+                <template #label>
+                    <div class="flex items-center justify-between">
+                        <span>{{ $t('database.remoteConn') }}</span>
+                        <el-button link @click="copyConnURL(false)" icon="DocumentCopy">
+                            {{ $t('database.copyConnURL') }}
+                        </el-button>
+                    </div>
+                </template>
                 <el-card class="mini-border-card">
                     <el-descriptions :column="1">
                         <el-descriptions-item :label="$t('database.connAddress')">
@@ -95,7 +111,12 @@
                 <el-button :disabled="loading" @click="dialogVisible = false">
                     {{ $t('commons.button.cancel') }}
                 </el-button>
-                <el-button :disabled="loading || form.status !== 'Running'" type="primary" @click="onSave(formRef)">
+                <el-button
+                    v-permission
+                    :disabled="loading || form.status !== 'Running'"
+                    type="primary"
+                    @click="onSave(formRef)"
+                >
                     {{ $t('commons.button.confirm') }}
                 </el-button>
             </span>
@@ -111,10 +132,11 @@ import { ElForm } from 'element-plus';
 import { getDatabase, updatePostgresqlPassword } from '@/api/modules/database';
 import { getAppConnInfo } from '@/api/modules/app';
 import { MsgSuccess } from '@/utils/message';
-import { getRandomStr } from '@/utils/util';
+import { getRandomStr } from '@/utils/id';
+import { copyText } from '@/utils/clipboard';
 import { getAgentSettingInfo } from '@/api/modules/setting';
-import { GlobalStore } from '@/store';
-const globalStore = GlobalStore();
+import { useGlobalStore } from '@/composables/useGlobalStore';
+const { currentNodeAddr } = useGlobalStore();
 
 const loading = ref(false);
 
@@ -165,6 +187,13 @@ function loadPgInfo(isContainer: boolean) {
     }
 }
 
+const copyConnURL = (isContainer: boolean) => {
+    const host = loadPgInfo(isContainer);
+    const port = isContainer && form.from === 'local' ? 5432 : form.port;
+    const encodedPassword = encodeURIComponent(form.password);
+    copyText(`postgresql://${form.username}:${encodedPassword}@${host}:${port}`);
+};
+
 const random = async () => {
     form.password = getRandomStr(16);
 };
@@ -181,7 +210,7 @@ const loadAccess = async () => {
 
 const loadSystemIP = async () => {
     const res = await getAgentSettingInfo();
-    form.systemIP = res.data.systemIP || globalStore.currentNodeAddr || i18n.global.t('database.localIP');
+    form.systemIP = res.data.systemIP || currentNodeAddr.value || i18n.global.t('database.localIP');
 };
 
 const loadPassword = async () => {
@@ -250,5 +279,8 @@ defineExpose({
 :deep(.el-input__wrapper) {
     border-top-right-radius: 0px;
     border-bottom-right-radius: 0px;
+}
+:deep(.el-form-item__label) {
+    width: 100%;
 }
 </style>

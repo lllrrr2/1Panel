@@ -1,15 +1,29 @@
 package repo
 
 import (
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strconv"
+	"strings"
+	"time"
+
 	"github.com/1Panel-dev/1Panel/agent/app/model"
 	"github.com/1Panel-dev/1Panel/agent/constant"
 	"github.com/1Panel-dev/1Panel/agent/global"
+	"github.com/google/uuid"
 	"google.golang.org/genproto/googleapis/type/date"
 	"gorm.io/gorm"
-	"time"
+	"gorm.io/gorm/clause"
 )
 
 type AlertRepo struct{}
+
+var (
+	ErrAlertConfigRevisionConflict = errors.New("alert config revision conflict")
+	ErrAlertConfigRevisionRequired = errors.New("alert config revision is required")
+)
 
 type IAlertRepo interface {
 	WithByType(alertType string) DBOption
@@ -20,7 +34,9 @@ type IAlertRepo interface {
 	WithByCreateAt(date *date.Date) DBOption
 	WithByLicenseId(licenseId string) DBOption
 	WithByRecordId(recordId uint) DBOption
-	WithByMethod(method string) DBOption
+	WithByDeliveryLogID(logID uint) DBOption
+	WithByAlertMethodContainsConfigID(id uint) DBOption
+	WithByMethodConfigIDs(ids []uint) DBOption
 
 	Create(alert *model.Alert) error
 	Get(opts ...DBOption) (model.Alert, error)
@@ -40,6 +56,8 @@ type IAlertRepo interface {
 	CleanAlertLogs() error
 
 	CreateAlertTask(alertTaskBase *model.AlertTask) error
+	CreatePendingAlertTask(logID, alertID uint, alertTask *model.AlertTask) (bool, error)
+	FinalizePendingAlertTask(logID uint, succeeded bool, message string, fallback *model.AlertTask) (bool, error)
 	DeleteAlertTask(opts ...DBOption) error
 	GetAlertTask(opts ...DBOption) (model.AlertTask, error)
 	LoadTaskCount(alertType string, project string, method string) (uint, uint, error)
@@ -47,10 +65,15 @@ type IAlertRepo interface {
 	GetLicensePushCount(method string) (uint, error)
 
 	GetConfig(opts ...DBOption) (model.AlertConfig, error)
+	GetConfigById(id uint) (model.AlertConfig, error)
 	AlertConfigList(opts ...DBOption) ([]model.AlertConfig, error)
 	UpdateAlertConfig(maps map[string]interface{}, opts ...DBOption) error
+	UpdateAlertConfigWithRevision(maps map[string]interface{}, revision *time.Time, opts ...DBOption) error
 	CreateAlertConfig(config *model.AlertConfig) error
 	DeleteAlertConfig(opts ...DBOption) error
+
+	WithByTypeNotIn(types []string) DBOption
+	PageAlertConfig(page, size int, opts ...DBOption) (int64, []model.AlertConfig, error)
 
 	SyncAll(data []model.AlertConfig) error
 }
@@ -101,9 +124,20 @@ func (a *AlertRepo) WithByRecordId(recordId uint) DBOption {
 	}
 }
 
-func (a *AlertRepo) WithByMethod(method string) DBOption {
+func (a *AlertRepo) WithByAlertMethodContainsConfigID(id uint) DBOption {
+	method := strconv.Itoa(int(id))
 	return func(g *gorm.DB) *gorm.DB {
-		return g.Where("method = ?", method)
+		return g.Where("(method = ? OR method LIKE ? OR method LIKE ? OR method LIKE ?)", method, method+",%", "%,"+method, "%,"+method+",%")
+	}
+}
+
+func (a *AlertRepo) WithByMethodConfigIDs(ids []uint) DBOption {
+	return func(g *gorm.DB) *gorm.DB {
+		methods := make([]string, 0, len(ids))
+		for _, id := range ids {
+			methods = append(methods, strconv.Itoa(int(id)))
+		}
+		return g.Where("method IN ?", methods)
 	}
 }
 
@@ -203,11 +237,76 @@ func (a *AlertRepo) DeleteLog(opts ...DBOption) error {
 }
 
 func (a *AlertRepo) CleanAlertLogs() error {
-	return global.AlertDB.Where("1 = 1").Delete(&model.AlertLog{}).Error
+	return global.AlertDB.Where("status <> ?", constant.AlertPushing).Delete(&model.AlertLog{}).Error
 }
 
 func (a *AlertRepo) CreateAlertTask(alertTaskBase *model.AlertTask) error {
 	return global.AlertDB.Model(&model.AlertTask{}).Create(&alertTaskBase).Error
+}
+
+func (a *AlertRepo) CreatePendingAlertTask(logID, alertID uint, alertTask *model.AlertTask) (bool, error) {
+	if alertTask == nil {
+		return false, fmt.Errorf("pending alert task is required")
+	}
+	created := false
+	err := global.AlertDB.Transaction(func(tx *gorm.DB) error {
+		var log model.AlertLog
+		if err := tx.Where("id = ? AND status = ?", logID, constant.AlertPushing).First(&log).Error; err != nil {
+			return err
+		}
+		if log.AlertId != alertID || log.Type != alertTask.Type || log.Method != alertTask.Method {
+			return fmt.Errorf("pending alert task does not match delivery log %d", logID)
+		}
+		alertTask.DeliveryLogID = &logID
+		result := tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "delivery_log_id"}},
+			DoNothing: true,
+		}).Create(alertTask)
+		if result.Error != nil {
+			return result.Error
+		}
+		created = result.RowsAffected > 0
+		return nil
+	})
+	return created, err
+}
+
+func (a *AlertRepo) FinalizePendingAlertTask(logID uint, succeeded bool, message string, fallback *model.AlertTask) (bool, error) {
+	finalized := false
+	err := global.AlertDB.Transaction(func(tx *gorm.DB) error {
+		status := constant.AlertError
+		if succeeded {
+			status = constant.AlertSuccess
+			message = ""
+		}
+		result := tx.Model(&model.AlertLog{}).
+			Where("id = ? AND status = ?", logID, constant.AlertPushing).
+			Updates(map[string]interface{}{"status": status, "message": message})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return nil
+		}
+		finalized = true
+		if !succeeded {
+			return tx.Where("delivery_log_id = ?", logID).Delete(&model.AlertTask{}).Error
+		}
+
+		var count int64
+		if err := tx.Model(&model.AlertTask{}).Where("delivery_log_id = ?", logID).Count(&count).Error; err != nil {
+			return err
+		}
+		if count > 0 {
+			return nil
+		}
+		if fallback == nil {
+			return fmt.Errorf("pending alert task metadata is unavailable for delivery log %d", logID)
+		}
+		fallback.DeliveryLogID = &logID
+		return tx.Create(fallback).Error
+	})
+	return finalized, err
 }
 
 func (a *AlertRepo) DeleteAlertTask(opts ...DBOption) error {
@@ -290,7 +389,23 @@ func (a *AlertRepo) UpdateAlertConfig(maps map[string]interface{}, opts ...DBOpt
 	return db.Model(&model.AlertConfig{}).Updates(maps).Error
 }
 
+func (a *AlertRepo) UpdateAlertConfigWithRevision(maps map[string]interface{}, revision *time.Time, opts ...DBOption) error {
+	if revision == nil {
+		return a.UpdateAlertConfig(maps, opts...)
+	}
+	db, _ := getAlertDB(opts...)
+	result := db.Model(&model.AlertConfig{}).Where("updated_at = ?", *revision).Updates(maps)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrAlertConfigRevisionConflict
+	}
+	return nil
+}
+
 func (a *AlertRepo) CreateAlertConfig(config *model.AlertConfig) error {
+	ensureAlertConfigUID(config)
 	return global.AlertDB.Model(&model.AlertConfig{}).Create(config).Error
 }
 
@@ -306,32 +421,346 @@ func (a *AlertRepo) GetConfig(opts ...DBOption) (model.AlertConfig, error) {
 	return alertConfig, err
 }
 
+func (a *AlertRepo) GetConfigById(id uint) (model.AlertConfig, error) {
+	var config model.AlertConfig
+	err := global.AlertDB.First(&config, id).Error
+	return config, err
+}
+
+func (a *AlertRepo) WithByTypeNotIn(types []string) DBOption {
+	return func(g *gorm.DB) *gorm.DB {
+		return g.Where("`type` NOT IN (?)", types)
+	}
+}
+
+func (a *AlertRepo) WithByDeliveryLogID(logID uint) DBOption {
+	return func(g *gorm.DB) *gorm.DB {
+		return g.Where("delivery_log_id = ?", logID)
+	}
+}
+
+func (a *AlertRepo) PageAlertConfig(page, size int, opts ...DBOption) (int64, []model.AlertConfig, error) {
+	var configs []model.AlertConfig
+	db := global.AlertDB.Model(&model.AlertConfig{})
+	for _, opt := range opts {
+		db = opt(db)
+	}
+	count := int64(0)
+	db = db.Count(&count)
+	err := db.Limit(size).Offset(size * (page - 1)).Find(&configs).Error
+	return count, configs, err
+}
+
+var singletonTypes = map[string]bool{
+	constant.CommonConfig: true,
+}
+
 func (a *AlertRepo) SyncAll(data []model.AlertConfig) error {
 	tx := global.AlertDB.Begin()
+	if tx.Error != nil {
+		return tx.Error
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+			panic(r)
+		}
+	}()
+
 	var oldConfigs []model.AlertConfig
-	_ = tx.Find(&oldConfigs).Error
-	oldConfigMap := make(map[string]uint)
+	if err := tx.Find(&oldConfigs).Error; err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	usedConfigIDs, err := loadUsedAlertConfigIDs(tx)
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	oldConfigMap := make(map[string]model.AlertConfig)
+	oldConfigByUID := make(map[string]model.AlertConfig)
+	oldConfigByType := make(map[string][]model.AlertConfig)
+	oldConfigByKey := make(map[string][]model.AlertConfig)
+	consumedConfigIDs := make(map[uint]struct{})
 	for _, item := range oldConfigs {
-		oldConfigMap[item.Type] = item.ID
+		if strings.TrimSpace(item.UID) != "" {
+			oldConfigByUID[item.UID] = item
+		}
+		if singletonTypes[item.Type] {
+			oldConfigMap[item.Type] = item
+			continue
+		}
+		oldConfigByType[item.Type] = append(oldConfigByType[item.Type], item)
+		oldConfigByKey[alertConfigSyncKey(item)] = append(oldConfigByKey[alertConfigSyncKey(item)], item)
 	}
 	for _, item := range data {
-		if val, ok := oldConfigMap[item.Type]; ok {
-			item.ID = val
-			delete(oldConfigMap, item.Type)
-		} else {
-			item.ID = 0
+		if uid := strings.TrimSpace(item.UID); uid != "" {
+			if matched, ok := oldConfigByUID[uid]; ok && matched.Type != item.Type {
+				tx.Rollback()
+				return fmt.Errorf("alert config UID %q belongs to type %q, not %q", uid, matched.Type, item.Type)
+			}
 		}
-		if err := tx.Model(model.AlertConfig{}).Where("id = ?", item.ID).Save(&item).Error; err != nil {
+		if singletonTypes[item.Type] {
+			if matched, ok := oldConfigMap[item.Type]; ok {
+				if err := inheritAlertConfigSyncState(&item, matched); err != nil {
+					tx.Rollback()
+					return err
+				}
+				delete(oldConfigMap, item.Type)
+				consumedConfigIDs[item.ID] = struct{}{}
+			} else {
+				item.ID = 0
+				ensureAlertConfigUID(&item)
+				if err := validateAlertConfigSyncSecret(&item); err != nil {
+					tx.Rollback()
+					return err
+				}
+			}
+			if item.ID == 0 {
+				if err := tx.Create(&item).Error; err != nil {
+					tx.Rollback()
+					return err
+				}
+			} else if err := tx.Save(&item).Error; err != nil {
+				tx.Rollback()
+				return err
+			}
+			continue
+		}
+
+		if strings.TrimSpace(item.UID) != "" {
+			if matched, ok := oldConfigByUID[item.UID]; ok {
+				delete(oldConfigByUID, item.UID)
+				if err := inheritAlertConfigSyncState(&item, matched); err != nil {
+					tx.Rollback()
+					return err
+				}
+				consumedConfigIDs[item.ID] = struct{}{}
+				if err := tx.Save(&item).Error; err != nil {
+					tx.Rollback()
+					return err
+				}
+				deleteAlertConfigByID(oldConfigByType, matched.ID)
+				deleteAlertConfigByID(oldConfigByKey, matched.ID)
+				continue
+			}
+		}
+
+		key := alertConfigSyncKey(item)
+		if matched, ok := popAlertConfigByKey(oldConfigByKey, key); ok {
+			delete(oldConfigByUID, matched.UID)
+			if err := inheritAlertConfigSyncState(&item, matched); err != nil {
+				tx.Rollback()
+				return err
+			}
+			consumedConfigIDs[item.ID] = struct{}{}
+			if err := tx.Save(&item).Error; err != nil {
+				tx.Rollback()
+				return err
+			}
+			deleteAlertConfigByID(oldConfigByType, matched.ID)
+			continue
+		}
+
+		if matched, ok := popUnusedAlertConfigByType(oldConfigByType, usedConfigIDs, item.Type); ok {
+			delete(oldConfigByUID, matched.UID)
+			deleteAlertConfigByID(oldConfigByKey, matched.ID)
+			if err := inheritAlertConfigSyncState(&item, matched); err != nil {
+				tx.Rollback()
+				return err
+			}
+			consumedConfigIDs[item.ID] = struct{}{}
+			if err := tx.Save(&item).Error; err != nil {
+				tx.Rollback()
+				return err
+			}
+			continue
+		}
+
+		item.ID = 0
+		ensureAlertConfigUID(&item)
+		if err := validateAlertConfigSyncSecret(&item); err != nil {
+			tx.Rollback()
+			return err
+		}
+		if err := tx.Create(&item).Error; err != nil {
 			tx.Rollback()
 			return err
 		}
 	}
-	for _, val := range oldConfigMap {
-		if err := tx.Where("id = ?", val).Delete(&model.AlertConfig{}).Error; err != nil {
+	for _, item := range oldConfigs {
+		if _, used := usedConfigIDs[item.ID]; used {
+			continue
+		}
+		if _, kept := consumedConfigIDs[item.ID]; kept {
+			continue
+		}
+		if err := tx.Where("id = ?", item.ID).Delete(&model.AlertConfig{}).Error; err != nil {
 			tx.Rollback()
 			return err
 		}
 	}
-	tx.Commit()
+	if err := tx.Commit().Error; err != nil {
+		tx.Rollback()
+		return err
+	}
 	return nil
+}
+
+func ensureAlertConfigUID(config *model.AlertConfig) {
+	if config != nil && strings.TrimSpace(config.UID) == "" {
+		config.UID = uuid.NewString()
+	}
+}
+
+func inheritAlertConfigSyncState(incoming *model.AlertConfig, existing model.AlertConfig) error {
+	if incoming.Type != existing.Type {
+		return fmt.Errorf("alert config UID %q belongs to type %q, not %q", incoming.UID, existing.Type, incoming.Type)
+	}
+	preserveExistingCustom := incoming.Type == constant.Custom &&
+		existing.Status == constant.AlertDisable &&
+		incoming.Title == existing.Title &&
+		incoming.Status == existing.Status &&
+		incoming.Config == existing.Config &&
+		(incoming.SecretConfig == "" || incoming.SecretConfig == existing.SecretConfig)
+	incoming.ID = existing.ID
+	if strings.TrimSpace(incoming.UID) == "" {
+		incoming.UID = existing.UID
+	}
+	if incoming.Type == constant.Custom && incoming.SecretConfig == "" {
+		incoming.SecretConfig = existing.SecretConfig
+	}
+	if preserveExistingCustom {
+		return nil
+	}
+	return validateAlertConfigSyncSecret(incoming)
+}
+
+func validateAlertConfigSyncSecret(incoming *model.AlertConfig) error {
+	if incoming.Type != constant.Custom {
+		incoming.SecretConfig = ""
+		return nil
+	}
+	if strings.TrimSpace(incoming.SecretConfig) == "" {
+		return fmt.Errorf("custom webhook sync secret is missing")
+	}
+	var version struct {
+		SchemaVersion int `json:"schemaVersion"`
+	}
+	if err := json.Unmarshal([]byte(incoming.Config), &version); err != nil || version.SchemaVersion != 1 {
+		return fmt.Errorf("custom webhook sync config must use schemaVersion 1")
+	}
+	secret := incoming.SecretConfig
+	for _, prefix := range []string{"core:v1:", "agent:v1:"} {
+		if !strings.HasPrefix(secret, prefix) {
+			continue
+		}
+		ciphertext, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(secret, prefix))
+		if err != nil || len(ciphertext) < 32 || len(ciphertext)%16 != 0 {
+			return fmt.Errorf("custom webhook sync secret envelope is invalid")
+		}
+		return nil
+	}
+	return fmt.Errorf("custom webhook sync secret must use a versioned envelope")
+}
+
+func loadUsedAlertConfigIDs(tx *gorm.DB) (map[uint]struct{}, error) {
+	var alerts []model.Alert
+	if err := tx.Select("method").Find(&alerts).Error; err != nil {
+		return nil, err
+	}
+
+	usedIDs := make(map[uint]struct{})
+	for _, alert := range alerts {
+		for _, item := range strings.Split(alert.Method, ",") {
+			item = strings.TrimSpace(item)
+			if item == "" {
+				continue
+			}
+			id, err := strconv.ParseUint(item, 10, 64)
+			if err != nil {
+				continue
+			}
+			usedIDs[uint(id)] = struct{}{}
+		}
+	}
+	return usedIDs, nil
+}
+
+func alertConfigSyncKey(item model.AlertConfig) string {
+	return item.Type + "::" + normalizeAlertConfigJSON(item.Config)
+}
+
+func normalizeAlertConfigJSON(config string) string {
+	trimmed := strings.TrimSpace(config)
+	if trimmed == "" {
+		return ""
+	}
+
+	var data any
+	if err := json.Unmarshal([]byte(trimmed), &data); err != nil {
+		return trimmed
+	}
+	buf, err := json.Marshal(data)
+	if err != nil {
+		return trimmed
+	}
+	return string(buf)
+}
+
+func popAlertConfigByKey(configMap map[string][]model.AlertConfig, key string) (model.AlertConfig, bool) {
+	items := configMap[key]
+	if len(items) == 0 {
+		return model.AlertConfig{}, false
+	}
+
+	item := items[0]
+	if len(items) == 1 {
+		delete(configMap, key)
+	} else {
+		configMap[key] = items[1:]
+	}
+	return item, true
+}
+
+func popUnusedAlertConfigByType(configMap map[string][]model.AlertConfig, usedConfigIDs map[uint]struct{}, configType string) (model.AlertConfig, bool) {
+	items := configMap[configType]
+	if len(items) == 0 {
+		return model.AlertConfig{}, false
+	}
+
+	for idx, item := range items {
+		if _, used := usedConfigIDs[item.ID]; used {
+			continue
+		}
+		if idx == 0 {
+			if len(items) == 1 {
+				delete(configMap, configType)
+			} else {
+				configMap[configType] = items[1:]
+			}
+		} else {
+			configMap[configType] = append(items[:idx], items[idx+1:]...)
+		}
+		return item, true
+	}
+	return model.AlertConfig{}, false
+}
+
+func deleteAlertConfigByID(configMap map[string][]model.AlertConfig, id uint) {
+	for key, items := range configMap {
+		for idx, item := range items {
+			if item.ID != id {
+				continue
+			}
+			if len(items) == 1 {
+				delete(configMap, key)
+			} else {
+				configMap[key] = append(items[:idx], items[idx+1:]...)
+			}
+			return
+		}
+	}
 }

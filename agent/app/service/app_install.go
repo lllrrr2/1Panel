@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math"
 	"net/http"
 	"os"
@@ -13,12 +14,14 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/1Panel-dev/1Panel/agent/app/dto"
 	"github.com/1Panel-dev/1Panel/agent/app/dto/request"
 	"github.com/1Panel-dev/1Panel/agent/app/dto/response"
 	"github.com/1Panel-dev/1Panel/agent/app/model"
 	"github.com/1Panel-dev/1Panel/agent/app/repo"
+	"github.com/1Panel-dev/1Panel/agent/app/task"
 	"github.com/1Panel-dev/1Panel/agent/buserr"
 	"github.com/1Panel-dev/1Panel/agent/constant"
 	"github.com/1Panel-dev/1Panel/agent/global"
@@ -252,6 +255,9 @@ func (a *AppInstallService) Operate(req request.AppInstalledOperate) error {
 		return buserr.New("ErrInstallDirNotFound")
 	}
 	dockerComposePath := install.GetComposePath()
+	if req.UseLifecycleScripts && (req.Operate == constant.Start || req.Operate == constant.Stop || req.Operate == constant.Restart) {
+		return operateAppWithLifecycleScripts(install, req, nil)
+	}
 	switch req.Operate {
 	case constant.Rebuild:
 		return rebuildApp(install)
@@ -275,12 +281,13 @@ func (a *AppInstallService) Operate(req request.AppInstalledOperate) error {
 		return syncAppInstallStatus(&install, false)
 	case constant.Delete:
 		deleteReq := request.AppInstallDelete{
-			Install:      install,
-			DeleteBackup: req.DeleteBackup,
-			ForceDelete:  req.ForceDelete,
-			DeleteDB:     req.DeleteDB,
-			DeleteImage:  req.DeleteImage,
-			TaskID:       req.TaskID,
+			Install:             install,
+			DeleteBackup:        req.DeleteBackup,
+			ForceDelete:         req.ForceDelete,
+			DeleteDB:            req.DeleteDB,
+			DeleteImage:         req.DeleteImage,
+			TaskID:              req.TaskID,
+			UseLifecycleScripts: req.UseLifecycleScripts,
 		}
 		if err = deleteAppInstall(deleteReq); err != nil && !req.ForceDelete {
 			return err
@@ -294,6 +301,7 @@ func (a *AppInstallService) Operate(req request.AppInstalledOperate) error {
 			DetailID:      req.DetailId,
 			Backup:        req.Backup,
 			PullImage:     req.PullImage,
+			DeleteImage:   req.DeleteImage,
 			DockerCompose: req.DockerCompose,
 			TaskID:        req.TaskID,
 		}
@@ -309,6 +317,70 @@ func (a *AppInstallService) Operate(req request.AppInstalledOperate) error {
 	default:
 		return errors.New("operate not support")
 	}
+}
+
+func operateAppWithLifecycleScripts(install model.AppInstall, req request.AppInstalledOperate, onFailure func(error)) error {
+	taskType := task.TaskUpdate
+	switch req.Operate {
+	case constant.Start:
+		install.Status = constant.StatusStarting
+	case constant.Restart:
+		taskType = task.TaskRestart
+		install.Status = constant.StatusRestarting
+	case constant.Stop:
+		install.Status = constant.StatusWaiting
+	default:
+		return errors.New("lifecycle script operation not supported")
+	}
+	install.Message = ""
+	if err := appInstallRepo.Save(context.Background(), &install); err != nil {
+		return err
+	}
+
+	operationTask, err := task.NewTaskWithOps(install.Name, taskType, task.TaskScopeApp, req.TaskID, install.ID)
+	if err != nil {
+		return err
+	}
+	operation := string(req.Operate)
+	operationTask.AddSubTaskWithOps(
+		task.GetTaskName(install.Name, taskType, task.TaskScopeApp),
+		func(t *task.Task) error {
+			if err := runScript(t, &install, operation); err != nil {
+				return err
+			}
+			if req.Operate == constant.Stop {
+				install.Status = constant.StatusStopped
+				install.Message = ""
+				return appInstallRepo.Save(context.Background(), &install)
+			}
+			containerNames, err := getContainerNames(install)
+			if err != nil {
+				return err
+			}
+			if len(containerNames) == 0 {
+				return buserr.WithName("ErrContainerNotFound", install.Name)
+			}
+			install.ContainerName = strings.Join(containerNames, ",")
+			install.Status = constant.StatusRunning
+			install.Message = ""
+			return appInstallRepo.Save(context.Background(), &install)
+		},
+		nil,
+		0,
+		time.Hour,
+	)
+	go func() {
+		if taskErr := operationTask.Execute(); taskErr != nil {
+			if onFailure != nil {
+				onFailure(taskErr)
+				return
+			}
+			install.Status = constant.StatusUpErr
+			install.Message = taskErr.Error()
+			_ = appInstallRepo.Save(context.Background(), &install)
+		}
+	}()
+	return nil
 }
 
 func (a *AppInstallService) UpdateAppConfig(req request.AppConfigUpdate) error {
@@ -337,12 +409,11 @@ func (a *AppInstallService) Update(req request.AppInstalledUpdate) error {
 	if err != nil {
 		return err
 	}
-	changePort := false
+	oldInstalled := installed
 	port, ok := req.Params["PANEL_APP_PORT_HTTP"]
 	if ok {
 		portN := int(math.Ceil(port.(float64)))
 		if portN != installed.HttpPort {
-			changePort = true
 			httpPort, err := checkPort("PANEL_APP_PORT_HTTP", req.Params)
 			if err != nil {
 				return err
@@ -374,8 +445,10 @@ func (a *AppInstallService) Update(req request.AppInstalledUpdate) error {
 				return err
 			}
 		}
-		if err = addDockerComposeCommonParam(composeMap, installed.ServiceName, req.AppContainerConfig, req.Params); err != nil {
-			return err
+		if !req.SkipComposeCommonConfig {
+			if err = addDockerComposeCommonParam(composeMap, installed.ServiceName, req.AppContainerConfig, req.Params); err != nil {
+				return err
+			}
 		}
 		composeByte, err := yaml.Marshal(composeMap)
 		if err != nil {
@@ -408,7 +481,7 @@ func (a *AppInstallService) Update(req request.AppInstalledUpdate) error {
 	if err != nil {
 		return err
 	}
-	backupEnvMaps := oldEnvMaps
+	backupEnvMaps := maps.Clone(oldEnvMaps)
 	handleMap(req.Params, oldEnvMaps)
 	paramByte, err := json.Marshal(oldEnvMaps)
 	if err != nil {
@@ -420,17 +493,44 @@ func (a *AppInstallService) Update(req request.AppInstalledUpdate) error {
 	}
 	fileOp := files.NewFileOp()
 	_ = fileOp.WriteFile(installed.GetComposePath(), strings.NewReader(installed.DockerCompose), constant.DirPerm)
-	if err := rebuildApp(installed); err != nil {
+	restoreConfig := func(operationErr error) {
 		_ = env.Write(backupEnvMaps, envPath)
 		_ = fileOp.WriteFile(installed.GetComposePath(), strings.NewReader(backupDockerCompose), constant.DirPerm)
+		failed := oldInstalled
+		failed.Status = constant.StatusUpErr
+		failed.Message = operationErr.Error()
+		_ = appInstallRepo.Save(context.Background(), &failed)
+	}
+	if req.UseLifecycleScripts {
+		err = operateAppWithLifecycleScripts(installed, request.AppInstalledOperate{
+			InstallId:           installed.ID,
+			Operate:             constant.Restart,
+			TaskID:              req.TaskID,
+			UseLifecycleScripts: true,
+		}, restoreConfig)
+	} else {
+		err = rebuildApp(installed)
+	}
+	if err != nil {
+		restoreConfig(err)
 		return err
 	}
-	installed.Status = constant.StatusRunning
-	_ = appInstallRepo.Save(context.Background(), &installed)
+	if !req.UseLifecycleScripts {
+		installed.Status = constant.StatusRunning
+		_ = appInstallRepo.Save(context.Background(), &installed)
+	}
 
+	proxyChanged := hasAppInstallProxyPassChanged(&oldInstalled, &installed)
+	currentProxy, currentProxyErr := getAppInstallProxyPass(&installed)
 	website, _ := websiteRepo.GetFirst(websiteRepo.WithAppInstallId(installed.ID))
-	if changePort && website.ID != 0 && website.Status == constant.StatusRunning {
-		go func() {
+	if proxyChanged && website.ID != 0 && currentProxyErr == nil {
+		website.Proxy = currentProxy
+		if err := websiteRepo.SaveWithoutCtx(&website); err != nil {
+			global.LOG.Error(buserr.WithErr("ErrUpdateBuWebsite", err).Error())
+		}
+	}
+	if proxyChanged && website.ID != 0 && website.Status == constant.StatusRunning && currentProxyErr == nil {
+		go func(website model.Website, proxy string) {
 			nginxInstall, err := getNginxFull(&website)
 			if err != nil {
 				global.LOG.Error(buserr.WithErr("ErrUpdateBuWebsite", err).Error())
@@ -443,7 +543,6 @@ func (a *AppInstallService) Update(req request.AppInstalledUpdate) error {
 				return
 			}
 			server := servers[0]
-			proxy := fmt.Sprintf("http://127.0.0.1:%d", installed.HttpPort)
 			server.UpdateRootProxy([]string{proxy})
 
 			if err := nginx.WriteConfig(config, nginx.IndentedStyle); err != nil {
@@ -454,7 +553,10 @@ func (a *AppInstallService) Update(req request.AppInstalledUpdate) error {
 				global.LOG.Error(buserr.WithErr("ErrUpdateBuWebsite", err).Error())
 				return
 			}
-		}()
+		}(website, currentProxy)
+	}
+	if proxyChanged && website.ID != 0 && currentProxyErr != nil {
+		global.LOG.Error(buserr.WithErr("ErrUpdateBuWebsite", currentProxyErr).Error())
 	}
 	return nil
 }
@@ -573,6 +675,9 @@ func (a *AppInstallService) GetUpdateVersions(req request.AppUpdateVersion) ([]d
 		return versions, err
 	}
 	for _, detail := range details {
+		if !canAccessVllmVersion(app.Key, detail.Version) {
+			continue
+		}
 		ignores, _ := appIgnoreUpgradeRepo.List(runtimeRepo.WithDetailId(detail.ID), appIgnoreUpgradeRepo.WithScope("version"))
 		if len(ignores) > 0 {
 			continue
@@ -580,12 +685,20 @@ func (a *AppInstallService) GetUpdateVersions(req request.AppUpdateVersion) ([]d
 		if common.IsCrossVersion(install.Version, detail.Version) && !app.CrossVersionUpdate {
 			continue
 		}
-		if common.CompareVersion(detail.Version, install.Version) {
+		canUpgrade := common.CompareVersion(detail.Version, install.Version)
+		if app.Key == vllmAppKeyForUpgrade {
+			currentImage := loadVllmImageFromEnv(install.Env)
+			canUpgrade = isVllmUpgradeCandidate(install.Version, detail.Version, currentImage)
+		}
+		if canUpgrade {
 			var newCompose string
 			if req.UpdateVersion != "" && req.UpdateVersion == detail.Version && detail.DockerCompose == "" && !app.IsLocalApp() {
 				filename := filepath.Base(detail.DownloadUrl)
 				dockerComposeUrl := fmt.Sprintf("%s%s", strings.TrimSuffix(detail.DownloadUrl, filename), "docker-compose.yml")
 				statusCode, composeRes, err := req_helper.HandleRequest(dockerComposeUrl, http.MethodGet, constant.TimeOut20s)
+				if statusCode == http.StatusNotFound {
+					return versions, buserr.New("ErrAppVersionUnavailable")
+				}
 				if err != nil {
 					return versions, err
 				}
@@ -818,7 +931,9 @@ func (a *AppInstallService) GetParams(id uint) (*response.AppConfig, error) {
 }
 
 func syncAppInstallStatus(appInstall *model.AppInstall, force bool) error {
-	if appInstall.Status == constant.StatusInstalling || appInstall.Status == constant.StatusRebuilding || appInstall.Status == constant.StatusUpgrading || appInstall.Status == constant.StatusUninstalling {
+	switch appInstall.Status {
+	case constant.StatusInstalling, constant.StatusRebuilding, constant.StatusUpgrading, constant.StatusUninstalling,
+		constant.StatusStarting, constant.StatusRestarting, constant.StatusWaiting:
 		return nil
 	}
 	cli, err := docker.NewClient()
@@ -844,6 +959,10 @@ func syncAppInstallStatus(appInstall *model.AppInstall, force bool) error {
 	return nil
 }
 
+func SyncAppInstallStatus(appInstall *model.AppInstall, force bool) error {
+	return syncAppInstallStatus(appInstall, force)
+}
+
 func updateInstallInfoInDB(appKey, appName, param string, value interface{}) error {
 	if param != "password" && param != "port" && param != "user-password" {
 		return nil
@@ -861,7 +980,7 @@ func updateInstallInfoInDB(appKey, appName, param string, value interface{}) err
 	envKey := ""
 	switch param {
 	case "password":
-		if appKey == "mysql" || appKey == "mariadb" || appKey == "postgresql" {
+		if appKey == "mysql" || appKey == "mariadb" || appKey == "postgresql" || appKey == "mongodb" {
 			envKey = "PANEL_DB_ROOT_PASSWORD="
 		} else {
 			envKey = "PANEL_REDIS_ROOT_PASSWORD="
@@ -902,7 +1021,7 @@ func updateInstallInfoInDB(appKey, appName, param string, value interface{}) err
 			"param": strings.ReplaceAll(appInstall.Param, oldVal, newVal),
 			"env":   strings.ReplaceAll(appInstall.Env, oldVal, newVal),
 		}, repo.WithByID(appInstall.ID))
-		if appKey == "mysql" || appKey == "postgresql" {
+		if appKey == "mysql" || appKey == "postgresql" || appKey == "mongodb" {
 			return nil
 		}
 	}

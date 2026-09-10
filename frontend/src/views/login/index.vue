@@ -2,11 +2,18 @@
     <div class="flex items-center justify-center min-h-screen relative bg-gray-100">
         <div class="absolute inset-0 bg-cover bg-center bg-no-repeat" :style="backgroundStyle"></div>
         <div
+            v-if="externalLoginPending"
+            v-loading="true"
+            class="absolute inset-0 z-20 bg-gray-100"
+            aria-busy="true"
+        ></div>
+        <div
+            v-show="!externalLoginPending"
             :style="{ opacity: backgroundOpacity, width: containerWidth, height: containerHeight }"
             class="bg-white shadow-lg relative z-10 border border-gray-200 flex overflow-hidden"
             id="login-container"
         >
-            <div class="grid grid-cols-1 md:grid-cols-2 items-stretch w-full">
+            <div class="grid items-stretch w-full" :style="loginGridStyle">
                 <div v-if="showLogo" class="flex justify-center" :style="{ height: containerHeight }">
                     <img
                         v-show="imgLoaded"
@@ -18,27 +25,32 @@
                     />
                 </div>
                 <div :class="loginFormClass">
-                    <LoginForm ref="loginRef"></LoginForm>
+                    <LoginForm ref="loginRef" @external-login-ready="externalLoginPending = false"></LoginForm>
                 </div>
             </div>
         </div>
     </div>
 </template>
 
-<script setup lang="ts" name="login">
+<script setup lang="ts">
 import LoginForm from './components/login-form.vue';
 import { ref, onMounted } from 'vue';
-import { GlobalStore } from '@/store';
-import { preloadImage } from '@/utils/util';
-
-const globalStore = GlobalStore();
+import { useGlobalStore } from '@/composables/useGlobalStore';
+import { preloadImage } from '@/utils/browser';
+import { hasExternalLoginTicket } from '@/utils/external-login';
+defineOptions({ name: 'Login' });
+const { entrance, isEnterprise, themeConfig } = useGlobalStore();
 const backgroundOpacity = ref(1);
 const defaultLoginImage = new URL('@/assets/images/1panel-login.jpg', import.meta.url).href;
+const defaultEnterpriseLoginImage = new URL('@/assets/images/1panel-login-enterprise.png', import.meta.url).href;
 const defaultLoginBgImage = new URL('@/assets/images/1panel-login-bg.jpg', import.meta.url).href;
 const loadedLoginImage = ref<string | null>(null);
 const loadedBackgroundImage = ref<string | null>(null);
 const backgroundStyle = ref<{ backgroundImage?: string; backgroundColor?: string }>({});
 const imgLoaded = ref(false);
+const currentDefaultLoginImage = computed(() => (isEnterprise.value ? defaultEnterpriseLoginImage : defaultLoginImage));
+
+const externalLoginPending = ref(hasExternalLoginTicket());
 
 function onImgLoad() {
     imgLoaded.value = true;
@@ -53,18 +65,30 @@ const mySafetyCode = defineProps({
 const getStatus = async () => {
     let code = mySafetyCode.code;
     if (code != '') {
-        globalStore.entrance = code;
+        entrance.value = code;
     }
 };
 
 const loadImage = (name: string) => {
-    const { loginImage, loginBackground, loginBgType } = globalStore.themeConfig;
+    const { loginImage, loginBackground, loginBgType } = themeConfig.value;
     if (name === 'loginImage') {
-        return loginImage === 'loginImage' ? loadedLoginImage.value : defaultLoginImage;
+        if (loginImage === 'loginImage') {
+            return loadedLoginImage.value || currentDefaultLoginImage.value;
+        }
+        if (loginImage) {
+            return loginImage;
+        }
+        return currentDefaultLoginImage.value;
     }
     if (name === 'loginBackground') {
         if (loginBgType === 'image') {
-            return loginBackground === 'loginBackground' ? loadedBackgroundImage.value : defaultLoginBgImage;
+            if (loginBackground === 'loginBackground') {
+                return loadedBackgroundImage.value || defaultLoginBgImage;
+            }
+            if (loginBackground) {
+                return loginBackground;
+            }
+            return defaultLoginBgImage;
         }
         if (loginBgType === 'color') {
             return loginBackground;
@@ -75,7 +99,7 @@ const loadImage = (name: string) => {
 };
 
 const onImgError = (event: any) => {
-    event.target.src = defaultLoginImage;
+    event.target.src = currentDefaultLoginImage.value;
     imgLoaded.value = true;
 };
 
@@ -83,11 +107,15 @@ onMounted(async () => {
     await getStatus();
     const loginImageUrl = `/api/v2/images/loginImage?t=${Date.now()}`;
     const backgroundImageUrl = `/api/v2/images/loginBackground?t=${Date.now()}`;
-    loadedLoginImage.value = await preloadImage(loginImageUrl);
-    loadedBackgroundImage.value = await preloadImage(backgroundImageUrl);
-    if (globalStore.themeConfig.loginBgType === 'color') {
+    if (themeConfig.value.loginImage === 'loginImage') {
+        loadedLoginImage.value = await preloadImage(loginImageUrl);
+    }
+    if (themeConfig.value.loginBgType === 'image' && themeConfig.value.loginBackground === 'loginBackground') {
+        loadedBackgroundImage.value = await preloadImage(backgroundImageUrl);
+    }
+    if (themeConfig.value.loginBgType === 'color') {
         backgroundStyle.value = {
-            backgroundColor: globalStore.themeConfig.loginBackground,
+            backgroundColor: themeConfig.value.loginBackground,
         };
     } else {
         const img = new Image();
@@ -99,7 +127,7 @@ onMounted(async () => {
         };
         img.onerror = () => {
             backgroundStyle.value = {
-                backgroundImage: `url(${defaultLoginBgImage})`, // 你定义的默认图
+                backgroundImage: `url(${defaultLoginBgImage})`,
             };
         };
         img.src = url;
@@ -126,9 +154,12 @@ const { width } = useWindowSize();
 const showLogo = computed(() => width.value >= FIXED_WIDTH);
 const containerWidth = computed(() => `${FIXED_WIDTH}px`);
 const containerHeight = computed(() => `${FIXED_HEIGHT}px`);
+const loginGridStyle = computed(() => ({
+    gridTemplateColumns: showLogo.value ? 'repeat(2, minmax(0, 1fr))' : 'minmax(0, 1fr)',
+}));
 const loginFormClass = computed(() => {
     return showLogo.value
-        ? 'hidden md:flex items-center justify-center p-4'
-        : 'flex items-center justify-center p-4 w-full';
+        ? 'flex items-center justify-center p-4 min-w-0'
+        : 'flex items-center justify-center p-4 w-full min-w-0';
 });
 </script>

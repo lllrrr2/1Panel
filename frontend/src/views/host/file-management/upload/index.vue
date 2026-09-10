@@ -2,26 +2,34 @@
     <DrawerPro
         v-model="open"
         :header="$t('commons.button.upload')"
-        @before-close="handleClose"
+        @before-close="requestClose"
         size="normal"
         :confirmBeforeClose="true"
     >
         <template #content>
+            <el-alert
+                v-if="isAppendOnly"
+                class="mb-4"
+                type="warning"
+                :title="$t('xpack.tamper.tamperCreateHint')"
+                :closable="false"
+            />
             <div class="upload-button flex flex-wrap justify-between items-center gap-4 pb-4 md:flex-nowrap">
                 <div class="flex flex-wrap gap-4">
-                    <el-button type="primary" @click="upload('file')">
+                    <el-button type="primary" :disabled="uploadLocked" @click="upload('file')">
                         {{ $t('commons.button.upload') }}{{ $t('menu.files') }}
                     </el-button>
-                    <el-button type="primary" @click="upload('dir')">
+                    <el-button type="primary" :disabled="uploadLocked" @click="upload('dir')">
                         {{ $t('commons.button.upload') }}{{ $t('file.dir') }}
                     </el-button>
                 </div>
-                <el-button @click="clearFiles">{{ $t('file.clearList') }}</el-button>
+                <el-button :disabled="uploadLocked" @click="clearFiles">{{ $t('file.clearList') }}</el-button>
             </div>
 
             <div>
                 <div
                     class="el-upload-dragger"
+                    :class="{ 'upload-dragger-disabled': uploadLocked }"
                     @dragover="handleDragover"
                     @drop="handleDrop"
                     @dragleave="handleDragleave"
@@ -46,17 +54,25 @@
                 :on-success="handleSuccess"
                 :show-file-list="false"
                 multiple
+                :disabled="uploadLocked"
                 v-model:file-list="uploaderFiles"
                 :limit="1000"
             >
                 <template #tip>
                     <el-text>{{ uploadHelper }}</el-text>
-                    <el-progress
-                        v-if="upLoading"
-                        text-inside
-                        :stroke-width="20"
-                        :percentage="uploadPercent"
-                    ></el-progress>
+                    <div v-if="upLoading && uploadTotalCount > 1" class="mt-3 space-y-1">
+                        <div class="flex justify-between text-sm text-gray-500">
+                            <span>{{ $t('file.uploadOverallProgress') }}</span>
+                            <span>{{ uploadCurrentIndex + 1 }} / {{ uploadTotalCount }}</span>
+                        </div>
+                        <el-progress :stroke-width="20" :percentage="uploadOverallPercent" />
+                    </div>
+                    <div v-if="upLoading" :class="{ 'mt-3': upLoading && uploadTotalCount > 1 }" class="space-y-1">
+                        <div v-if="uploadTotalCount > 1" class="text-sm text-gray-500">
+                            {{ $t('file.uploadCurrentFileProgress') }}
+                        </div>
+                        <el-progress text-inside :stroke-width="16" :percentage="uploadPercent"></el-progress>
+                    </div>
                 </template>
             </el-upload>
 
@@ -80,7 +96,7 @@
                             type="primary"
                             link
                             @click="removeFile(index)"
-                            :disabled="loading"
+                            :disabled="uploadLocked"
                             :icon="Close"
                         ></el-button>
                     </span>
@@ -90,8 +106,10 @@
 
         <template #footer>
             <span class="dialog-footer">
-                <el-button @click="handleClose" :disabled="upLoading">{{ $t('commons.button.cancel') }}</el-button>
-                <el-button type="primary" @click="submit()" :disabled="upLoading || uploaderFiles.length == 0">
+                <el-button :type="upLoading ? 'danger' : 'default'" :loading="canceling" @click="requestClose()">
+                    {{ $t('commons.button.cancel') }}
+                </el-button>
+                <el-button type="primary" @click="submit()" :disabled="uploadLocked || uploaderFiles.length == 0">
                     {{ $t('commons.button.confirm') }}
                 </el-button>
             </span>
@@ -101,52 +119,102 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, reactive, ref } from 'vue';
+import { computed, nextTick, reactive, ref } from 'vue';
 import { UploadFile, UploadFiles, UploadInstance, UploadProps, UploadRawFile } from 'element-plus';
-import { batchCheckFiles, chunkUploadFileData, uploadFileData } from '@/api/modules/files';
+import {
+    batchCheckFiles,
+    chunkUploadFileData,
+    stopChunkUpload,
+    uploadFileData,
+    type FileUploadRequestConfig,
+} from '@/api/modules/files';
 import i18n from '@/lang';
 import { MsgError, MsgSuccess, MsgWarning } from '@/utils/message';
 import { Close, Document, UploadFilled } from '@element-plus/icons-vue';
-import { TimeoutEnum } from '@/enums/http-enum';
 import ExistFileDialog from '@/components/exist-file/index.vue';
+import { newUUID } from '@/utils/id';
+import { getErrorMessage } from '@/utils/misc';
+import { useGlobalStore } from '@/composables/useGlobalStore';
 
 interface UploadFileProps {
     path: string;
+    isAppendOnly?: boolean;
 }
 
 const uploadRef = ref<UploadInstance>();
-const loading = ref(false);
+const upLoading = ref(false);
+const canceling = ref(false);
+const uploadLocked = computed(() => upLoading.value || canceling.value);
 let uploadPercent = ref(0);
+const uploadTotalCount = ref(0);
+const uploadCurrentIndex = ref(0);
+const uploadOverallPercent = computed(() => {
+    const total = uploadTotalCount.value;
+    if (!upLoading.value || total === 0) {
+        return 0;
+    }
+    const raw = (uploadCurrentIndex.value * 100 + uploadPercent.value) / total;
+    return Math.min(100, Math.round(raw));
+});
 const open = ref(false);
+const isAppendOnly = ref(false);
 const path = ref();
 let uploadHelper = ref('');
 const dialogExistFileRef = ref();
-const upLoading = ref(false);
 const abortController = ref<AbortController | null>(null);
+const activeChunkUpload = ref<{ uploadID: string; node: string } | null>(null);
+const { currentNode } = useGlobalStore();
 
 const em = defineEmits(['close']);
-const handleClose = (done) => {
-    if (upLoading.value) {
-        ElMessageBox.confirm(i18n.global.t('file.cancelUploadHelper'), i18n.global.t('file.cancelUpload'), {
-            confirmButtonText: i18n.global.t('commons.button.confirm'),
-            cancelButtonText: i18n.global.t('commons.button.cancel'),
-            type: 'info',
-        })
-            .then(() => {
-                abortController.value.abort();
-                abortController.value = null;
-                closePage();
-                done();
-            })
-            .catch(() => {});
-    } else {
-        closePage();
-        done();
+type DrawerCloseDone = () => void;
+
+const finishClose = (done?: DrawerCloseDone) => {
+    closePage();
+    done?.();
+};
+
+const requestClose = async (done?: DrawerCloseDone) => {
+    if (canceling.value) {
+        return;
+    }
+    if (!upLoading.value) {
+        finishClose(done);
+        return;
+    }
+
+    canceling.value = true;
+    try {
+        try {
+            await ElMessageBox.confirm(i18n.global.t('file.cancelUploadHelper'), i18n.global.t('file.cancelUpload'), {
+                confirmButtonText: i18n.global.t('commons.button.confirm'),
+                cancelButtonText: i18n.global.t('commons.button.cancel'),
+                type: 'info',
+            });
+        } catch {
+            return;
+        }
+
+        if (!upLoading.value) {
+            finishClose(done);
+            return;
+        }
+
+        const controller = abortController.value;
+        controller?.abort();
+        await cleanupActiveChunkUpload();
+        if (abortController.value === controller) {
+            abortController.value = null;
+        }
+        finishClose(done);
+    } finally {
+        canceling.value = false;
     }
 };
 const closePage = () => {
     open.value = false;
     upLoading.value = false;
+    uploadTotalCount.value = 0;
+    uploadCurrentIndex.value = 0;
     clearFiles();
     em('close', false);
 };
@@ -158,15 +226,21 @@ const hoverIndex = ref<number | null>(null);
 const tmpFiles = ref<UploadFiles>([]);
 const breakFlag = ref(false);
 const CHUNK_SIZE = 1024 * 1024 * 5;
-const MAX_SINGLE_FILE_SIZE = 1024 * 1024 * 10;
+const MAX_CHUNK_RETRIES = 3;
 
 const upload = (command: string) => {
+    if (uploadLocked.value) {
+        return;
+    }
     state.uploadEle.webkitdirectory = command == 'dir';
     uploadRef.value.$el.querySelector('input').value = '';
     uploadRef.value.$el.querySelector('input').click();
 };
 
 const removeFile = (index: number) => {
+    if (uploadLocked.value) {
+        return;
+    }
     uploaderFiles.value.splice(index, 1);
 };
 
@@ -180,8 +254,11 @@ const initTempFiles = () => {
 };
 
 const handleDrop = async (event: DragEvent) => {
-    initTempFiles();
     event.preventDefault();
+    if (uploadLocked.value) {
+        return;
+    }
+    initTempFiles();
     const items = event.dataTransfer?.items;
 
     if (items) {
@@ -281,7 +358,7 @@ const fileOnChange = (_uploadFile: UploadFile, uploadFiles: UploadFiles) => {
 };
 
 const clearFiles = () => {
-    uploadRef.value!.clearFiles();
+    uploadRef.value?.clearFiles();
     uploaderFiles.value = [];
 };
 
@@ -314,7 +391,7 @@ const submit = async () => {
             onConfirm: handleFileUpload,
         });
     } else {
-        await uploadFile(files);
+        await uploadFile(files, false);
     }
 };
 
@@ -325,104 +402,217 @@ const handleFileUpload = (action: 'skip' | 'overwrite', skippedPaths: string[] =
             (file) => !skippedPaths.includes(`${path.value}/${file.raw.webkitRelativePath || file.name}`),
         );
         uploaderFiles.value = filteredFiles;
-        uploadFile(filteredFiles);
+        uploadFile(filteredFiles, false);
     } else if (action === 'overwrite') {
-        uploadFile(files);
+        uploadFile(files, true);
     }
 };
 
-const uploadFile = async (files: any[]) => {
+const uploadFile = async (files: any[], overwrite: boolean) => {
     if (files.length == 0) {
         clearFiles();
-    } else {
-        loading.value = true;
-        upLoading.value = true;
-        abortController.value = new AbortController();
-        let successCount = 0;
+        return;
+    }
+
+    upLoading.value = true;
+    uploadTotalCount.value = files.length;
+    const controller = new AbortController();
+    const uploadNode = currentNode.value;
+    abortController.value = controller;
+    let successCount = 0;
+    try {
         for (let i = 0; i < files.length; i++) {
             const file = files[i];
+            uploadCurrentIndex.value = i;
+            uploadPercent.value = 0;
             uploadHelper.value = i18n.global.t('file.fileUploadStart', [file.name]);
 
-            if (abortController.value.signal.aborted) {
+            if (controller.signal.aborted) {
                 break;
             }
 
-            let isSuccess =
-                file.size <= MAX_SINGLE_FILE_SIZE ? await uploadSingleFile(file) : await uploadLargeFile(file);
+            let isSuccess = false;
+            try {
+                isSuccess =
+                    Number(file.size) === 0
+                        ? await uploadEmptyFile(file, controller, uploadNode, overwrite)
+                        : await uploadChunkedFile(file, controller, uploadNode, overwrite);
+            } catch (error) {
+                if (!controller.signal.aborted) {
+                    MsgError(getErrorMessage(error));
+                }
+            }
 
             if (isSuccess) {
                 successCount++;
-                uploaderFiles.value[i].status = 'success';
+                file.status = 'success';
             } else {
-                uploaderFiles.value[i].status = 'fail';
+                file.status = 'fail';
             }
         }
 
-        loading.value = false;
-        upLoading.value = false;
-        uploadHelper.value = '';
-
-        if (successCount === files.length && !abortController.value.signal.aborted) {
+        if (successCount === files.length && !controller.signal.aborted) {
             clearFiles();
             MsgSuccess(i18n.global.t('file.uploadSuccess'));
+        }
+    } finally {
+        upLoading.value = false;
+        uploadTotalCount.value = 0;
+        uploadCurrentIndex.value = 0;
+        uploadHelper.value = '';
+        if (abortController.value === controller) {
+            abortController.value = null;
         }
     }
 };
 
-const uploadSingleFile = async (file: { raw: string | Blob }) => {
+const uploadEmptyFile = async (
+    file: { raw: string | Blob },
+    controller: AbortController,
+    node: string,
+    overwrite: boolean,
+) => {
     const formData = new FormData();
     formData.append('file', file.raw);
     formData.append('path', getUploadPath(file));
-    formData.append('overwrite', 'True');
+    formData.append('overwrite', overwrite.toString());
     uploadPercent.value = 0;
     await uploadFileData(formData, {
         onUploadProgress: (progressEvent) => {
-            uploadPercent.value = Math.round((progressEvent.loaded / progressEvent.total) * 100);
+            uploadPercent.value = progressEvent.total
+                ? Math.round((progressEvent.loaded / progressEvent.total) * 100)
+                : 0;
         },
-        timeout: 40000,
-        signal: abortController.value?.signal,
+        headers: { CurrentNode: node },
+        skipErrorMessage: true,
+        timeout: 0,
+        signal: controller.signal,
     });
     return true;
 };
 
-const uploadLargeFile = async (file: { size: any; raw: string | Blob; name: string }) => {
-    const fileSize = file.size;
-    const chunkCount = Math.ceil(fileSize / CHUNK_SIZE);
-    let uploadedChunkCount = 0;
-    for (let c = 0; c < chunkCount; c++) {
-        if (abortController.value?.signal.aborted) {
-            return false;
-        }
-        const start = c * CHUNK_SIZE;
-        const end = Math.min(start + CHUNK_SIZE, fileSize);
-        const chunk = file.raw.slice(start, end);
-        const formData = new FormData();
-        formData.append('filename', getFilenameFromPath(file.name));
-        formData.append('path', getUploadPath(file));
-        formData.append('chunk', chunk);
-        formData.append('chunkIndex', c.toString());
-        formData.append('chunkCount', chunkCount.toString());
+const cleanupActiveChunkUpload = async () => {
+    const active = activeChunkUpload.value;
+    if (!active) {
+        return;
+    }
+    activeChunkUpload.value = null;
+    try {
+        await stopChunkUpload(active.uploadID, active.node);
+    } catch (error) {
+        console.error(error);
+    }
+};
 
+const shouldRetryChunkUpload = (error: unknown) => {
+    const item = error as {
+        code?: string | number;
+        data?: { retryable?: boolean };
+        response?: { status?: number };
+    };
+    if (item?.code === 'ERR_CANCELED') {
+        return false;
+    }
+    if (typeof item?.data?.retryable === 'boolean') {
+        return item.data.retryable;
+    }
+    const status = item?.response?.status ?? (typeof item?.code === 'number' ? item.code : undefined);
+    return !status || status === 408 || status === 429 || status >= 500;
+};
+
+const waitForChunkRetry = (attempt: number, signal: AbortSignal) => {
+    return new Promise<void>((resolve) => {
+        if (signal.aborted) {
+            resolve();
+            return;
+        }
+        const timer = window.setTimeout(done, 500 * 2 ** attempt);
+        function done() {
+            window.clearTimeout(timer);
+            signal.removeEventListener('abort', done);
+            resolve();
+        }
+        signal.addEventListener('abort', done, { once: true });
+    });
+};
+
+const uploadChunkWithRetry = async (formData: FormData, config: FileUploadRequestConfig, signal: AbortSignal) => {
+    let retryCount = 0;
+    while (true) {
         try {
-            await chunkUploadFileData(formData, {
-                onUploadProgress: (progressEvent) => {
-                    uploadPercent.value = Math.round(
-                        ((uploadedChunkCount + progressEvent.loaded / progressEvent.total) * 100) / chunkCount,
-                    );
-                },
-                timeout: TimeoutEnum.T_60S,
-                signal: abortController.value?.signal,
-            });
-            uploadedChunkCount++;
+            await chunkUploadFileData(formData, config);
+            return;
         } catch (error) {
-            if (abortController.value?.signal.aborted) {
-                return false;
+            if (signal.aborted || retryCount >= MAX_CHUNK_RETRIES || !shouldRetryChunkUpload(error)) {
+                throw error;
             }
-            return false;
+            await waitForChunkRetry(retryCount, signal);
+            retryCount++;
         }
     }
+};
 
-    return uploadedChunkCount === chunkCount;
+const uploadChunkedFile = async (
+    file: { size: number; raw: Blob; name: string },
+    controller: AbortController,
+    node: string,
+    overwrite: boolean,
+) => {
+    const fileSize = file.size;
+    const chunkCount = Math.ceil(fileSize / CHUNK_SIZE);
+    const uploadID = newUUID();
+    const uploadPath = getUploadPath(file);
+    const filename = getFilenameFromPath(file.name);
+    let uploadedChunkCount = 0;
+    activeChunkUpload.value = { uploadID, node };
+    try {
+        for (let c = 0; c < chunkCount; c++) {
+            if (controller.signal.aborted) {
+                return false;
+            }
+            const start = c * CHUNK_SIZE;
+            const end = Math.min(start + CHUNK_SIZE, fileSize);
+            const chunk = file.raw.slice(start, end);
+            const formData = new FormData();
+            formData.append('uploadID', uploadID);
+            formData.append('filename', filename);
+            formData.append('path', uploadPath);
+            formData.append('chunk', chunk);
+            formData.append('chunkIndex', c.toString());
+            formData.append('chunkCount', chunkCount.toString());
+            formData.append('offset', start.toString());
+            formData.append('fileSize', fileSize.toString());
+            formData.append('overwrite', overwrite.toString());
+
+            await uploadChunkWithRetry(
+                formData,
+                {
+                    headers: { CurrentNode: node },
+                    skipErrorMessage: true,
+                    timeout: 0,
+                    signal: controller.signal,
+                    onUploadProgress: (progressEvent) => {
+                        const chunkProgress = progressEvent.total ? progressEvent.loaded / progressEvent.total : 0;
+                        uploadPercent.value = Math.round(((uploadedChunkCount + chunkProgress) * 100) / chunkCount);
+                    },
+                },
+                controller.signal,
+            );
+            uploadedChunkCount++;
+        }
+        return uploadedChunkCount === chunkCount;
+    } catch (error) {
+        await cleanupActiveChunkUpload();
+        throw error;
+    } finally {
+        if (activeChunkUpload.value?.uploadID === uploadID) {
+            if (controller.signal.aborted) {
+                await cleanupActiveChunkUpload();
+            } else {
+                activeChunkUpload.value = null;
+            }
+        }
+    }
 };
 
 const getUploadPath = (file) => {
@@ -439,9 +629,13 @@ const getFilenameFromPath = (path: string) => {
 
 const acceptParams = (props: UploadFileProps) => {
     path.value = props.path;
+    isAppendOnly.value = Boolean(props.isAppendOnly);
     open.value = true;
     uploadPercent.value = 0;
+    uploadTotalCount.value = 0;
+    uploadCurrentIndex.value = 0;
     uploadHelper.value = '';
+    canceling.value = false;
 
     nextTick(() => {
         state.uploadEle = document.querySelector('.el-upload__input');
@@ -468,6 +662,11 @@ defineExpose({ acceptParams, handleDrop, open });
     .el-button + .el-button {
         margin-left: 0;
     }
+}
+
+.upload-dragger-disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
 }
 
 .file-item {

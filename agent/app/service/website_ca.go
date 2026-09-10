@@ -28,10 +28,9 @@ import (
 	"github.com/1Panel-dev/1Panel/agent/constant"
 	"github.com/1Panel-dev/1Panel/agent/global"
 	"github.com/1Panel-dev/1Panel/agent/i18n"
-	"github.com/1Panel-dev/1Panel/agent/utils/cmd"
 	"github.com/1Panel-dev/1Panel/agent/utils/files"
 	"github.com/1Panel-dev/1Panel/agent/utils/ssl"
-	"github.com/go-acme/lego/v4/certcrypto"
+	"github.com/go-acme/lego/v5/certcrypto"
 )
 
 type WebsiteCAService struct {
@@ -188,7 +187,7 @@ func (w WebsiteCAService) ObtainSSL(req request.WebsiteCAObtain) (*model.Website
 			existDomains = append(existDomains, strings.Split(websiteSSL.Domains, ",")...)
 		}
 		for _, domain := range existDomains {
-			if ipAddress := net.ParseIP(domain); ipAddress == nil {
+			if ipAddress := common.ParseIPLoose(domain); ipAddress == nil {
 				domains = append(domains, domain)
 			} else {
 				ips = append(ips, ipAddress)
@@ -208,6 +207,7 @@ func (w WebsiteCAService) ObtainSSL(req request.WebsiteCAObtain) (*model.Website
 			Description: req.Description,
 			ExecShell:   req.ExecShell,
 		}
+		setSSLPushConfig(websiteSSL, req.PushNode, req.Nodes)
 		if req.ExecShell {
 			websiteSSL.Shell = req.Shell
 		}
@@ -220,7 +220,7 @@ func (w WebsiteCAService) ObtainSSL(req request.WebsiteCAObtain) (*model.Website
 		if req.Domains != "" {
 			domainArray := strings.Split(req.Domains, "\n")
 			for _, domain := range domainArray {
-				if ipAddress := net.ParseIP(domain); ipAddress == nil {
+				if ipAddress := common.ParseIPLoose(domain); ipAddress == nil {
 					if domain != "localhost" && !common.IsValidDomain(domain) {
 						err = buserr.WithName("ErrDomainFormat", domain)
 						return nil, err
@@ -277,38 +277,11 @@ func (w WebsiteCAService) ObtainSSL(req request.WebsiteCAObtain) (*model.Website
 			return nil, err
 		}
 	}
-	interPrivateKey, interPublicKey, _, err := createPrivateKey(websiteSSL.KeyType)
-	if err != nil {
-		return nil, err
-	}
 	notAfter := time.Now()
 	if req.Unit == "year" {
 		notAfter = notAfter.AddDate(req.Time, 0, 0)
 	} else {
 		notAfter = notAfter.AddDate(0, 0, req.Time)
-	}
-	interCsr := &x509.Certificate{
-		SerialNumber:          big.NewInt(time.Now().Unix() + 2),
-		Subject:               rootCsr.Subject,
-		NotBefore:             time.Now(),
-		NotAfter:              notAfter,
-		BasicConstraintsValid: true,
-		IsCA:                  true,
-		MaxPathLen:            0,
-		MaxPathLenZero:        true,
-		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
-	}
-	interDer, err := x509.CreateCertificate(rand.Reader, interCsr, rootCsr, interPublicKey, rootPrivateKey)
-	if err != nil {
-		return nil, err
-	}
-	interCert, err := x509.ParseCertificate(interDer)
-	if err != nil {
-		return nil, err
-	}
-	interCertBlock := &pem.Block{
-		Type:  "CERTIFICATE",
-		Bytes: interCert.Raw,
 	}
 	_, publicKey, privateKeyBytes, err := createPrivateKey(websiteSSL.KeyType)
 	if err != nil {
@@ -330,13 +303,13 @@ func (w WebsiteCAService) ObtainSSL(req request.WebsiteCAObtain) (*model.Website
 		NotAfter:              notAfter,
 		BasicConstraintsValid: true,
 		IsCA:                  false,
-		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		KeyUsage:              leafKeyUsage(websiteSSL.KeyType),
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		DNSNames:              domains,
 		IPAddresses:           ips,
 	}
 
-	der, err := x509.CreateCertificate(rand.Reader, csr, interCert, publicKey, interPrivateKey)
+	der, err := x509.CreateCertificate(rand.Reader, csr, rootCsr, publicKey, rootPrivateKey)
 	if err != nil {
 		return nil, err
 	}
@@ -349,7 +322,7 @@ func (w WebsiteCAService) ObtainSSL(req request.WebsiteCAObtain) (*model.Website
 		Type:  "CERTIFICATE",
 		Bytes: cert.Raw,
 	}
-	websiteSSL.Pem = string(pem.EncodeToMemory(certBlock)) + string(pem.EncodeToMemory(rootCertBlock)) + string(pem.EncodeToMemory(interCertBlock))
+	websiteSSL.Pem = string(pem.EncodeToMemory(certBlock))
 	websiteSSL.PrivateKey = string(privateKeyBytes)
 	websiteSSL.ExpireDate = cert.NotAfter
 	websiteSSL.StartDate = cert.NotBefore
@@ -378,15 +351,27 @@ func (w WebsiteCAService) ObtainSSL(req request.WebsiteCAObtain) (*model.Website
 			workDir = websiteSSL.Dir
 		}
 		logger.Println(i18n.GetMsgByKey("ExecShellStart"))
-		cmdMgr := cmd.NewCommandMgr(cmd.WithTimeout(30*time.Minute), cmd.WithLogger(logger), cmd.WithWorkDir(workDir))
-		if err = cmdMgr.RunBashC(websiteSSL.Shell); err != nil {
+		if err = runShellScriptFile(workDir, websiteSSL.Shell, logger); err != nil {
 			logger.Println(i18n.GetMsgWithMap("ErrExecShell", map[string]interface{}{"err": err.Error()}))
 		} else {
 			logger.Println(i18n.GetMsgByKey("ExecShellSuccess"))
 		}
 	}
 	reloadSystemSSL(websiteSSL, logger)
+	if websiteSSL.PushNode {
+		if err = pushSSLToNode(websiteSSL, logger); err != nil {
+			return nil, err
+		}
+	}
 	return websiteSSL, nil
+}
+
+func leafKeyUsage(keyType string) x509.KeyUsage {
+	usage := x509.KeyUsageDigitalSignature
+	if ssl.KeyType(keyType) != certcrypto.EC256 && ssl.KeyType(keyType) != certcrypto.EC384 {
+		usage |= x509.KeyUsageKeyEncipherment
+	}
+	return usage
 }
 
 func createPrivateKey(keyType string) (privateKey any, publicKey any, privateKeyBytes []byte, err error) {
@@ -443,7 +428,7 @@ func (w WebsiteCAService) DownloadFile(id uint) (*os.File, error) {
 		return nil, err
 	}
 	fileName := ca.Name + ".zip"
-	if err = fileOp.Compress([]string{path.Join(dir, "ca.crt"), path.Join(dir, "ca.key")}, dir, fileName, files.SdkZip, ""); err != nil {
+	if err = fileOp.Compress(context.Background(), []string{path.Join(dir, "ca.crt"), path.Join(dir, "ca.key")}, dir, fileName, files.SdkZip, "", nil); err != nil {
 		return nil, err
 	}
 	return os.Open(path.Join(dir, fileName))

@@ -24,6 +24,9 @@ func (ssl *ssl) Run() {
 	sslList, _ := sslRepo.List()
 	nyc, _ := time.LoadLocation(common.LoadTimeZoneByCmd())
 	global.LOG.Info("The scheduled certificate update task is currently in progress ...")
+	// Recover from any prior renewal whose reloadSystemSSL was skipped
+	// (e.g. nginx reload failure left DB ahead of the on-disk panel cert).
+	service.SyncSystemSSL()
 	now := time.Now().Add(10 * time.Second)
 	for _, s := range sslList {
 		if !s.AutoRenew || s.Provider == "manual" || s.Provider == "dnsManual" || s.Status == "applying" {
@@ -46,10 +49,7 @@ func (ssl *ssl) Run() {
 					continue
 				}
 			} else {
-				if err := sslService.ObtainSSL(request.WebsiteSSLApply{
-					ID:         s.ID,
-					DisableLog: true,
-				}); err != nil {
+				if err := sslService.AutoRenewSSL(s.ID); err != nil {
 					global.LOG.Errorf("Failed to update the SSL certificate for the [%s] domain , err:%s", s.PrimaryDomain, err.Error())
 					continue
 				}

@@ -5,7 +5,6 @@ import (
 )
 
 type SettingInfo struct {
-	UserName            string `json:"userName"`
 	SystemVersion       string `json:"systemVersion"`
 	DeveloperMode       string `json:"developerMode"`
 	UpgradeBackupCopies string `json:"upgradeBackupCopies"`
@@ -18,7 +17,9 @@ type SettingInfo struct {
 	Edition        string `json:"edition"`
 	Theme          string `json:"theme"`
 	MenuTabs       string `json:"menuTabs"`
+	MenuAccordion  string `json:"menuAccordion"`
 	Language       string `json:"language"`
+	DocSource      string `json:"docSource"`
 
 	ServerPort                 string `json:"serverPort"`
 	SSL                        string `json:"ssl"`
@@ -26,14 +27,12 @@ type SettingInfo struct {
 	BindDomain                 string `json:"bindDomain"`
 	PasskeyTrustedProxies      string `json:"passkeyTrustedProxies"`
 	AllowIPs                   string `json:"allowIPs"`
+	AllowIPTrustedProxies      string `json:"allowIPTrustedProxies"`
 	SecurityEntrance           string `json:"securityEntrance"`
 	DashboardMemoVisible       string `json:"dashboardMemoVisible"`
 	DashboardSimpleNodeVisible string `json:"dashboardSimpleNodeVisible"`
 	ExpirationDays             string `json:"expirationDays"`
-	ExpirationTime             string `json:"expirationTime"`
 	ComplexityVerification     string `json:"complexityVerification"`
-	MFAStatus                  string `json:"mfaStatus"`
-	MFAInterval                string `json:"mfaInterval"`
 
 	AppStoreVersion      string `json:"appStoreVersion"`
 	AppStoreLastModified string `json:"appStoreLastModified"`
@@ -48,19 +47,39 @@ type SettingInfo struct {
 	ProxyUser       string `json:"proxyUser"`
 	ProxyPasswd     string `json:"proxyPasswd"`
 	ProxyPasswdKeep string `json:"proxyPasswdKeep"`
-
-	ApiInterfaceStatus string `json:"apiInterfaceStatus"`
-	ApiKey             string `json:"apiKey"`
-	IpWhiteList        string `json:"ipWhiteList"`
-	ApiKeyValidityTime string `json:"apiKeyValidityTime"`
 }
 
-type SettingKey struct {
-	Key string `json:"key" validate:"required,oneof=ScriptSync"`
+type SettingBaseInfo struct {
+	SystemVersion       string `json:"systemVersion"`
+	DeveloperMode       string `json:"developerMode"`
+	UpgradeBackupCopies string `json:"upgradeBackupCopies"`
+
+	Port          string `json:"port"`
+	Ipv6          string `json:"ipv6"`
+	BindAddress   string `json:"bindAddress"`
+	PanelName     string `json:"panelName"`
+	Edition       string `json:"edition"`
+	Theme         string `json:"theme"`
+	MenuTabs      string `json:"menuTabs"`
+	MenuAccordion string `json:"menuAccordion"`
+	Language      string `json:"language"`
+	HideMenu      string `json:"hideMenu"`
+	DocSource     string `json:"docSource"`
+
+	ServerPort             string `json:"serverPort"`
+	SecurityEntrance       string `json:"securityEntrance"`
+	ComplexityVerification string `json:"complexityVerification"`
+	NoAuthSetting          string `json:"noAuthSetting"`
+	ProxyType              string `json:"proxyType"`
+
+	ScriptSync string `json:"scriptSync"`
+
+	DashboardMemoVisible       string `json:"dashboardMemoVisible"`
+	DashboardSimpleNodeVisible string `json:"dashboardSimpleNodeVisible"`
 }
 
 type SettingUpdate struct {
-	Key   string `json:"key" validate:"required"`
+	Key   string `json:"key" validate:"required,base_setting_key"`
 	Value string `json:"value"`
 }
 
@@ -216,43 +235,55 @@ type MenuLabelSort struct {
 	Sort  int    `json:"sort"`
 }
 
-type ApiInterfaceConfig struct {
-	ApiInterfaceStatus string `json:"apiInterfaceStatus"`
-	ApiKey             string `json:"apiKey"`
-	IpWhiteList        string `json:"ipWhiteList"`
-	ApiKeyValidityTime string `json:"apiKeyValidityTime"`
+type TerminalInfo struct {
+	ShowTerminalButton string `json:"showTerminalButton"`
+	LineHeight         string `json:"lineHeight"`
+	LetterSpacing      string `json:"letterSpacing"`
+	FontSize           string `json:"fontSize"`
+	FontFamily         string `json:"fontFamily"`
+	BackgroundColor    string `json:"backgroundColor"`
+	ForegroundColor    string `json:"foregroundColor"`
+	CursorBlink        string `json:"cursorBlink"`
+	CursorStyle        string `json:"cursorStyle"`
+	Scrollback         string `json:"scrollback"`
+	ScrollSensitivity  string `json:"scrollSensitivity"`
 }
 
-type TerminalInfo struct {
-	LineHeight        string `json:"lineHeight"`
-	LetterSpacing     string `json:"letterSpacing"`
-	FontSize          string `json:"fontSize"`
-	FontFamily        string `json:"fontFamily"`
-	BackgroundColor   string `json:"backgroundColor"`
-	ForegroundColor   string `json:"foregroundColor"`
-	CursorBlink       string `json:"cursorBlink"`
-	CursorStyle       string `json:"cursorStyle"`
-	Scrollback        string `json:"scrollback"`
-	ScrollSensitivity string `json:"scrollSensitivity"`
+type TerminalUpdate struct {
+	ShowTerminalButton *string `json:"showTerminalButton,omitempty" validate:"omitempty,oneof=Enable Disable"`
+	LineHeight         *string `json:"lineHeight,omitempty"`
+	LetterSpacing      *string `json:"letterSpacing,omitempty"`
+	FontSize           *string `json:"fontSize,omitempty"`
+	FontFamily         *string `json:"fontFamily,omitempty"`
+	BackgroundColor    *string `json:"backgroundColor,omitempty"`
+	ForegroundColor    *string `json:"foregroundColor,omitempty"`
+	CursorBlink        *string `json:"cursorBlink,omitempty"`
+	CursorStyle        *string `json:"cursorStyle,omitempty"`
+	Scrollback         *string `json:"scrollback,omitempty"`
+	ScrollSensitivity  *string `json:"scrollSensitivity,omitempty"`
 }
 
 type AppstoreUpdate struct {
-	Scope  string `json:"scope" validate:"required,oneof=UninstallDeleteImage UpgradeBackup UninstallDeleteBackup"`
+	Scope  string `json:"scope" validate:"required,oneof=UninstallDeleteImage UpgradeBackup UpgradeDeleteImage UninstallDeleteBackup InstallAllowPort"`
 	Status string `json:"status"  validate:"required,oneof=Disable Enable"`
 }
 type AppstoreConfig struct {
 	UninstallDeleteImage  string `json:"uninstallDeleteImage"`
 	UpgradeBackup         string `json:"upgradeBackup"`
+	UpgradeDeleteImage    string `json:"upgradeDeleteImage"`
 	UninstallDeleteBackup string `json:"uninstallDeleteBackup"`
+	InstallAllowPort      string `json:"installAllowPort"`
 }
 
 type LoginSetting struct {
 	IsDemo         bool   `json:"isDemo"`
 	IsIntl         bool   `json:"isIntl"`
-	IsOffLine      bool   `json:"isOffLine"`
+	IsOffline      bool   `json:"isOffline"`
 	IsFxplay       bool   `json:"isFxplay"`
+	IsEnterprise   bool   `json:"isEnterprise"`
 	Language       string `json:"language"`
 	MenuTabs       string `json:"menuTabs"`
+	MenuAccordion  string `json:"menuAccordion"`
 	PanelName      string `json:"panelName"`
 	Theme          string `json:"theme"`
 	NeedCaptcha    bool   `json:"needCaptcha"`

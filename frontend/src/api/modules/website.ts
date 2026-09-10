@@ -3,8 +3,8 @@ import { ReqPage, ResPage } from '../interface';
 import { Website } from '../interface/website';
 import { File } from '../interface/file';
 import { TimeoutEnum } from '@/enums/http-enum';
-import { deepCopy } from '@/utils/util';
-import { Base64 } from 'js-base64';
+import { deepCopy } from '@/utils/misc';
+import { encodeBase64Fields } from '@/utils/base64';
 
 export const searchWebsites = (req: Website.WebSiteSearch, node?: string) => {
     const params = node ? `?operateNode=${node}` : '';
@@ -17,9 +17,7 @@ export const listWebsites = () => {
 
 export const createWebsite = (req: Website.WebSiteCreateReq) => {
     let request = deepCopy(req) as Website.WebSiteCreateReq;
-    if (request.ftpPassword) {
-        request.ftpPassword = Base64.encode(request.ftpPassword);
-    }
+    encodeBase64Fields(request, ['ftpPassword']);
     return http.post<any>(`/websites`, request, TimeoutEnum.T_10M);
 };
 
@@ -29,11 +27,16 @@ export const opWebsite = (req: Website.WebSiteOp, node?: string) => {
 };
 
 export const opWebsiteLog = (req: Website.WebSiteOpLog) => {
-    return http.post<Website.WebSiteLog>(`/websites/log`, req);
+    return http.post<any>(`/websites/log/operate`, req);
 };
 
-export const updateWebsite = (req: Website.WebSiteUpdateReq) => {
-    return http.post<any>(`/websites/update`, req);
+export const getWebsiteLog = (req: Website.WebSiteLogReq) => {
+    return http.post<Website.WebSiteLog>(`/websites/log/search`, req);
+};
+
+export const updateWebsite = (req: Website.WebSiteUpdateReq, node?: string) => {
+    const query = node ? `?operateNode=${node}` : '';
+    return http.post<any>(`/websites/update${query}`, req);
 };
 
 export const getWebsite = (id: number) => {
@@ -41,7 +44,7 @@ export const getWebsite = (id: number) => {
 };
 
 export const getWebsiteOptions = (req: Website.OptionReq) => {
-    return http.post<any>(`/websites/options`, req);
+    return http.post<Website.WebsiteOption[]>(`/websites/options`, req);
 };
 
 export const getWebsiteConfig = (id: number, type: string) => {
@@ -108,8 +111,13 @@ export const updateAcmeAccount = (req: Website.AcmeAccountUpdate) => {
     return http.post<Website.AcmeAccount>(`/websites/acme/update`, req, TimeoutEnum.T_10M);
 };
 
-export const searchSSL = (req: ReqPage) => {
-    return http.post<ResPage<Website.SSLDTO>>(`/websites/ssl/search`, req);
+export const searchSSL = (req: ReqPage, currentNode?: string) => {
+    return http.post<ResPage<Website.SSLDTO>>(
+        `/websites/ssl/search`,
+        req,
+        TimeoutEnum.T_40S,
+        currentNode ? { CurrentNode: currentNode } : undefined,
+    );
 };
 
 export const listSSL = (req: Website.SSLReq) => {
@@ -133,11 +141,15 @@ export const getSSL = (id: number) => {
 };
 
 export const obtainSSL = (req: Website.SSLObtain) => {
-    return http.post<any>(`/websites/ssl/obtain`, req);
+    return http.post<any>(`/websites/ssl/obtain`, req, TimeoutEnum.T_10M);
 };
 
 export const updateSSL = (req: Website.SSLUpdate) => {
     return http.post<any>(`/websites/ssl/update`, req);
+};
+
+export const pushSSLToNode = (req: Website.SSLPush, currentNode?: string) => {
+    return http.post<any>(`/websites/ssl/push`, req, undefined, currentNode ? { CurrentNode: currentNode } : undefined);
 };
 
 export const getDnsResolve = (req: Website.DNSResolveReq) => {
@@ -186,6 +198,14 @@ export const getProxyConfig = (req: Website.ProxyReq) => {
 
 export const operateProxyConfig = (req: Website.ProxyReq) => {
     return http.post<any>(`/websites/proxies/update`, req);
+};
+
+export const deleteProxyConfig = (req: Website.ProxyDel) => {
+    return http.post<any>(`/websites/proxies/delete`, req);
+};
+
+export const updateProxyConfigStatus = (req: Website.ProxyStatusUpdate) => {
+    return http.post<any>(`/websites/proxies/status`, req);
 };
 
 export const updateProxyConfigFile = (req: Website.ProxyFileUpdate) => {
@@ -342,7 +362,7 @@ export const changeDatabase = (req: Website.ChangeDatabase) => {
     return http.post(`/websites/databases`, req);
 };
 
-export const operateCustomRewrite = (req: Website.CustomRewirte) => {
+export const operateCustomRewrite = (req: Website.CustomRewrite) => {
     return http.post(`/websites/rewrite/custom`, req);
 };
 
@@ -358,7 +378,7 @@ export const execComposer = (req: Website.ExecComposer) => {
     return http.post(`/websites/exec/composer`, req);
 };
 
-export const batchOpreate = (req: Website.BatchOperate) => {
+export const batchOperate = (req: Website.BatchOperate) => {
     return http.post(`/websites/batch/operate`, req);
 };
 
@@ -380,4 +400,54 @@ export const updateWebsiteStream = (req: Website.WebsiteStreamUpdate) => {
 
 export const batchSetHttps = (req: Website.BatchSetHttps) => {
     return http.post(`/websites/batch/ssl`, req);
+};
+
+export const searchTemplates = (req: Website.TemplateSearch) => {
+    return http.post<ResPage<Website.Template>>(`/websites/templates/search`, req);
+};
+
+export const createTemplate = (req: Website.TemplateCreate) => {
+    return http.post<any>(`/websites/templates`, req);
+};
+
+export const updateTemplate = (req: Website.TemplateUpdate) => {
+    return http.post<any>(`/websites/templates/update`, req);
+};
+
+export const deleteTemplate = (params: { id: number }) => {
+    return http.post<any>(`/websites/templates/del`, params);
+};
+
+export const getTemplate = (id: number) => {
+    return http.post<Website.Template>(`/websites/templates/get`, { id });
+};
+
+export const uploadTemplateZip = (file: globalThis.File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return http.post<{ filePath: string; variables: string[] }>(
+        `/websites/templates/upload`,
+        formData,
+        TimeoutEnum.T_5M,
+    );
+};
+
+export const previewTemplate = (req: Website.PreviewReq) => {
+    return http.post<Website.PreviewDTO>(`/websites/templates/preview`, req);
+};
+
+export const searchTemplateOutputs = (req: Website.TemplateOutputSearch) => {
+    return http.post<ResPage<Website.TemplateOutputDTO>>(`/websites/templates/outputs/search`, req);
+};
+
+export const createTemplateOutput = (req: Website.TemplateOutputCreate) => {
+    return http.post<any>(`/websites/templates/outputs`, req);
+};
+
+export const deleteTemplateOutput = (params: { id: number }) => {
+    return http.post<any>(`/websites/templates/outputs/del`, params);
+};
+
+export const getTemplateOutput = (id: number) => {
+    return http.post<Website.TemplateOutputDTO>(`/websites/templates/outputs/get`, { id });
 };

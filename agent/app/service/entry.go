@@ -12,15 +12,19 @@ var (
 	appInstallResourceRepo = repo.NewIAppInstallResourceRpo()
 	appIgnoreUpgradeRepo   = repo.NewIAppIgnoreUpgradeRepo()
 
-	aiRepo           = repo.NewIAiRepo()
-	mcpServerRepo    = repo.NewIMcpServerRepo()
-	tensorrtLLMRepo  = repo.NewITensorRTLLMRepo()
-	agentRepo        = repo.NewIAgentRepo()
-	agentAccountRepo = repo.NewIAgentAccountRepo()
+	aiRepo                = repo.NewIAiRepo()
+	mcpServerRepo         = repo.NewIMcpServerRepo()
+	tensorrtLLMRepo       = repo.NewITensorRTLLMRepo()
+	agentRepo             = repo.NewIAgentRepo()
+	agentAccountRepo      = repo.NewIAgentAccountRepo()
+	agentAccountModelRepo = repo.NewIAgentAccountModelRepo()
 
-	mysqlRepo      = repo.NewIMysqlRepo()
-	postgresqlRepo = repo.NewIPostgresqlRepo()
-	databaseRepo   = repo.NewIDatabaseRepo()
+	mysqlRepo             = repo.NewIMysqlRepo()
+	postgresqlRepo        = repo.NewIPostgresqlRepo()
+	mongodbRepo           = repo.NewIMongodbRepo()
+	databaseRepo          = repo.NewIDatabaseRepo()
+	databaseUserRepo      = repo.NewIDatabaseUserRepo()
+	databaseUserGrantRepo = repo.NewIDatabaseUserGrantRepo()
 
 	imageRepoRepo = repo.NewIImageRepoRepo()
 	composeRepo   = repo.NewIComposeTemplateRepo()
@@ -36,19 +40,22 @@ var (
 	settingRepo = repo.NewISettingRepo()
 	backupRepo  = repo.NewIBackupRepo()
 
-	websiteRepo       = repo.NewIWebsiteRepo()
-	websiteDomainRepo = repo.NewIWebsiteDomainRepo()
-	websiteDnsRepo    = repo.NewIWebsiteDnsAccountRepo()
-	websiteSSLRepo    = repo.NewISSLRepo()
-	websiteAcmeRepo   = repo.NewIAcmeAccountRepo()
-	websiteCARepo     = repo.NewIWebsiteCARepo()
+	websiteRepo               = repo.NewIWebsiteRepo()
+	websiteDomainRepo         = repo.NewIWebsiteDomainRepo()
+	websiteDnsRepo            = repo.NewIWebsiteDnsAccountRepo()
+	websiteSSLRepo            = repo.NewISSLRepo()
+	websiteAcmeRepo           = repo.NewIAcmeAccountRepo()
+	websiteCARepo             = repo.NewIWebsiteCARepo()
+	websiteTemplateRepo       = repo.NewIWebsiteTemplateRepo()
+	websiteTemplateOutputRepo = repo.NewIWebsiteTemplateOutputRepo()
 
 	snapshotRepo = repo.NewISnapshotRepo()
 
 	runtimeRepo       = repo.NewIRunTimeRepo()
 	phpExtensionsRepo = repo.NewIPHPExtensionsRepo()
 
-	favoriteRepo = repo.NewIFavoriteRepo()
+	favoriteRepo  = repo.NewIFavoriteRepo()
+	fileShareRepo = repo.NewIFileShareRepo()
 
 	taskRepo = repo.NewITaskRepo()
 

@@ -1,6 +1,8 @@
 package service
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path"
@@ -38,6 +40,7 @@ func (u *BackupService) MysqlBackup(req dto.CommonBackup) error {
 		TaskID:            req.TaskID,
 		Status:            constant.StatusWaiting,
 		Description:       req.Description,
+		Args:              encodeBackupArgs(req.Args),
 	}
 	if err := backupRepo.CreateRecord(record); err != nil {
 		global.LOG.Errorf("save backup record failed, err: %v", err)
@@ -46,7 +49,7 @@ func (u *BackupService) MysqlBackup(req dto.CommonBackup) error {
 
 	databaseHelper := DatabaseHelper{Database: req.Name, DBType: req.Type, Name: req.DetailName, Args: req.Args}
 	if err := handleMysqlBackup(databaseHelper, nil, record.ID, targetDir, fileName, req.TaskID, req.Secret); err != nil {
-		backupRepo.UpdateRecordByMap(record.ID, map[string]interface{}{"status": constant.StatusFailed, "message": err.Error()})
+		markBackupFailed(record.ID, err)
 		return err
 	}
 	return nil
@@ -99,7 +102,7 @@ func handleMysqlBackup(db DatabaseHelper, parentTask *task.Task, recordID uint, 
 	backupTask.AddSubTaskWithOps(task.GetTaskName(itemName, task.TaskBackup, task.TaskScopeBackup), func(t *task.Task) error { return itemHandler() }, nil, 0, 3*time.Hour)
 	go func() {
 		if err := backupTask.Execute(); err != nil {
-			backupRepo.UpdateRecordByMap(recordID, map[string]interface{}{"status": constant.StatusFailed, "message": err.Error()})
+			markBackupFailed(recordID, err)
 			return
 		}
 		backupRepo.UpdateRecordByMap(recordID, map[string]interface{}{"status": constant.StatusSuccess})
@@ -142,6 +145,14 @@ func handleMysqlRecover(req dto.CommonRecover, parentTask *task.Task, isRollback
 
 		if !isRollback {
 			rollbackFile := path.Join(global.Dir.TmpDir, fmt.Sprintf("database/%s/%s_%s.sql.gz", req.Type, req.DetailName, time.Now().Format(constant.DateTimeSlimLayout)))
+			var rollbackArgs []string
+			if req.BackupRecordID != 0 {
+				record, err := backupRepo.GetRecord(repo.WithByID(req.BackupRecordID))
+				if err != nil {
+					return err
+				}
+				rollbackArgs = decodeBackupArgs(record.Args)
+			}
 			if err := cli.Backup(client.BackupInfo{
 				Name:      req.DetailName,
 				Type:      req.Type,
@@ -149,6 +160,7 @@ func handleMysqlRecover(req dto.CommonRecover, parentTask *task.Task, isRollback
 				Format:    dbInfo.Format,
 				TargetDir: path.Dir(rollbackFile),
 				FileName:  path.Base(rollbackFile),
+				Args:      rollbackArgs,
 			}); err != nil {
 				return fmt.Errorf("backup mysql db %s for rollback before recover failed, err: %v", req.DetailName, err)
 			}
@@ -241,6 +253,36 @@ func doMysqlBackup(db DatabaseHelper, targetDir, fileName, secret string) error 
 	return nil
 }
 
+func encodeBackupArgs(args []string) string {
+	var items []string
+	for _, arg := range args {
+		if len(arg) != 0 {
+			items = append(items, arg)
+		}
+	}
+	if len(items) == 0 {
+		return ""
+	}
+	data, err := json.Marshal(items)
+	if err != nil {
+		global.LOG.Warnf("marshal backup args failed: %v", err)
+		return ""
+	}
+	return string(data)
+}
+
+func decodeBackupArgs(value string) []string {
+	if len(value) == 0 {
+		return nil
+	}
+	var args []string
+	if err := json.Unmarshal([]byte(value), &args); err != nil {
+		global.LOG.Warnf("unmarshal backup args failed: %v", err)
+		return nil
+	}
+	return args
+}
+
 func loadSqlFile(file string) (string, error) {
 	if !strings.HasSuffix(file, ".tar.gz") && !strings.HasSuffix(file, ".zip") {
 		return file, nil
@@ -263,7 +305,7 @@ func loadSqlFile(file string) (string, error) {
 			_ = os.RemoveAll(dstDir)
 			return "", err
 		}
-		if err := archiver.Extract(file, dstDir, ""); err != nil {
+		if err := archiver.Extract(context.Background(), file, dstDir, ""); err != nil {
 			_ = os.RemoveAll(dstDir)
 			return "", err
 		}

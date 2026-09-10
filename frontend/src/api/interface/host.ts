@@ -64,82 +64,6 @@ export namespace Host {
         info?: string;
     }
 
-    export interface FirewallBase {
-        name: string;
-        isExist: boolean;
-        isActive: boolean;
-        isInit: boolean;
-        isBind: boolean;
-        version: string;
-        pingStatus: string;
-    }
-    export interface RuleSearch extends ReqPage {
-        strategy: string;
-        info: string;
-        type: string;
-    }
-    export interface RuleInfo extends ReqPage {
-        family: string;
-        address: string;
-        destination: string;
-        port: string;
-        srcPort: string;
-        destPort: string;
-        protocol: string;
-        strategy: string;
-
-        usedStatus: string;
-        description: string;
-
-        [key: string]: any;
-    }
-    export interface UpdateDescription {
-        type: string;
-        chain: string;
-        srcIP: string;
-        dstIP: string;
-        srcPort: string;
-        dstPort: string;
-        protocol: string;
-        strategy: string;
-        description: string;
-    }
-    export interface RulePort {
-        operation: string;
-        address: string;
-        port: string;
-        source: string;
-        protocol: string;
-        strategy: string;
-        description: string;
-    }
-    export interface RuleForward {
-        operation: string;
-        protocol: string;
-        port: string;
-        targetIP: string;
-        targetPort: string;
-        interface: string;
-    }
-    export interface RuleIP {
-        operation: string;
-        address: string;
-        strategy: string;
-        description: string;
-    }
-    export interface UpdatePortRule {
-        oldRule: RulePort;
-        newRule: RulePort;
-    }
-    export interface UpdateAddrRule {
-        oldRule: RuleIP;
-        newRule: RuleIP;
-    }
-    export interface BatchRule {
-        type: string;
-        rules: Array<RulePort>;
-    }
-
     export interface MonitorSetting {
         defaultNetwork: string;
         defaultIO: string;
@@ -160,45 +84,29 @@ export namespace Host {
         endTime: Date;
     }
 
-    export interface MonitorGPUSearch {
-        productName: string;
-        startTime: Date;
-        endTime: Date;
+    export interface RuntimeDiagnosticsSummary {
+        rss: number;
+        heapAlloc: number;
+        heapObjects: number;
+        goroutines: number;
     }
-    export interface MonitorGPUOptions {
-        gpuType: string;
-        options: Array<string>;
-        chartHide: Array<ChartHide>;
+    export interface RuntimeGoroutineGroup {
+        state: string;
+        top: string;
+        count: number;
+        stack: string[];
     }
-    export interface ChartHide {
-        productName: string;
-        process: boolean;
-        gpu: boolean;
-        memory: boolean;
-        power: boolean;
-        temperature: boolean;
-        speed: boolean;
+    export interface RuntimeGoroutineSnapshot {
+        total: number;
+        groupCount: number;
+        truncated: boolean;
+        capturedAt: string;
+        goroutines: RuntimeGoroutineGroup[];
     }
-    export interface MonitorGPUData {
-        date: Array<Date>;
-        gpuValue: Array<number>;
-        temperatureValue: Array<number>;
-        powerTotal: Array<number>;
-        powerUsed: Array<number>;
-        powerPercent: Array<number>;
-        memoryTotal: Array<number>;
-        memoryUsed: Array<number>;
-        memoryPercent: Array<number>;
-        speedValue: Array<number>;
-        gpuProcesses: Array<Array<GPUProcess>>;
+    export interface RuntimeProfileCreate {
+        type: 'cpu' | 'heap' | 'goroutine' | 'mutex' | 'block';
+        duration: number;
     }
-    export interface GPUProcess {
-        pid: string;
-        type: string;
-        processName: string;
-        usedMemory: string;
-    }
-
     export interface SSHInfo {
         autoStart: boolean;
         isActive: boolean;
@@ -215,7 +123,6 @@ export namespace Host {
     }
     export interface SSHUpdate {
         key: string;
-        oldValue: string;
         newValue: string;
     }
     export interface RootCert {
@@ -241,6 +148,8 @@ export namespace Host {
     export interface searchSSHLog extends ReqPage {
         info: string;
         status: string;
+        startTime?: string | Date;
+        endTime?: string | Date;
     }
     export interface analysisSSHLog extends ReqPage {
         orderBy: string;
@@ -308,42 +217,5 @@ export namespace Host {
         version: string;
         path: string;
         error: string;
-    }
-
-    // Iptables Filter
-    export interface IptablesFilterRuleSearch extends ReqPage {
-        info: string;
-        type: string;
-    }
-    export interface IptablesData {
-        items: IptablesRules[];
-        total: number;
-        defaultStrategy: string;
-    }
-    export interface IptablesRules {
-        id: number;
-        protocol: string;
-        srcPort: string;
-        dstPort: string;
-        srcIP: string;
-        dstIP: string;
-        strategy: string;
-        description: string;
-    }
-    export interface ChainStatus {
-        isBind: boolean;
-        defaultStrategy: string;
-    }
-    export interface IptablesFilterRuleOp {
-        operation: string;
-        id?: number;
-        chain: string;
-        protocol: string;
-        srcIP?: string;
-        srcPort?: number;
-        dstIP?: string;
-        dstPort?: number;
-        strategy: string;
-        description?: string;
     }
 }

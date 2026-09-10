@@ -16,8 +16,10 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/1Panel-dev/1Panel/core/app/dto"
@@ -30,7 +32,7 @@ import (
 	"github.com/1Panel-dev/1Panel/core/utils/common"
 	"github.com/1Panel-dev/1Panel/core/utils/controller"
 	"github.com/1Panel-dev/1Panel/core/utils/encrypt"
-	"github.com/1Panel-dev/1Panel/core/utils/firewall"
+	"github.com/1Panel-dev/1Panel/core/utils/menutree"
 	"github.com/1Panel-dev/1Panel/core/utils/passkey"
 	"github.com/1Panel-dev/1Panel/core/utils/req_helper/proxy_local"
 	"github.com/1Panel-dev/1Panel/core/utils/xpack"
@@ -40,23 +42,22 @@ import (
 
 type SettingService struct{}
 
+var panelPortChangeMu sync.Mutex
+
 type ISettingService interface {
 	GetSettingInfo() (*dto.SettingInfo, error)
+	GetSettingBaseInfo() (*dto.SettingBaseInfo, error)
 	LoadInterfaceAddr() ([]string, error)
-	Update(key, value string) error
-	UpdatePassword(c *gin.Context, old, new string) error
+	Update(c *gin.Context, key, value string) error
 	UpdatePort(port uint) error
 	UpdateBindInfo(req dto.BindInfo) error
 	UpdateSSL(c *gin.Context, req dto.SSLUpdate) error
 	LoadFromCert() (*dto.SSLInfo, error)
-	HandlePasswordExpired(c *gin.Context, old, new string) error
-	GenerateApiKey() (string, error)
-	UpdateApiConfig(req dto.ApiInterfaceConfig) error
 
 	UpdateProxy(req dto.ProxyUpdate) error
 
 	GetTerminalInfo() (*dto.TerminalInfo, error)
-	UpdateTerminal(req dto.TerminalInfo) error
+	UpdateTerminal(req dto.TerminalUpdate) error
 
 	UpdateSystemSSL() error
 	GenerateRSAKey() error
@@ -82,6 +83,7 @@ func (u *SettingService) GetSettingInfo() (*dto.SettingInfo, error) {
 	for _, set := range setting {
 		settingMap[set.Key] = set.Value
 	}
+	repairAndSortHideMenu(settingMap)
 	var info dto.SettingInfo
 	arr, err := json.Marshal(settingMap)
 	if err != nil {
@@ -94,6 +96,10 @@ func (u *SettingService) GetSettingInfo() (*dto.SettingInfo, error) {
 		info.Edition = "cn"
 		_ = settingRepo.UpdateOrCreate("Edition", info.Edition)
 	}
+	if info.MenuAccordion == "" {
+		info.MenuAccordion = constant.StatusDisable
+		_ = settingRepo.UpdateOrCreate("MenuAccordion", info.MenuAccordion)
+	}
 	if info.ProxyPasswdKeep != constant.StatusEnable {
 		info.ProxyPasswd = ""
 	} else {
@@ -103,15 +109,95 @@ func (u *SettingService) GetSettingInfo() (*dto.SettingInfo, error) {
 	return &info, err
 }
 
-func (u *SettingService) Update(key, value string) error {
+func (u *SettingService) GetSettingBaseInfo() (*dto.SettingBaseInfo, error) {
+	setting, err := settingRepo.List()
+	if err != nil {
+		return nil, buserr.New("ErrRecordNotFound")
+	}
+	settingMap := make(map[string]string)
+	for _, set := range setting {
+		settingMap[set.Key] = set.Value
+	}
+	repairAndSortHideMenu(settingMap)
+	var info dto.SettingBaseInfo
+	arr, err := json.Marshal(settingMap)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(arr, &info); err != nil {
+		return nil, err
+	}
+	if info.Edition == "" {
+		info.Edition = "cn"
+		_ = settingRepo.UpdateOrCreate("Edition", info.Edition)
+	}
+	if info.MenuAccordion == "" {
+		info.MenuAccordion = constant.StatusDisable
+		_ = settingRepo.UpdateOrCreate("MenuAccordion", info.MenuAccordion)
+	}
+
+	return &info, err
+}
+
+func repairAndSortHideMenu(settingMap map[string]string) {
+	hideMenu, ok := settingMap["HideMenu"]
+	if !ok || strings.TrimSpace(hideMenu) == "" {
+		return
+	}
+	var menus []dto.ShowMenu
+	if err := json.Unmarshal([]byte(hideMenu), &menus); err != nil || len(menus) == 0 {
+		return
+	}
+
+	menus, changed := menutree.ReconcileHideMenuIntegrity(menus, nil)
+	if changed {
+		repairedBytes, err := json.Marshal(menus)
+		if err != nil {
+			global.LOG.Warnf("marshal repaired HideMenu failed, err: %v", err)
+		} else {
+			updated, err := settingRepo.UpdateIfMatch("HideMenu", hideMenu, string(repairedBytes))
+			if err != nil {
+				global.LOG.Warnf("persist repaired HideMenu failed, err: %v", err)
+			} else if !updated {
+				global.LOG.Debug("skip persisting repaired HideMenu because the setting changed concurrently")
+			}
+		}
+	}
+	sortShowMenus(menus)
+	if sortedBytes, err := json.Marshal(menus); err == nil {
+		settingMap["HideMenu"] = string(sortedBytes)
+	}
+}
+
+func sortShowMenus(menus []dto.ShowMenu) {
+	for i := range menus {
+		if len(menus[i].Children) > 0 {
+			sortShowMenus(menus[i].Children)
+		}
+	}
+	sort.SliceStable(menus, func(i, j int) bool {
+		if menus[i].Sort == menus[j].Sort {
+			return menus[i].ID < menus[j].ID
+		}
+		return menus[i].Sort < menus[j].Sort
+	})
+}
+
+func (u *SettingService) Update(c *gin.Context, key, value string) error {
 	oldVal, err := settingRepo.Get(repo.WithByKey(key))
 	if err != nil {
 		return err
 	}
-	if oldVal.Value == value {
+	if oldVal.Value == value && key != "HideMenu" {
 		return nil
 	}
+	sessionLifeTime := 0
 	switch key {
+	case "SessionTimeout":
+		sessionLifeTime, err = strconv.Atoi(value)
+		if err != nil {
+			return err
+		}
 	case "AppStoreLastModified":
 		exist, _ := settingRepo.Get(repo.WithByKey("AppStoreLastModified"))
 		if exist.ID == 0 {
@@ -123,6 +209,13 @@ func (u *SettingService) Update(key, value string) error {
 		if err := json.Unmarshal([]byte(value), &menus); err != nil {
 			return err
 		}
+		var previousMenus []dto.ShowMenu
+		_ = json.Unmarshal([]byte(oldVal.Value), &previousMenus)
+		menus, _ = menutree.PreserveMissingMenus(menus, previousMenus)
+		if len(menus) == 0 {
+			return fmt.Errorf("hide menu cannot be empty")
+		}
+		menus, _ = menutree.ReconcileHideMenuIntegrity(menus, previousMenus)
 		for i := 0; i < len(menus); i++ {
 			if menus[i].Label == "Home-Menu" || menus[i].Label == "App-Menu" || menus[i].Label == "Setting-Menu" {
 				menus[i].IsShow = true
@@ -134,32 +227,34 @@ func (u *SettingService) Update(key, value string) error {
 		}
 		value = string(menuItem)
 	}
+	if oldVal.Value == value {
+		return nil
+	}
 
 	if err := settingRepo.Update(key, value); err != nil {
 		return err
 	}
+	if key == "ExpirationDays" {
+		if err := xpack.AuthProvider.SyncPasswordExpirationTime(value); err != nil {
+			return err
+		}
+	}
+	if key == "SessionTimeout" {
+		global.SESSION.ApplyTimeout(sessionLifeTime)
+	}
 
 	switch key {
-	case "ExpirationDays":
-		timeout, err := strconv.Atoi(value)
-		if err != nil {
-			return err
-		}
-		if err := settingRepo.Update("ExpirationTime", time.Now().AddDate(0, 0, timeout).Format(constant.DateTimeLayout)); err != nil {
-			return err
-		}
 	case "BindDomain":
 		if len(value) != 0 {
 			_ = global.SESSION.Clean()
+			CloseTerminalSessions("all", "", "")
 		}
 		if err := u.clearPasskeySettings(); err != nil {
 			return err
 		}
-	case "UserName", "Password":
-		_ = global.SESSION.Clean()
 	case "Language":
 		i18n.SetCachedDBLanguage(value)
-		if err := xpack.Sync(constant.SyncLanguage); err != nil {
+		if err := xpack.MultiNodeProvider.Sync(constant.SyncLanguage); err != nil {
 			global.LOG.Errorf("sync language to node failed, err: %v", err)
 		}
 	case "UpgradeBackupCopies":
@@ -172,6 +267,9 @@ func (u *SettingService) Update(key, value string) error {
 		}
 	case "Edition":
 		global.CONF.Base.Edition = value
+		if err := xpack.MultiNodeProvider.Sync(constant.SyncEdition); err != nil {
+			global.LOG.Errorf("sync edition to node failed, err: %v", err)
+		}
 	}
 
 	return nil
@@ -236,23 +334,23 @@ func (u *SettingService) UpdateProxy(req dto.ProxyUpdate) error {
 	if err := settingRepo.Update("ProxyPasswdKeep", req.ProxyPasswdKeep); err != nil {
 		return err
 	}
-	if err := xpack.ProxyDocker(loadDockerProxy(req)); err != nil {
+	if err := xpack.MultiNodeProvider.ProxyDocker(loadDockerProxy(req)); err != nil {
 		return err
 	}
 	syncScope := constant.SyncSystemProxy
 	if req.WithDockerRestart {
 		syncScope = constant.SyncSystemProxyWithRestartDocker
 	}
-	if err := xpack.Sync(syncScope); err != nil {
+	if err := xpack.MultiNodeProvider.Sync(syncScope); err != nil {
 		global.LOG.Errorf("sync proxy to node failed, err: %v", err)
 	}
 	return nil
 }
 
 func (u *SettingService) UpdatePort(port uint) error {
-	if common.ScanPort(int(port)) {
-		return buserr.WithDetail("ErrPortInUsed", port, nil)
-	}
+	panelPortChangeMu.Lock()
+	defer panelPortChangeMu.Unlock()
+
 	oldPort, err := settingRepo.Get(repo.WithByKey("ServerPort"))
 	if err != nil {
 		return err
@@ -260,7 +358,10 @@ func (u *SettingService) UpdatePort(port uint) error {
 	if oldPort.Value == fmt.Sprintf("%v", port) {
 		return nil
 	}
-	if err := firewall.UpdatePort(oldPort.Value, fmt.Sprintf("%v", port)); err != nil {
+	if common.ScanPort(int(port)) {
+		return buserr.WithDetail("ErrPortInUsed", port, nil)
+	}
+	if err := proxy_local.UpdatePanelPort(oldPort.Value, port); err != nil {
 		return err
 	}
 
@@ -281,6 +382,7 @@ func (u *SettingService) UpdateSSL(c *gin.Context, req dto.SSLUpdate) error {
 	secretDir := path.Join(global.CONF.Base.InstallDir, "1panel/secret")
 	if req.SSL == constant.StatusDisable {
 		c.SetCookie(constant.SessionName, "", -1, "/", "", false, true)
+		c.SetCookie(constant.CSRFTokenName, "", -1, "/", "", false, false)
 		if err := settingRepo.Update("SSL", constant.StatusDisable); err != nil {
 			return err
 		}
@@ -342,7 +444,7 @@ func (u *SettingService) UpdateSSL(c *gin.Context, req dto.SSLUpdate) error {
 		params["domains"] = req.Domain
 		params["time"] = 10
 		params["unit"] = "year"
-		params["keyType"] = "P256"
+		params["keyType"] = "EC256"
 		params["id"] = ca.ID
 		jsonData, err := json.Marshal(params)
 		if err != nil {
@@ -382,7 +484,7 @@ func (u *SettingService) UpdateSSL(c *gin.Context, req dto.SSLUpdate) error {
 	if err := os.Rename(path.Join(secretDir, "server.key.tmp"), path.Join(secretDir, "server.key")); err != nil {
 		return err
 	}
-	status, _ := settingRepo.GetValueByKey("SSL")
+	status := global.CONF.Conn.SSL
 	if req.SSL != status {
 		go func() {
 			time.Sleep(1 * time.Second)
@@ -392,6 +494,7 @@ func (u *SettingService) UpdateSSL(c *gin.Context, req dto.SSLUpdate) error {
 	if err := settingRepo.Update("SSL", req.SSL); err != nil {
 		return err
 	}
+	global.CONF.Conn.SSL = req.SSL
 	return u.UpdateSystemSSL()
 }
 
@@ -447,37 +550,6 @@ func (u *SettingService) LoadFromCert() (*dto.SSLInfo, error) {
 	return &data, nil
 }
 
-func (u *SettingService) HandlePasswordExpired(c *gin.Context, old, new string) error {
-	setting, err := settingRepo.Get(repo.WithByKey("Password"))
-	if err != nil {
-		return err
-	}
-	passwordFromDB, err := encrypt.StringDecrypt(setting.Value)
-	if err != nil {
-		return err
-	}
-	if passwordFromDB == old {
-		newPassword, err := encrypt.StringEncrypt(new)
-		if err != nil {
-			return err
-		}
-		if err := settingRepo.Update("Password", newPassword); err != nil {
-			return err
-		}
-
-		expiredSetting, err := settingRepo.Get(repo.WithByKey("ExpirationDays"))
-		if err != nil {
-			return err
-		}
-		timeout, _ := strconv.Atoi(expiredSetting.Value)
-		if err := settingRepo.Update("ExpirationTime", time.Now().AddDate(0, 0, timeout).Format(constant.DateTimeLayout)); err != nil {
-			return err
-		}
-		return nil
-	}
-	return buserr.New("ErrInitialPassword")
-}
-
 func (u *SettingService) GetTerminalInfo() (*dto.TerminalInfo, error) {
 	setting, err := settingRepo.List()
 	if err != nil {
@@ -487,7 +559,7 @@ func (u *SettingService) GetTerminalInfo() (*dto.TerminalInfo, error) {
 	for _, set := range setting {
 		settingMap[set.Key] = set.Value
 	}
-	var info dto.TerminalInfo
+	info := dto.TerminalInfo{ShowTerminalButton: "Enable"}
 	arr, err := json.Marshal(settingMap)
 	if err != nil {
 		return nil, err
@@ -497,49 +569,44 @@ func (u *SettingService) GetTerminalInfo() (*dto.TerminalInfo, error) {
 	}
 	return &info, err
 }
-func (u *SettingService) UpdateTerminal(req dto.TerminalInfo) error {
-	if err := settingRepo.UpdateOrCreate("LineHeight", req.LineHeight); err != nil {
-		return err
+func (u *SettingService) UpdateTerminal(req dto.TerminalUpdate) error {
+	settings := []struct {
+		key   string
+		value *string
+	}{
+		{"ShowTerminalButton", req.ShowTerminalButton},
+		{"LineHeight", req.LineHeight},
+		{"LetterSpacing", req.LetterSpacing},
+		{"FontSize", req.FontSize},
+		{"FontFamily", req.FontFamily},
+		{"CursorBlink", req.CursorBlink},
+		{"BackgroundColor", req.BackgroundColor},
+		{"ForegroundColor", req.ForegroundColor},
+		{"CursorStyle", req.CursorStyle},
+		{"Scrollback", req.Scrollback},
+		{"ScrollSensitivity", req.ScrollSensitivity},
 	}
-	if err := settingRepo.UpdateOrCreate("LetterSpacing", req.LetterSpacing); err != nil {
-		return err
-	}
-	if err := settingRepo.UpdateOrCreate("FontSize", req.FontSize); err != nil {
-		return err
-	}
-	if err := settingRepo.Update("FontFamily", req.FontFamily); err != nil {
-		return err
-	}
-	if err := settingRepo.Update("CursorBlink", req.CursorBlink); err != nil {
-		return err
-	}
-	if err := settingRepo.UpdateOrCreate("BackgroundColor", req.BackgroundColor); err != nil {
-		return err
-	}
-	if err := settingRepo.UpdateOrCreate("ForegroundColor", req.ForegroundColor); err != nil {
-		return err
-	}
-	if err := settingRepo.UpdateOrCreate("CursorBlink", req.CursorBlink); err != nil {
-		return err
-	}
-	if err := settingRepo.UpdateOrCreate("CursorStyle", req.CursorStyle); err != nil {
-		return err
-	}
-	if err := settingRepo.UpdateOrCreate("Scrollback", req.Scrollback); err != nil {
-		return err
-	}
-	if err := settingRepo.UpdateOrCreate("ScrollSensitivity", req.ScrollSensitivity); err != nil {
-		return err
+	for _, setting := range settings {
+		if setting.value == nil {
+			continue
+		}
+		if err := settingRepo.UpdateOrCreate(setting.key, *setting.value); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
-func (u *SettingService) UpdatePassword(c *gin.Context, old, new string) error {
-	if err := u.HandlePasswordExpired(c, old, new); err != nil {
-		return err
+func (u *SettingService) deleteCurrentSession(c *gin.Context) {
+	if c == nil {
+		return
 	}
-	_ = global.SESSION.Clean()
-	return nil
+	sessionUser, err := global.SESSION.Get(c)
+	if err != nil || sessionUser.ID == "" {
+		return
+	}
+	_ = global.SESSION.DeleteByID(sessionUser.ID)
+	CloseTerminalSessions("user", sessionUser.ID, "")
 }
 
 func (u *SettingService) clearPasskeySettings() error {
@@ -549,7 +616,7 @@ func (u *SettingService) clearPasskeySettings() error {
 	if err := settingRepo.Update(passkey.PasskeyCredentialSettingKey, ""); err != nil {
 		return err
 	}
-	return nil
+	return xpack.AuthProvider.ClearPasskeys()
 }
 
 func (u *SettingService) UpdateSystemSSL() error {
@@ -568,35 +635,6 @@ func (u *SettingService) UpdateSystemSSL() error {
 		return err
 	}
 	constant.CertStore.Store(&cert)
-	return nil
-}
-
-func (u *SettingService) GenerateApiKey() (string, error) {
-	apiKey := common.RandStr(32)
-	if err := settingRepo.Update("ApiKey", apiKey); err != nil {
-		return global.Api.ApiKey, err
-	}
-	global.Api.ApiKey = apiKey
-	return apiKey, nil
-}
-
-func (u *SettingService) UpdateApiConfig(req dto.ApiInterfaceConfig) error {
-	if err := settingRepo.UpdateOrCreate("ApiInterfaceStatus", req.ApiInterfaceStatus); err != nil {
-		return err
-	}
-	global.Api.ApiInterfaceStatus = req.ApiInterfaceStatus
-	if err := settingRepo.UpdateOrCreate("ApiKey", req.ApiKey); err != nil {
-		return err
-	}
-	global.Api.ApiKey = req.ApiKey
-	if err := settingRepo.UpdateOrCreate("IpWhiteList", req.IpWhiteList); err != nil {
-		return err
-	}
-	global.Api.IpWhiteList = req.IpWhiteList
-	if err := settingRepo.UpdateOrCreate("ApiKeyValidityTime", req.ApiKeyValidityTime); err != nil {
-		return err
-	}
-	global.Api.ApiKeyValidityTime = req.ApiKeyValidityTime
 	return nil
 }
 
@@ -691,15 +729,23 @@ func (u *SettingService) GetAppstoreConfig() (*dto.AppstoreConfig, error) {
 	res := &dto.AppstoreConfig{}
 	res.UninstallDeleteImage, _ = settingRepo.GetValueByKey("UninstallDeleteImage")
 	if res.UninstallDeleteImage == "" {
-		res.UninstallDeleteImage = "False"
+		res.UninstallDeleteImage = constant.StatusDisable
 	}
 	res.UpgradeBackup, _ = settingRepo.GetValueByKey("UpgradeBackup")
 	if res.UpgradeBackup == "" {
-		res.UpgradeBackup = "False"
+		res.UpgradeBackup = constant.StatusDisable
+	}
+	res.UpgradeDeleteImage, _ = settingRepo.GetValueByKey("UpgradeDeleteImage")
+	if res.UpgradeDeleteImage == "" {
+		res.UpgradeDeleteImage = constant.StatusDisable
 	}
 	res.UninstallDeleteBackup, _ = settingRepo.GetValueByKey("UninstallDeleteBackup")
 	if res.UninstallDeleteBackup == "" {
-		res.UninstallDeleteBackup = "False"
+		res.UninstallDeleteBackup = constant.StatusDisable
+	}
+	res.InstallAllowPort, _ = settingRepo.GetValueByKey("InstallAllowPort")
+	if res.InstallAllowPort == "" {
+		res.InstallAllowPort = constant.StatusDisable
 	}
 	return res, nil
 }
@@ -749,8 +795,9 @@ func checkProxy(req dto.ProxyUpdate) error {
 		}
 		transport = http.Transport{DialContext: dialContext}
 	case "", "close":
+		return nil
 	default:
-		return buserr.WithDetail("ErrNotSupportType", req.ProxyType, nil)
+		return buserr.WithName("ErrNotSupportType", req.ProxyType)
 	}
 	defer func() {
 		if r := recover(); r != nil {
@@ -771,10 +818,10 @@ func checkProxy(req dto.ProxyUpdate) error {
 	if err != nil {
 		return buserr.WithErr("ErrProxySetting", err)
 	}
+	defer resp.Body.Close()
 	if _, err := io.ReadAll(resp.Body); err != nil {
 		return buserr.WithErr("ErrProxySetting", err)
 	}
-	defer resp.Body.Close()
 	return nil
 }
 

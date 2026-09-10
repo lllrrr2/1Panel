@@ -1,5 +1,5 @@
 <template>
-    <DrawerPro v-model="drawerVisible" :header="$t('aiTools.model.create')" @close="handleClose">
+    <DrawerPro v-model="drawerVisible" :header="$t('commons.button.add')" @close="handleClose">
         <el-alert type="info" :closable="false">
             <template #title>
                 <span class="flx-align-center">
@@ -27,7 +27,7 @@
                 <el-button @click="drawerVisible = false">
                     {{ $t('commons.button.cancel') }}
                 </el-button>
-                <el-button type="primary" @click="onSubmit(formRef)">
+                <el-button v-permission type="primary" @click="onSubmit(formRef)">
                     {{ $t('commons.button.add') }}
                 </el-button>
             </span>
@@ -42,8 +42,7 @@ import i18n from '@/lang';
 import { ElForm } from 'element-plus';
 import { MsgSuccess } from '@/utils/message';
 import { createOllamaModel } from '@/api/modules/ai';
-import { newUUID } from '@/utils/util';
-
+import { newUUID } from '@/utils/id';
 const drawerVisible = ref(false);
 const form = reactive({
     name: '',

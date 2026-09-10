@@ -23,8 +23,9 @@ export namespace Database {
         username: string;
         password: string;
         permission: string;
-        isDelete: string;
+        isDelete: boolean;
         description: string;
+        authorizedUsers?: MysqlUser[];
     }
     export interface BaseInfo {
         name: string;
@@ -44,18 +45,78 @@ export namespace Database {
         from: string;
         database: string;
         format: string;
+        collation: string;
         username: string;
         password: string;
         permission: string;
         description: string;
     }
 
-    export interface BindUser {
+    export interface MysqlUser {
+        username: string;
+        host: string;
+        password: string;
+        description: string;
+        isDelete: boolean;
+    }
+
+    export interface MysqlGrant {
+        database: string;
+        username: string;
+        host: string;
+    }
+
+    export interface MysqlUserSearch {
+        database: string;
+    }
+
+    export interface MysqlGrantSummarySearch {
+        database: string;
+        dbs: string[];
+    }
+
+    export interface MysqlUserCreate {
+        database: string;
+        username: string;
+        password: string;
+        host: string;
+        description: string;
+        dbs?: string[];
+    }
+
+    export interface MysqlUserDelete {
+        database: string;
+        username: string;
+        host: string;
+    }
+
+    export interface MysqlUserUpdate {
+        database: string;
+        username: string;
+        host: string;
+        newHost: string;
+        description: string;
+    }
+
+    export interface MysqlUserPassword {
+        database: string;
+        username: string;
+        host: string;
+        password: string;
+    }
+
+    export interface MysqlGrantCreate {
         database: string;
         db: string;
         username: string;
-        password: string;
-        permission: string;
+        host: string;
+    }
+
+    export interface MysqlGrantDelete {
+        database: string;
+        db: string;
+        username: string;
+        host: string;
     }
 
     export interface MysqlLoadDB {
@@ -75,6 +136,66 @@ export namespace Database {
         database: string;
         forceDelete: boolean;
         deleteBackup: boolean;
+    }
+    export interface MongodbDBInfo {
+        id: number;
+        createdAt: Date;
+        name: string;
+        mongodbName: string;
+        from: string;
+        username: string;
+        password: string;
+        isDelete: boolean;
+        description: string;
+        showPassword?: boolean;
+    }
+    export interface MongodbDBCreate {
+        name: string;
+        from: string;
+        database: string;
+        username: string;
+        password: string;
+        permission: string;
+        description: string;
+    }
+    export interface MongodbLoadDB {
+        from: string;
+        type: string;
+        database: string;
+    }
+    export interface MongodbDBDeleteCheck {
+        id: number;
+        type: string;
+        database: string;
+    }
+    export interface MongodbDBDelete {
+        id: number;
+        type: string;
+        database: string;
+        forceDelete: boolean;
+        deleteBackup: boolean;
+    }
+    export interface MongodbBind {
+        database: string;
+        name: string;
+        username: string;
+        password: string;
+    }
+    export interface MongodbPassword {
+        database: string;
+        name: string;
+        password: string;
+    }
+    export interface MongodbPrivileges {
+        database: string;
+        name: string;
+        username: string;
+        permission: string;
+    }
+    export interface MongodbPrivilegesLoad {
+        database: string;
+        name: string;
+        username: string;
     }
     export interface MysqlVariables {
         mysqlName: string;
@@ -185,6 +306,8 @@ export namespace Database {
         format: string;
         username: string;
         password: string;
+        superUser: boolean;
+        isDelete: string;
         description: string;
     }
     export interface PostgresqlConfUpdateByFile {
@@ -200,19 +323,6 @@ export namespace Database {
         username: string;
         password: string;
         superUser: boolean;
-        description: string;
-    }
-    export interface PostgresqlDBInfo {
-        id: number;
-        createdAt: Date;
-        name: string;
-        mysqlName: string;
-        from: string;
-        format: string;
-        username: string;
-        password: string;
-        superUser: boolean;
-        isDelete: string;
         description: string;
     }
     export interface ChangeInfo {
@@ -320,6 +430,7 @@ export namespace Database {
         from: string;
         address: string;
         port: number;
+        initialDB: string;
         username: string;
         password: string;
 
@@ -337,6 +448,7 @@ export namespace Database {
         version: string;
         address: string;
         port: number;
+        initialDB: string;
         username: string;
         password: string;
 

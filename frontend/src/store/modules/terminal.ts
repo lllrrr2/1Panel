@@ -1,10 +1,11 @@
 import { defineStore } from 'pinia';
+import type { StoreDefinition } from 'pinia';
 import piniaPersistConfig from '@/config/pinia-persist';
 import { TerminalState } from '../interface';
 
-export const TerminalStore = defineStore({
-    id: 'TerminalState',
+export const TerminalStore = defineStore('TerminalState', {
     state: (): TerminalState => ({
+        showTerminalButton: true,
         lineHeight: 1.2,
         letterSpacing: 1.2,
         fontSize: 12,
@@ -14,41 +15,9 @@ export const TerminalStore = defineStore({
         cursorBlink: 'enable',
         cursorStyle: 'underline',
         scrollback: 1000,
-        scrollSensitivity: 10,
+        scrollSensitivity: 6,
     }),
-    actions: {
-        setLineHeight(lineHeight: number) {
-            this.lineHeight = lineHeight;
-        },
-        setLetterSpacing(letterSpacing: number) {
-            this.letterSpacing = letterSpacing;
-        },
-        setFontSize(fontSize: number) {
-            this.fontSize = fontSize;
-        },
-        setFontFamily(fontFamily: string) {
-            this.fontFamily = fontFamily;
-        },
-        setBackgroundColor(backgroundColor: string) {
-            this.backgroundColor = backgroundColor;
-        },
-        setForegroundColor(foregroundColor: string) {
-            this.foregroundColor = foregroundColor;
-        },
-        setCursorBlink(cursorBlink: string) {
-            this.cursorBlink = cursorBlink;
-        },
-        setCursorStyle(cursorStyle: string) {
-            this.cursorStyle = cursorStyle;
-        },
-        setScrollback(scrollback: number) {
-            this.scrollback = scrollback;
-        },
-        setScrollSensitivity(scrollSensitivity: number) {
-            this.scrollSensitivity = scrollSensitivity;
-        },
-    },
     persist: piniaPersistConfig('TerminalState'),
-});
+}) as StoreDefinition<'TerminalState', TerminalState, any, any>;
 
 export default TerminalStore;
